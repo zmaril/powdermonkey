@@ -1,34 +1,9 @@
 # PowderMonkey
 
-> *Powder to every gun, monkey — keep the slop cannons fed and the magazine full!*
+PowderMonkey is an alternative web interface for Claude Code. It's really nothing more than a thousand `claude -p` in a trenchcoat. You can read [`design.md`](./design.md) for more info, or the rest of this file for how to use it and why it was built.
 
 ![A powder monkey serving the guns](docs/powder-monkey.jpg)
 
-<sub>*"Tir"* — a naval gun crew at the cannons. Public domain, via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Tir.jpg).</sub>
-
-
-Single-operator command center for running many `claude -p` workers at once.
-Local-first: your repos, your Claude Max subscription, one process.
-
-**The design — concepts, decisions, data model, and as-built status — lives in
-[`design.md`](./design.md).** This file is just how to run and use it.
-
-## What it is
-
-You state a **Goal** for a **Project** (a local repo, optionally scoped to a
-subpath, with any secrets a worker needs). A supervisor `claude -p` pass reads
-the repo and proposes a **Plan** of tasks; you review and approve it. Each task
-launches a `claude -p` **worker** in its own `git worktree` on a branch. Workers
-report status by curling a self-describing token API (no CLI to install). An
-**attention board** shows what needs you — answer a question, review a diff, mark
-done. The entities (projects, goals, plans, workstreams, tasks, sessions,
-artifacts) are real tables in a local **embedded Postgres** (PGlite) via Drizzle
-— the source of truth, mutated CRUD-style with **soft deletes**. Every change
-also appends one row to an append-only **action log** carrying the field-level
-**diff** (before→after) of the entity that changed, so you get a full audit and a
-per-entity history. The board reads straight from the tables; `done` is
-operator-marked, never inferred. The schema is Postgres dialect, so moving to a
-real Postgres later is just swapping the client.
 
 ## Run (dev)
 
@@ -45,56 +20,13 @@ To change the schema, edit `src/server/schema.ts`, then `bun run db:generate`
 `claude` must be installed and logged in (workers run through a login shell so
 they inherit your Claude auth).
 
-## Using it
 
-- **Propose plan** — pick/define a Project and state a Goal; the supervisor
-  drafts a Plan that shows up under **Plans** for review (Approve / Approve &
-  launch / Reject).
-- **+ New task** — create and launch a single task directly.
-- **Board** — three columns: **Working** (the worker's ball, incl. CI fixes),
-  **Needs Input** (your ball — a question to answer or a diff to review), **Done**.
-- **Click a card** — see the objective, artifacts, and the branch **diff**;
-  answer a question, comment, approve, mark done, or launch.
+## Why 
 
-## API
+Coding agents have sped up the production of code tremendously. They are able to quickly accomplish tasks that would otherwise take a person with a decade or more of specialized experience to complete. Knowledge work is now a resource that you can pour over a problem, and see how much of it saturates and dissolves on its own, without human effort or intervention. What I feel myself struggling with day to day is the long term coordination of many agents working together towards related yet disparate goals.
 
-| Route | Purpose |
-|---|---|
-| `GET /api/board` | board state, read from the live tables |
-| `GET /api/actions` | the append-only action log (each row carries the entity diff) |
-| `POST /api/projects · /goals · /workstreams · /tasks` | create entities |
-| `POST /api/tasks/:id/answer · /comment · /approve-review · /done · /abandon` | operator actions |
-| `POST /api/tasks/:id/launch` | launch a task (worktree + worker) |
-| `GET /api/tasks/:id/diff` | the task branch's diff + stat |
-| `POST /api/goals/:id/plan` | supervisor: propose a plan |
-| `POST /api/plans/:id/approve` · `/reject` | act on a proposed plan |
-| `GET /api/w/:token` | the self-describing worker API (curl this) |
-| `WS /ws` | change notifications (board refetches) |
+At times, I feel like I am just ferrying information back and forth between Claude sessions. I already have a long term plan written down somewhere, with various milestones and tasks all written up. I even have little scripts that will take that plan, make an agent create prompts for other agents to use, and dispatch those agents out. However, ultimately, I still feel like I am just running back and forth, copying and pasting things, without a clear sense of how I am progressing on long term goals.
 
-## Layout
+One might reasonably suggest Linear or Jira or any other project management software. I have found those distasteful and counterproductive when used with agents, when I am just working by myself. In my personal projects, I do not need to hold anyone accountable for delivery. I do not need a ticket that I can watch and reference during stand up. Current long term planning systems are centered around communication between humans, about creating and shipping context around to people so that they can accomplish their part of the epic task at hand. Agents can and will do most of the work for me on my personal projects, so I don't need to create as much context, or filter and shape it so much, when there's no handoff from engineering to design or marketing.
 
-```
-drizzle/               drizzle-kit generated migrations (committed)
-data/pgdata/           embedded Postgres (PGlite) data dir (gitignored)
-src/
-  shared/types.ts      entity + board-state shapes (server + web)
-  server/
-    schema.ts          Drizzle tables (Postgres dialect): live entities + actions log
-    db.ts              PGlite + Drizzle: connection + migrate-on-boot
-    repo.ts            CRUD + soft-delete; each mutation logs an action with the diff; getBoardState
-    worker.ts          self-describing token API (/api/w/:token)
-    backend.ts         WorkerBackend interface + LocalClaudeBackend (claude -p)
-    dispatcher.ts      launch/worktree/spawn, boot+answer resume, plan approve, diff
-    supervisor.ts      Goal → claude -p planning → proposed Plan
-    index.ts           Elysia: REST + WS + static SPA (models + route groups)
-  web/
-    client.ts          Eden Treaty: type-safe client generated from the server's App type
-    store.ts           Zustand; calls the treaty client
-    Board.tsx          board, detail+diff, plans, propose, ProjectFields
-```
-
-## Status
-
-Local-first MVP works end-to-end (Goal → plan → workers → review → done),
-validated with real `claude -p` workers. See **[`design.md` §15](./design.md)**
-for the full build status. Next: Dockerfile (single container).
+There are likely new and exciting long term planning systems out there, alternatives to the ideas in here. This one is mine, wherein I try to capture the spirit of how I felt being a powder monkey carrying context back and forth to the slop cannons.
