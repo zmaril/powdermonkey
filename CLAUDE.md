@@ -3,18 +3,24 @@
 PowderMonkey is a Bun + Elysia server (`src/server`) serving a React/Mantine UI
 (`src/web`), backed by PGlite. See `README.md` and `design.md` for the model.
 
-## Frontend changes must be verified in the browser, with screenshots
+## Verify frontend changes by actually rendering them
 
 If a change touches the UI (`src/web/**`, or a server route the UI calls), don't
-call it done after `bun test` / `biome` alone — those don't render anything. Boot
-the app in this remote container, drive it with headless Chromium, and attach
-before/after screenshots to the PR (or the chat).
+call it done after `bun test` / `biome` alone — those don't render anything. See
+the change in a real browser before calling it done.
 
-The container has everything needed: `bun`, `tmux`, the `claude` CLI, and
-Playwright's Chromium under `/opt/pw-browsers`. Your own browser can't reach the
-container's `localhost`, so render headlessly and share the image.
+How you do that depends on where you're running:
 
-Recipe (uses a scratch data dir + isolated tmux socket so it touches nothing real):
+- **Local development** — just open the app yourself (`bun run dev`) and look. No
+  screenshots needed; you have a browser.
+- **Remote container** (Claude Code on the web) — your own browser can't reach the
+  container's `localhost`, so drive the app with headless Chromium and share
+  before/after screenshots (on the PR or in the chat). That's the only way to show
+  the change actually rendered.
+
+The container has everything the headless path needs: `bun`, `tmux`, the `claude`
+CLI, and Playwright's Chromium under `/opt/pw-browsers`. Recipe (uses a scratch
+data dir + isolated tmux socket so it touches nothing real):
 
 ```sh
 # 1. build the web bundle and boot the server on a scratch dir
