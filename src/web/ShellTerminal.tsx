@@ -1,4 +1,5 @@
 import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef } from "react";
@@ -21,6 +22,8 @@ export function ShellTerminal({ cwd, session }: { cwd?: string; session?: number
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    // Detect URLs in the output and render them as clickable links.
+    term.loadAddon(new WebLinksAddon());
     term.open(el);
     fit.fit();
 
