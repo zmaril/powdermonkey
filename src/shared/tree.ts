@@ -18,6 +18,32 @@ export type GoalNode = Goal & { milestones: MilestoneNode[]; rollup: Rollup };
 
 export type PlanTree = { goals: GoalNode[]; rollup: Rollup };
 
+/** Empty tree — the store's initial value before the first /tree fetch lands. */
+export const emptyTree: PlanTree = { goals: [], rollup: { done: 0, total: 0, pct: 0 } };
+
+/** The inverse of buildTree: walk the nested tree back into the flat row lists.
+ * Lets the browser keep its flat indexes/active-set derivations while fetching the
+ * plan as one rolled-up request. Sessions are the latest-per-task the tree carries. */
+export function flattenTree(tree: PlanTree): TreeInput {
+  const goals: Goal[] = [];
+  const milestones: Milestone[] = [];
+  const tasks: Task[] = [];
+  const phases: Phase[] = [];
+  const sessions: Session[] = [];
+  for (const g of tree.goals) {
+    goals.push(g);
+    for (const m of g.milestones) {
+      milestones.push(m);
+      for (const t of m.tasks) {
+        tasks.push(t);
+        phases.push(...t.phases);
+        if (t.session) sessions.push(t.session);
+      }
+    }
+  }
+  return { goals, milestones, tasks, phases, sessions };
+}
+
 export type TreeInput = {
   goals: Goal[];
   milestones: Milestone[];

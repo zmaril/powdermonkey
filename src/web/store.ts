@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Goal, Milestone, Note, Phase, Session, Task } from "../server/schema.ts";
+import { type PlanTree, emptyTree } from "../shared/tree.ts";
 import { api } from "./client.ts";
 
 export type StartInfo = {
@@ -11,11 +12,10 @@ export type StartInfo = {
 };
 
 type State = {
-  goals: Goal[];
-  milestones: Milestone[];
-  tasks: Task[];
-  phases: Phase[];
-  sessions: Session[];
+  // The live plan, rolled up server-side in one GET /tree call (goals → milestones
+  // → tasks → phases, each task's latest session attached). The panes derive their
+  // indexes off this — see plan-data.ts.
+  tree: PlanTree;
   notes: Note[];
   // The book of work: archived + finished rows (fetched with ?archived=true, which
   // returns live AND archived). The Archive pane reads this; the live panes don't.
@@ -86,11 +86,7 @@ function ensureScratch(set: (partial: Partial<State>) => void): Promise<Note | n
 }
 
 export const useStore = create<State>((set, get) => ({
-  goals: [],
-  milestones: [],
-  tasks: [],
-  phases: [],
-  sessions: [],
+  tree: emptyTree,
   notes: [],
   archive: { goals: [], milestones: [], tasks: [], phases: [], sessions: [] },
   loading: false,
@@ -134,28 +130,12 @@ export const useStore = create<State>((set, get) => ({
   refresh: async () => {
     set({ loading: true, error: null });
     try {
-      const [goals, milestones, tasks, phases, sessions, notes] = await Promise.all([
-        api.goals.get(),
-        api.milestones.get(),
-        api.tasks.get(),
-        api.phases.get(),
-        api.sessions.get(),
-        api.notes.get(),
-      ]);
-      const err =
-        goals.error ??
-        milestones.error ??
-        tasks.error ??
-        phases.error ??
-        sessions.error ??
-        notes.error;
+      // The whole live plan in one rolled-up request, plus the notepad.
+      const [tree, notes] = await Promise.all([api.tree.get(), api.notes.get()]);
+      const err = tree.error ?? notes.error;
       if (err) throw new Error(String(err.value ?? err.status));
       set({
-        goals: (goals.data ?? []) as Goal[],
-        milestones: (milestones.data ?? []) as Milestone[],
-        tasks: (tasks.data ?? []) as Task[],
-        phases: (phases.data ?? []) as Phase[],
-        sessions: (sessions.data ?? []) as Session[],
+        tree: (tree.data ?? emptyTree) as PlanTree,
         notes: (notes.data ?? []) as Note[],
         loading: false,
       });

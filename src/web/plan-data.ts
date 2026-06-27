@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { Goal, Milestone, Phase, Session, Task } from "../server/schema.ts";
+import { flattenTree } from "../shared/tree.ts";
 import { activeTaskIds } from "./active.ts";
 import { useStore } from "./store.ts";
 
@@ -82,14 +83,13 @@ export type PlanData = {
 /** Pure derivation off the store: the shared indexes plus the derived active set.
  *  No polling here — App owns the single refresh timer. */
 export function usePlanData(): PlanData {
-  const goals = useStore((s) => s.goals);
-  const milestones = useStore((s) => s.milestones);
-  const tasks = useStore((s) => s.tasks);
-  const phases = useStore((s) => s.phases);
-  const sessions = useStore((s) => s.sessions);
+  const tree = useStore((s) => s.tree);
   const loading = useStore((s) => s.loading);
   const error = useStore((s) => s.error);
 
+  // GET /tree already nested + rolled these up; flatten back to the row lists the
+  // indexes/active-set derivations expect. One network call, same read-model.
+  const { goals, milestones, tasks, phases, sessions } = useMemo(() => flattenTree(tree), [tree]);
   const idx = useMemo(
     () => buildIndexes(goals, milestones, tasks, phases, sessions),
     [goals, milestones, tasks, phases, sessions],

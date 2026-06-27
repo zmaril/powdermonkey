@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Goal, Milestone, Phase, Session, Task } from "../src/server/schema.ts";
-import { buildTree } from "../src/shared/tree.ts";
+import { buildTree, flattenTree } from "../src/shared/tree.ts";
 
 // Isolate the store before importing anything that opens the DB.
 process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
@@ -128,6 +128,33 @@ test("the latest session is attached per task; tasks without one get null", () =
   const tasks = tree.goals[0].milestones[0].tasks;
   expect(tasks[0].session?.id).toBe(2);
   expect(tasks[1].session).toBeNull();
+});
+
+test("flattenTree inverts buildTree (sessions collapse to latest-per-task)", () => {
+  const s = (id: number, taskId: number): Session => ({
+    id,
+    kind: "local",
+    state: "running",
+    taskId,
+    branch: null,
+    worktreePath: null,
+    url: null,
+    needsInput: false,
+    ...ts,
+  });
+  const input = {
+    goals: [goal(1), goal(2)],
+    milestones: [milestone(10, 1), milestone(11, 2)],
+    tasks: [task(100, 10), task(101, 10, 1), task(200, 11)],
+    phases: [phase(1, 100, "done"), phase(2, 101, "todo"), phase(3, 200, "done")],
+    sessions: [s(1, 100), s(2, 100)], // two for task 100 — only the latest survives
+  };
+  const flat = flattenTree(buildTree(input));
+  expect(flat.goals.map((g) => g.id).sort()).toEqual([1, 2]);
+  expect(flat.tasks.map((t) => t.id).sort()).toEqual([100, 101, 200]);
+  expect(flat.phases.map((p) => p.id).sort()).toEqual([1, 2, 3]);
+  // The flat session list is the latest-per-task the tree carries, not the original.
+  expect(flat.sessions.map((x) => x.id)).toEqual([2]);
 });
 
 test("empty inputs yield an empty tree with a zero rollup", () => {
