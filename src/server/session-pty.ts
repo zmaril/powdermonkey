@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "./db.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { sessions } from "./schema.ts";
+import { SOCKET, TMUX_BIN, hasSession, shq, tmux } from "./tmux.ts";
 
 // One long-lived `claude` per local session, run inside tmux so it OUTLIVES the
 // supervisor. The supervisor is started with `--watch`; editing PowderMonkey's own
@@ -19,9 +20,6 @@ import { sessions } from "./schema.ts";
 // biome-ignore lint/suspicious/noExplicitAny: native PTY handle (see pty.ts).
 type Pty = any;
 
-// A private tmux socket so we never touch the operator's own tmux server.
-const TMUX_BIN = process.env.PM_TMUX ?? "tmux";
-const SOCKET = process.env.PM_TMUX_SOCKET ?? "powdermonkey";
 const SHELL = process.env.SHELL || "bash";
 
 type Entry = {
@@ -69,23 +67,9 @@ function sessionName(id: number): string {
   return `pm-session-${id}`;
 }
 
-/** Run a tmux control command on our private socket, synchronously. */
-function tmux(...args: string[]): { ok: boolean; stdout: string; stderr: string } {
-  const r = Bun.spawnSync([TMUX_BIN, "-L", SOCKET, ...args]);
-  return {
-    ok: r.exitCode === 0,
-    stdout: r.stdout.toString(),
-    stderr: r.stderr.toString(),
-  };
-}
-
 /** True while the durable tmux session (and thus its agent) is alive. */
 export function hasSessionPty(sessionId: number): boolean {
-  return tmux("has-session", "-t", sessionName(sessionId)).ok;
-}
-
-function shq(s: string): string {
-  return `'${s.replaceAll("'", `'\\''`)}'`;
+  return hasSession(sessionName(sessionId));
 }
 
 /** Persist a needs_input transition. Deduped against the in-memory flag so we
