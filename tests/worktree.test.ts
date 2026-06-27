@@ -8,6 +8,12 @@ const repoDir = mkdtempSync(join(tmpdir(), "pm-repo-"));
 process.env.PM_REPO_DIR = repoDir;
 process.env.PM_MAIN_BRANCH = "main";
 process.env.PM_WORKTREE_DIR = join(mkdtempSync(join(tmpdir(), "pm-wt-")), "wt");
+// Isolate the tmux socket + skip launching a real `claude`. Without this the test
+// would create/kill `pm-session-<id>` on the operator's shared "powdermonkey"
+// socket — and since this temp DB restarts ids at 1, landSession() here would kill
+// a real live session whose id happens to collide (e.g. a worker running the suite).
+process.env.PM_TMUX_SOCKET = `pm-test-${process.pid}`;
+process.env.PM_SESSION_CMD = "";
 
 const { ready } = await import("../src/server/db.ts");
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");

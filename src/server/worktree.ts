@@ -26,12 +26,14 @@ function promptDir(): string {
   return join(repo, "data", "prompts");
 }
 
-// The command the session's PTY runs in the worktree. Defaults to a bare
-// interactive `claude`; the prompt stays visible in the UI for the operator to
-// paste. Set PM_SESSION_CMD to override — a `{prompt_file}` placeholder is
-// replaced with the absolute prompt path, e.g.  PM_SESSION_CMD='claude "$(cat {prompt_file})"'
+// The command the session's PTY runs in the worktree. By default we hand the
+// generated prompt (task + phases + trailer block) straight to `claude` as its
+// opening message, so the worker knows what to build and starts immediately —
+// no copy/paste. The `{prompt_file}` placeholder is replaced with the absolute
+// prompt path; set PM_SESSION_CMD to override (e.g. PM_SESSION_CMD='claude' for a
+// bare session where you paste the prompt yourself).
 function sessionStartup(promptPath: string): string {
-  const tmpl = process.env.PM_SESSION_CMD ?? "claude";
+  const tmpl = process.env.PM_SESSION_CMD ?? `claude "$(cat {prompt_file})"`;
   return tmpl.replaceAll("{prompt_file}", promptPath);
 }
 

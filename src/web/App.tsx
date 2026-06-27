@@ -113,14 +113,20 @@ function TaskCard({ task, phases, session }: { task: Task; phases: Phase[]; sess
         <Group gap="xs">
           {session ? (
             <>
-              <Badge variant="dot" color="teal">
-                {session.kind} · {session.branch}
+              <Badge variant="dot" color="teal" title={session.kind}>
+                <span aria-label={session.kind}>{session.kind === "local" ? "💻" : "☁️"}</span>{" "}
+                {session.branch}
               </Badge>
               <Button
                 size="compact-xs"
                 variant={session.needsInput ? "filled" : "light"}
                 color="grape"
-                onClick={() => openSessionTerminal(session.id, task.title)}
+                onClick={() =>
+                  openSessionTerminal(
+                    session.id,
+                    `${session.kind} · ${session.branch}`.toUpperCase(),
+                  )
+                }
               >
                 Shell
               </Button>
@@ -361,7 +367,7 @@ export function App() {
       id: "shell-0",
       component: "shell",
       params: { cwd: "", session: null },
-      title: "shell · repo",
+      title: "supervisor",
       position: { direction: "left", referencePanel: "plan" },
     });
   };
@@ -380,7 +386,9 @@ export function App() {
       id,
       component: "shell",
       params: { cwd: shellReq.cwd, session: shellReq.session },
-      title: `shell · ${shellReq.title}`,
+      // Session panels show the bare tag (LOCAL · PM/TASK-35); plain shells keep
+      // a "shell · " prefix to set them apart.
+      title: shellReq.session != null ? shellReq.title : `shell · ${shellReq.title}`,
       position: { referencePanel: "shell-0", direction: "within" },
     });
   }, [shellReq]);
