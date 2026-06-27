@@ -1,4 +1,4 @@
-import { Badge, Box, Group, SegmentedControl, Stack, Text, Title } from "@mantine/core";
+import { Anchor, Badge, Box, Group, SegmentedControl, Stack, Text, Title } from "@mantine/core";
 import { useState } from "react";
 import type { Goal, Milestone, Task } from "../server/schema.ts";
 import { partitionTasks } from "./active.ts";
@@ -50,9 +50,14 @@ function ActiveRow({
         </Box>
         <TaskBadges task={task} session={session} />
       </Group>
-      {session && (
+      {(session || task.prUrl) && (
         <Group gap="xs" wrap="wrap" justify="flex-end" mt={6}>
-          <SessionActions session={session} />
+          {session && <SessionActions session={session} />}
+          {task.prUrl && (
+            <Anchor href={task.prUrl} target="_blank" size="sm" fw={500}>
+              PR ↗
+            </Anchor>
+          )}
         </Group>
       )}
     </Box>

@@ -107,44 +107,59 @@ export function TaskBadges({ task, session }: { task: Task; session?: Session })
   );
 }
 
-/** Actions for a task that currently HAS a live session: shell, editor, land, stop. */
+/** Actions for a task that currently HAS a live session. A local session runs in a
+ *  worktree, so it gets Shell + VS Code; a remote (cloud) session has neither — it
+ *  lives on claude.ai, so it gets a link out to the session plus Teleport to pull
+ *  it down. Both get Land / Stop. */
 export function SessionActions({ session }: { session: Session }) {
   const { land, stop, teleport, openSessionTerminal, openEditor } = useStore();
+  const isRemote = session.kind === "remote";
   return (
     <Group gap="xs" wrap="nowrap">
       <Badge variant="dot" color="teal" title={session.kind}>
-        <span aria-label={session.kind}>{session.kind === "local" ? "💻" : "☁️"}</span>{" "}
-        {session.branch ?? "remote"}
+        <span aria-label={session.kind}>{isRemote ? "☁️" : "💻"}</span> {session.branch ?? "remote"}
       </Badge>
-      <Button
-        size="compact-xs"
-        variant={session.needsInput ? "filled" : "light"}
-        color="grape"
-        onClick={() =>
-          openSessionTerminal(session.id, `${session.kind} · ${session.branch}`.toUpperCase())
-        }
-      >
-        Shell
-      </Button>
-      <Button
-        size="compact-xs"
-        variant="light"
-        color="blue"
-        onClick={() => openEditor(session.id)}
-        title={session.kind === "local" ? "Open worktree in VS Code" : "Open PR in github.dev"}
-      >
-        VS Code
-      </Button>
-      {session.kind === "remote" && session.taskId != null && (
-        <Button
-          size="compact-xs"
-          variant="light"
-          color="grape"
-          title="Pull this cloud session down to a local worktree (claude --teleport)"
-          onClick={() => teleport(session.taskId as number)}
-        >
-          Teleport
-        </Button>
+      {isRemote ? (
+        <>
+          {session.url && (
+            <Anchor href={session.url} target="_blank" size="sm" fw={500}>
+              session ↗
+            </Anchor>
+          )}
+          {session.taskId != null && (
+            <Button
+              size="compact-xs"
+              variant="light"
+              color="grape"
+              title="Pull this cloud session down to a local worktree (claude --teleport)"
+              onClick={() => teleport(session.taskId as number)}
+            >
+              Teleport
+            </Button>
+          )}
+        </>
+      ) : (
+        <>
+          <Button
+            size="compact-xs"
+            variant={session.needsInput ? "filled" : "light"}
+            color="grape"
+            onClick={() =>
+              openSessionTerminal(session.id, `${session.kind} · ${session.branch}`.toUpperCase())
+            }
+          >
+            Shell
+          </Button>
+          <Button
+            size="compact-xs"
+            variant="light"
+            color="blue"
+            onClick={() => openEditor(session.id)}
+            title="Open worktree in VS Code"
+          >
+            VS Code
+          </Button>
+        </>
       )}
       <Button size="compact-xs" variant="light" color="teal" onClick={() => land(session.id)}>
         Land
