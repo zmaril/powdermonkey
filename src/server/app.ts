@@ -17,6 +17,7 @@ import {
   writeSessionPty,
 } from "./session-pty.ts";
 import { readSessionStatus } from "./session-status.ts";
+import { teleportTask } from "./teleport.ts";
 import { landSession, startLocalSession, stopSession } from "./worktree.ts";
 
 // Full CRUD for every vocab entity, plus the nested plan loader and the runtime
@@ -93,6 +94,13 @@ const tasksGroup = resource("tasks", taskRepo, models.tasks)
   // Start a local session: worktree on pm/task-<id> + a session row + trailer block.
   .post("/:id/start-local", async ({ params, set }) => {
     const result = await startLocalSession(Number(params.id));
+    if (!result.ok) set.status = 400;
+    return result;
+  })
+  // Teleport a running cloud session down to a local worktree session, continuing
+  // the same conversation via `claude --teleport <id>`.
+  .post("/:id/teleport", async ({ params, set }) => {
+    const result = await teleportTask(Number(params.id));
     if (!result.ok) set.status = 400;
     return result;
   })

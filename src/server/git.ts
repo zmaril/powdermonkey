@@ -52,6 +52,36 @@ export async function worktreeAdd(
   return run(["worktree", "add", "-b", branch, path, baseRef]);
 }
 
+/** List remote branch names (without the `refs/heads/` prefix) matching `pattern`,
+ *  e.g. `refs/heads/pm/task-12*`. Returns [] when the remote has no match (or the
+ *  call fails). Used to discover the branch a cloud worker pushed for a task. */
+export async function lsRemoteHeads(pattern: string): Promise<string[]> {
+  const r = await run(["ls-remote", "--heads", "origin", pattern]);
+  if (!r.ok || !r.output) return [];
+  return r.output
+    .split("\n")
+    .map((line) => line.split("\t")[1])
+    .filter((ref): ref is string => Boolean(ref))
+    .map((ref) => ref.replace(/^refs\/heads\//, ""));
+}
+
+/** Add a worktree checked out to `branch`, which may exist only on the remote (the
+ *  cloud worker pushed it but we've never fetched it). Fetch origin/<branch> first,
+ *  then: use a local branch if one exists, else create a local branch tracking the
+ *  fetched remote one, else fall back to creating <branch> off `baseRef` (nothing
+ *  was pushed). The fetch is best-effort — a missing remote branch is not fatal. */
+export async function worktreeAddRemote(
+  path: string,
+  branch: string,
+  baseRef: string,
+): Promise<GitResult> {
+  await run(["fetch", "origin", branch]);
+  if (await branchExists(branch)) return run(["worktree", "add", path, branch]);
+  if (await branchExists(`origin/${branch}`))
+    return run(["worktree", "add", "-b", branch, path, `origin/${branch}`]);
+  return run(["worktree", "add", "-b", branch, path, baseRef]);
+}
+
 /** Remove a worktree. Not forced by default — fails if it has uncommitted changes,
  *  which is what `land` wants. Pass `{ force: true }` to remove regardless (an
  *  aborted session via `stop` discards its in-progress work rather than waiting

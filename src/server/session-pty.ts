@@ -109,14 +109,28 @@ function pushChunk(entry: Entry, bytes: Uint8Array): void {
 /** Bring up the durable tmux session running the agent (idempotent per id). The
  *  agent starts immediately, detached, so it's already running before anyone
  *  attaches — and keeps running across supervisor restarts. */
-export function startSessionPty(sessionId: number, cwd: string, startup: string): void {
+export function startSessionPty(
+  sessionId: number,
+  cwd: string,
+  startup: string,
+  env?: Record<string, string>,
+): void {
   cwdById.set(sessionId, cwd);
   if (hasSessionPty(sessionId)) return;
 
   const name = sessionName(sessionId);
+  // Export any per-session env (e.g. a teleported worker's PORT / PM_DATA_DIR) up
+  // front so the agent — and anything it launches, like `bun run dev` — inherits
+  // it. Done inside the inner command rather than via tmux `-e` so it doesn't
+  // depend on the tmux version's option support.
+  const exports = env
+    ? Object.entries(env)
+        .map(([k, v]) => `export ${k}=${shq(v)}; `)
+        .join("")
+    : "";
   // Run the agent under a login shell (so PATH/profile resolve `claude`), then
   // fall through to an interactive shell when it exits.
-  const inner = startup ? `${startup}; exec ${SHELL} -i` : `exec ${SHELL} -i`;
+  const inner = exports + (startup ? `${startup}; exec ${SHELL} -i` : `exec ${SHELL} -i`);
   const cmd = `${SHELL} -l -c ${shq(inner)}`;
 
   // Follow the most recently active (browser) client's size and drop the status

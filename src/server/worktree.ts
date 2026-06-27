@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { db } from "./db.ts";
 import { loadTaskPrompt } from "./dispatch.ts";
-import { worktreeAdd, worktreeRemove } from "./git.ts";
+import { worktreeAdd, worktreeAddRemote, worktreeRemove } from "./git.ts";
 import { type Session, sessions, tasks } from "./schema.ts";
 import { killSessionPty, startSessionPty } from "./session-pty.ts";
 
@@ -19,6 +19,13 @@ function worktreeBase(): string {
   return process.env.PM_WORKTREE_DIR ?? join(repo, "..", "pm-worktrees");
 }
 
+/** The on-disk worktree path a task's local session lives in. Exposed so the
+ *  teleport flow can derive the same path (and a data dir under it) before the
+ *  session is created. */
+export function worktreePathFor(taskId: number): string {
+  return join(worktreeBase(), `task-${taskId}`);
+}
+
 // Where per-session prompt files live (outside any worktree so the agent never
 // commits them). The startup command can `cat` this to seed the session.
 function promptDir(): string {
@@ -32,10 +39,26 @@ function promptDir(): string {
 // no copy/paste. The `{prompt_file}` placeholder is replaced with the absolute
 // prompt path; set PM_SESSION_CMD to override (e.g. PM_SESSION_CMD='claude' for a
 // bare session where you paste the prompt yourself).
-function sessionStartup(promptPath: string): string {
-  const tmpl = process.env.PM_SESSION_CMD ?? `claude "$(cat {prompt_file})"`;
+function sessionStartup(promptPath: string, override?: string): string {
+  const tmpl = override ?? process.env.PM_SESSION_CMD ?? `claude "$(cat {prompt_file})"`;
   return tmpl.replaceAll("{prompt_file}", promptPath);
 }
+
+/** Overrides for a non-default local session. Plain `start-local` passes none and
+ *  gets a fresh `pm/task-<id>` branch off main running the task prompt. Teleport
+ *  passes a discovered cloud branch (fetched from the remote), a `claude --teleport`
+ *  startup, and env so the worktree's dev server runs isolated. */
+export type StartLocalOpts = {
+  // Branch to check out (default `pm/task-<id>`).
+  branch?: string;
+  // When true, `branch` may live only on the remote — fetch + check it out rather
+  // than cutting a fresh branch off main.
+  fetchRemote?: boolean;
+  // Startup command template (overrides PM_SESSION_CMD); `{prompt_file}` is replaced.
+  startup?: string;
+  // Extra env exported into the session shell (e.g. PORT, PM_DATA_DIR).
+  env?: Record<string, string>;
+};
 
 export type StartLocalResult =
   | {
@@ -48,16 +71,21 @@ export type StartLocalResult =
     }
   | { ok: false; error: string; output?: string };
 
-export async function startLocalSession(taskId: number): Promise<StartLocalResult> {
+export async function startLocalSession(
+  taskId: number,
+  opts: StartLocalOpts = {},
+): Promise<StartLocalResult> {
   const built = await loadTaskPrompt(taskId);
   if (!built) return { ok: false, error: `unknown task "${taskId}"` };
   const { prompt, trailers } = built;
 
-  const branch = `pm/task-${taskId}`;
-  const worktreePath = join(worktreeBase(), `task-${taskId}`);
+  const branch = opts.branch ?? `pm/task-${taskId}`;
+  const worktreePath = worktreePathFor(taskId);
   mkdirSync(worktreeBase(), { recursive: true });
 
-  const add = await worktreeAdd(worktreePath, branch, MAIN_BRANCH);
+  const add = opts.fetchRemote
+    ? await worktreeAddRemote(worktreePath, branch, MAIN_BRANCH)
+    : await worktreeAdd(worktreePath, branch, MAIN_BRANCH);
   if (!add.ok) return { ok: false, error: "git worktree add failed", output: add.output };
 
   const [session] = await db
@@ -75,7 +103,7 @@ export async function startLocalSession(taskId: number): Promise<StartLocalResul
   mkdirSync(promptDir(), { recursive: true });
   const promptPath = join(promptDir(), `session-${session.id}.md`);
   writeFileSync(promptPath, `${prompt}\n`);
-  startSessionPty(session.id, worktreePath, sessionStartup(promptPath));
+  startSessionPty(session.id, worktreePath, sessionStartup(promptPath, opts.startup), opts.env);
 
   return { ok: true, session, worktreePath, branch, prompt, trailers };
 }
