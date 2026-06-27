@@ -1,28 +1,16 @@
-import {
-  Box,
-  Button,
-  Card,
-  Code,
-  CopyButton,
-  Group,
-  Stack,
-  Text,
-  TextInput,
-  Title,
-} from "@mantine/core";
-import { useState } from "react";
+import { Box, Button, Card, Code, CopyButton, Group, Stack, Text, Title } from "@mantine/core";
 import type { Goal, Phase, Task } from "../server/schema.ts";
 import { partitionTasks } from "./active.ts";
-import { api } from "./client.ts";
 import { type Indexes, usePlanData } from "./plan-data.ts";
 import { LaunchActions, PhaseList, TaskBadges, TaskLinks } from "./plan-ui.tsx";
 import { useStore } from "./store.ts";
 
 // The Backlog pane is the launchpad — everything to-be-worked (not active),
 // grouped goal → milestone as cards. Each card carries its launch actions
-// (Start local / Dispatch remote); a per-milestone "new task" row is the exec-now
-// affordance: it creates the task and (optionally) launches a session in one go,
-// so the item lands straight in Active.
+// (Start local / Dispatch remote). Task creation is supervisor-only for now (via
+// the API); a per-task editing UI comes later. Milestones and goals with no
+// backlog tasks left are hidden here — their finished work lives in the Archive
+// pane, so completed work doesn't float around as empty headers.
 
 /** One backlog task card: title + status, its phase checklist, launch actions. */
 function BacklogCard({ task, phases }: { task: Task; phases: Phase[] }) {
@@ -41,61 +29,18 @@ function BacklogCard({ task, phases }: { task: Task; phases: Phase[] }) {
   );
 }
 
-/** Exec-now on create: type a title, then either drop it in the backlog or launch
- *  a session immediately (which moves it to Active). New items default to backlog. */
-function NewTaskRow({ milestoneId }: { milestoneId: number }) {
-  const { refresh, startLocal, setError } = useStore();
-  const [title, setTitle] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const create = async (launch: boolean) => {
-    const name = title.trim();
-    if (!name || busy) return;
-    setBusy(true);
-    const { data, error } = await api.tasks.post({ milestoneId, title: name });
-    if (error || !data) {
-      setError(error ? String(error.value ?? error.status) : "create failed");
-      setBusy(false);
-      return;
-    }
-    setTitle("");
-    const id = (data as unknown as Task).id;
-    if (launch) await startLocal(id);
-    else await refresh();
-    setBusy(false);
-  };
-
-  return (
-    <Group gap="xs" wrap="nowrap">
-      <TextInput
-        size="xs"
-        placeholder="New task…"
-        value={title}
-        onChange={(e) => setTitle(e.currentTarget.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") create(false);
-        }}
-        style={{ flex: 1 }}
-      />
-      <Button size="compact-xs" variant="light" disabled={busy} onClick={() => create(true)}>
-        Start local
-      </Button>
-      <Button
-        size="compact-xs"
-        variant="subtle"
-        color="gray"
-        disabled={busy}
-        onClick={() => create(false)}
-      >
-        Backlog
-      </Button>
-    </Group>
-  );
-}
-
-/** A goal and its milestones, each milestone listing its backlog cards + an add row. */
+/** A goal and its milestones, each milestone listing its backlog cards. Milestones
+ *  with no backlog tasks are skipped; a goal with no remaining backlog renders
+ *  nothing (its done work lives in the Archive pane). */
 function GoalGroup({ goal, idx, backlog }: { goal: Goal; idx: Indexes; backlog: Set<number> }) {
-  const milestones = idx.milestonesByGoal.get(goal.id) ?? [];
+  const milestones = (idx.milestonesByGoal.get(goal.id) ?? [])
+    .map((m) => ({
+      m,
+      tasks: (idx.tasksByMilestone.get(m.id) ?? []).filter((t) => backlog.has(t.id)),
+    }))
+    .filter(({ tasks }) => tasks.length > 0);
+
+  if (milestones.length === 0) return null;
 
   return (
     <Stack gap="md">
@@ -108,20 +53,16 @@ function GoalGroup({ goal, idx, backlog }: { goal: Goal; idx: Indexes; backlog: 
         )}
       </div>
 
-      {milestones.map((m) => {
-        const tasks = (idx.tasksByMilestone.get(m.id) ?? []).filter((t) => backlog.has(t.id));
-        return (
-          <Stack key={m.id} gap="xs">
-            <Title order={5}>{m.title}</Title>
-            <Stack gap="xs">
-              {tasks.map((t) => (
-                <BacklogCard key={t.id} task={t} phases={idx.phasesByTask.get(t.id) ?? []} />
-              ))}
-            </Stack>
-            <NewTaskRow milestoneId={m.id} />
+      {milestones.map(({ m, tasks }) => (
+        <Stack key={m.id} gap="xs">
+          <Title order={5}>{m.title}</Title>
+          <Stack gap="xs">
+            {tasks.map((t) => (
+              <BacklogCard key={t.id} task={t} phases={idx.phasesByTask.get(t.id) ?? []} />
+            ))}
           </Stack>
-        );
-      })}
+        </Stack>
+      ))}
     </Stack>
   );
 }
