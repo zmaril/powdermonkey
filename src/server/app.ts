@@ -1,7 +1,7 @@
 import type { TSchema } from "@sinclair/typebox";
 import { Elysia, t } from "elysia";
 import { goalRepo, milestoneRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
-import { dispatchTask } from "./dispatch.ts";
+import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { models } from "./models.ts";
 import { loadPlan, planSchema } from "./plan.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
@@ -92,6 +92,13 @@ const tasksGroup = resource("tasks", taskRepo, models.tasks)
     const result = await startLocalSession(Number(params.id));
     if (!result.ok) set.status = 400;
     return result;
+  })
+  // Re-fetch the worker prompt + phase trailers for a task — the same content
+  // start-local/dispatch hand to a worker, available read-only without starting one.
+  .get("/:id/prompt", async ({ params, set }) => {
+    const result = await loadTaskPrompt(Number(params.id));
+    if (!result) set.status = 404;
+    return result ?? { error: "not found" };
   });
 
 // Sessions carry a `land` route (tear down the worktree) on top of CRUD.
