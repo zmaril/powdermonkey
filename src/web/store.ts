@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Goal, Milestone, Phase, Session, Task } from "../server/schema.ts";
+import type { Goal, Milestone, Note, Phase, Session, Task } from "../server/schema.ts";
 import { api } from "./client.ts";
 
 export type StartInfo = {
@@ -16,6 +16,7 @@ type State = {
   tasks: Task[];
   phases: Phase[];
   sessions: Session[];
+  notes: Note[];
   loading: boolean;
   error: string | null;
   lastStart: StartInfo | null;
@@ -23,9 +24,16 @@ type State = {
   // agent PTY; otherwise `cwd` opens a fresh shell ("" = repo dir). `key` dedupes
   // panels, `title` labels them, `n` makes repeats distinct so the effect re-fires.
   shellReq: { key: string; cwd: string; session: number | null; title: string; n: number } | null;
+  // Bumped each time the operator asks to open the notepad; App watches it.
+  notesReq: number;
   openTerminal: (cwd?: string) => void;
   openSessionTerminal: (sessionId: number, title: string) => void;
+  openNotes: () => void;
   refresh: () => Promise<void>;
+  refreshNotes: () => Promise<void>;
+  // The scratchpad is a single note. Returns it, creating the row on first use.
+  ensureScratch: () => Promise<Note | null>;
+  saveNote: (id: number, values: { title?: string; body?: string }) => Promise<void>;
   startLocal: (taskId: number) => Promise<void>;
   dispatch: (taskId: number) => Promise<void>;
   land: (sessionId: number) => Promise<void>;
@@ -34,16 +42,49 @@ type State = {
   dismissStart: () => void;
 };
 
+// Single-flight: the scratchpad is exactly one note. The first caller that finds
+// no note creates it; concurrent or StrictMode double-calls reuse the same promise
+// so we never create two scratch rows.
+let scratchInit: Promise<Note | null> | null = null;
+function ensureScratch(set: (partial: Partial<State>) => void): Promise<Note | null> {
+  if (scratchInit) return scratchInit;
+  scratchInit = (async () => {
+    const { data, error } = await api.notes.get();
+    if (error) {
+      set({ error: String(error.value ?? error.status) });
+      scratchInit = null;
+      return null;
+    }
+    const list = ((data ?? []) as Note[]).sort((a, b) => a.id - b.id);
+    if (list.length > 0) {
+      set({ notes: list });
+      return list[0];
+    }
+    const created = await api.notes.post({ title: "scratch", body: "", position: 0 });
+    if (created.error) {
+      set({ error: String(created.error.value ?? created.error.status) });
+      scratchInit = null;
+      return null;
+    }
+    const note = created.data as Note;
+    set({ notes: [note] });
+    return note;
+  })();
+  return scratchInit;
+}
+
 export const useStore = create<State>((set, get) => ({
   goals: [],
   milestones: [],
   tasks: [],
   phases: [],
   sessions: [],
+  notes: [],
   loading: false,
   error: null,
   lastStart: null,
   shellReq: null,
+  notesReq: 0,
   openTerminal: (cwd = "") =>
     set((s) => ({
       shellReq: {
@@ -64,17 +105,37 @@ export const useStore = create<State>((set, get) => ({
         n: (s.shellReq?.n ?? 0) + 1,
       },
     })),
+  openNotes: () => set((s) => ({ notesReq: s.notesReq + 1 })),
+  refreshNotes: async () => {
+    const { data, error } = await api.notes.get();
+    if (error) return set({ error: String(error.value ?? error.status) });
+    set({ notes: (data ?? []) as Note[] });
+  },
+  ensureScratch: () => ensureScratch(set),
+  saveNote: async (id, values) => {
+    // Optimistic: reflect the edit locally so typing stays responsive, then PATCH.
+    set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, ...values } : n)) }));
+    const { error } = await api.notes({ id }).patch(values);
+    if (error) set({ error: String(error.value ?? error.status) });
+  },
   refresh: async () => {
     set({ loading: true, error: null });
     try {
-      const [goals, milestones, tasks, phases, sessions] = await Promise.all([
+      const [goals, milestones, tasks, phases, sessions, notes] = await Promise.all([
         api.goals.get(),
         api.milestones.get(),
         api.tasks.get(),
         api.phases.get(),
         api.sessions.get(),
+        api.notes.get(),
       ]);
-      const err = goals.error ?? milestones.error ?? tasks.error ?? phases.error ?? sessions.error;
+      const err =
+        goals.error ??
+        milestones.error ??
+        tasks.error ??
+        phases.error ??
+        sessions.error ??
+        notes.error;
       if (err) throw new Error(String(err.value ?? err.status));
       set({
         goals: (goals.data ?? []) as Goal[],
@@ -82,6 +143,7 @@ export const useStore = create<State>((set, get) => ({
         tasks: (tasks.data ?? []) as Task[],
         phases: (phases.data ?? []) as Phase[],
         sessions: (sessions.data ?? []) as Session[],
+        notes: (notes.data ?? []) as Note[],
         loading: false,
       });
     } catch (e) {

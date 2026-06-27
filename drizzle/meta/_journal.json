@@ -22,6 +22,13 @@
       "when": 1782548967205,
       "tag": "0002_typical_logan",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782561616521,
+      "tag": "0003_tired_tomorrow_man",
+      "breakpoints": true
     }
   ]
 }

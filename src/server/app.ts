@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { TSchema } from "@sinclair/typebox";
 import { Elysia, t } from "elysia";
-import { goalRepo, milestoneRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
+import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
 import { models } from "./models.ts";
@@ -249,6 +249,7 @@ export const app = new Elysia()
   .use(tasksGroup)
   .use(resource("phases", phaseRepo, models.phases))
   .use(sessionsGroup)
+  .use(resource("notes", noteRepo, models.notes))
   // Static: bundled web app, SPA fallback to index.html.
   .get("/assets/*", ({ params }) => Bun.file(`public/assets/${params["*"]}`))
   .get("/*", () => Bun.file("public/index.html"));

@@ -3,11 +3,13 @@ import { db } from "./db.ts";
 import {
   type Goal,
   type Milestone,
+  type Note,
   type Phase,
   type Session,
   type Task,
   goals,
   milestones,
+  notes,
   phases,
   sessions,
   tasks,
@@ -67,3 +69,4 @@ export const milestoneRepo = crud<Milestone, typeof milestones.$inferInsert>(mil
 export const taskRepo = crud<Task, typeof tasks.$inferInsert>(tasks);
 export const phaseRepo = crud<Phase, typeof phases.$inferInsert>(phases);
 export const sessionRepo = crud<Session, typeof sessions.$inferInsert>(sessions);
+export const noteRepo = crud<Note, typeof notes.$inferInsert>(notes);

@@ -38,6 +38,15 @@ Validation is strict (TypeBox); a malformed plan returns 422. Don't include ids 
 
 **Don't fake progress.** Phase/task completion is owned by reconciliation (trailers on `main`). Never `PATCH` a phase to `status: "done"` to "finish" work — it'll be wrong and reconciliation is the source of truth.
 
+**Operator notes (`@notes`).** The operator keeps a free-form notepad — scratch thoughts, reminders, context — in a `notes` table, edited from the Notes panel in the UI. It's outside the goal hierarchy and never affects progress. When the operator references **`@notes`** (e.g. "check @notes", "what's in @notes", "per @notes…"), read the current notes with:
+
+```
+GET $PM_URL/notes      # → [{ id, title, body, position, ... }], newest edits included
+GET $PM_URL/notes/:id  # a single note
+```
+
+Treat the `body` of each note as operator instructions/context. The same CRUD as other entities applies (`POST`/`PATCH`/`DELETE` + soft-delete), so you can append or amend a note on request — but the operator usually writes these by hand; default to reading, and only write when asked.
+
 ## Working a task (inside a worktree)
 
 You've been started on one **Task**, on branch `pm/task-<id>`. It has ordered **Phases**, each with a numeric id (in your prompt; or `GET $PM_URL/tasks/<id>` + `/phases` filtered by `task_id`).

@@ -77,9 +77,21 @@ export const sessions = pgTable("sessions", {
   ...timestamps,
 });
 
+// Operator notepad. Free-form notes the operator keeps alongside the plan —
+// scratch thoughts, reminders, context for the supervisor. Not part of the
+// goal hierarchy; the supervisor reads them on request (e.g. "check @notes").
+export const notes = pgTable("notes", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  title: text("title").notNull().default(""),
+  body: text("body").notNull().default(""),
+  position: integer("position").notNull().default(0),
+  ...timestamps,
+});
+
 // Types derived directly from the table definitions — no separate schema layer.
 export type Goal = typeof goals.$inferSelect;
 export type Milestone = typeof milestones.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type Phase = typeof phases.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
+export type Note = typeof notes.$inferSelect;
