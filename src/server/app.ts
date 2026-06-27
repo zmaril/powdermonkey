@@ -17,7 +17,6 @@ import {
   startSupervisorPty,
   writeSessionPty,
 } from "./session-pty.ts";
-import { readSessionStatus } from "./session-status.ts";
 import { listSessionTasks } from "./session-tasks.ts";
 import { teleportTask } from "./teleport.ts";
 import { landSession, startLocalSession, stopSession } from "./worktree.ts";
@@ -94,17 +93,6 @@ const tasksGroup = resource("tasks", taskRepo, models.tasks)
     },
     { body: launchBody },
   )
-  .post("/:id/status", async ({ params, set }) => {
-    const task = await taskRepo.get(Number(params.id));
-    if (!task?.sessionUrl) {
-      set.status = 400;
-      return { ok: false as const, error: "task has no session" };
-    }
-    const result = await readSessionStatus(task.sessionUrl);
-    if (result.ok) await taskRepo.update(task.id, { sessionState: result.state });
-    else set.status = 502;
-    return result;
-  })
   // Start a local session: worktree on pm/task-<id> + a session row + trailer block.
   // Accepts extra `taskIds` to fold several tasks into the one worktree session.
   .post(

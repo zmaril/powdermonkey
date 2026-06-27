@@ -155,7 +155,11 @@ function BacklogRow({
   const phases = idx.phasesByTask.get(task.id) ?? [];
   const checked = selection.selected.has(task.id);
   return (
-    <Box px="sm" py={8} style={{ borderBottom: "1px solid #2c2e33", background: checked ? "#25262b" : undefined }}>
+    <Box
+      px="sm"
+      py={8}
+      style={{ borderBottom: "1px solid #2c2e33", background: checked ? "#25262b" : undefined }}
+    >
       <Group gap="sm" wrap="nowrap" align="flex-start">
         <Checkbox
           size="xs"
@@ -190,7 +194,11 @@ function BacklogRow({
 
 /** Flat backlog: every to-be-worked task in one dense list, starred first, each
  *  carrying its goal › milestone context. The Backlog counterpart to Active's flat. */
-function FlatView({ tasks, idx, selection }: { tasks: Task[]; idx: Indexes; selection: Selection }) {
+function FlatView({
+  tasks,
+  idx,
+  selection,
+}: { tasks: Task[]; idx: Indexes; selection: Selection }) {
   return (
     <Stack gap={0}>
       {starFirst(tasks).map((t) => {

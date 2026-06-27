@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import { db } from "./db.ts";
 import { commitBodies } from "./git.ts";
-import { phases, sessions, tasks } from "./schema.ts";
+import { phases, sessionTasks, sessions, tasks } from "./schema.ts";
 import { landSession } from "./worktree.ts";
 
 // Progress is driven by what lands on `main`, never by a session self-reporting.
@@ -40,22 +40,33 @@ function scanTrailers(text: string, key: string): Set<number> {
   return ids;
 }
 
-// Once a task merges, the PR landed, so any session still attached to it is done
-// by definition — leaving it live just makes the Active pane lie. Archive every
-// such session here so it happens automatically, no manual Land required.
+// Once a task merges, the PR landed, so any session still working it is done by
+// definition — leaving it live just makes the Active pane lie. Archive every such
+// session here so it happens automatically, no manual Land required.
 //
-// Driven off the task's current `merged` status (not just this tick's transition),
-// so it's idempotent and self-healing: already-archived sessions are excluded, a
-// teardown that failed last tick is retried, and a session belonging to a still-
-// running (non-merged) task is never touched. A `local` session reuses landSession
-// to tear down its worktree/PTY; a `remote` session has no worktree, so we just
-// archive its row.
+// A session can span several tasks (the session_tasks join), so it's only done
+// once EVERY task it's linked to has merged — a session still working an unmerged
+// task is left alone. Driven off the tasks' current `merged` status (not just this
+// tick's transition), so it's idempotent and self-healing: already-archived
+// sessions are excluded, and a teardown that failed last tick is retried. A
+// `local` session reuses landSession to tear down its worktree/PTY; a `remote`
+// session has no worktree, so we just archive its row.
 async function archiveMergedTaskSessions(): Promise<number> {
-  const live = await db
+  const liveSessions = await db
     .select({ id: sessions.id, kind: sessions.kind })
     .from(sessions)
-    .innerJoin(tasks, eq(sessions.taskId, tasks.id))
-    .where(and(isNull(sessions.archivedAt), eq(tasks.status, "merged")));
+    .where(isNull(sessions.archivedAt));
+
+  // Keep only sessions that have linked tasks and whose tasks have ALL merged.
+  const live: { id: number; kind: string }[] = [];
+  for (const s of liveSessions) {
+    const linked = await db
+      .select({ status: tasks.status })
+      .from(sessionTasks)
+      .innerJoin(tasks, eq(sessionTasks.taskId, tasks.id))
+      .where(eq(sessionTasks.sessionId, s.id));
+    if (linked.length > 0 && linked.every((t) => t.status === "merged")) live.push(s);
+  }
 
   let archived = 0;
   for (const s of live) {
