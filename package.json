@@ -9,6 +9,7 @@
     "build:web": "bun build src/web/main.tsx --outdir public/assets --target browser",
     "db:generate": "drizzle-kit generate",
     "check": "biome check src",
+    "size": "git ls-files 'src/**/*.ts' 'src/**/*.tsx' | xargs wc -l | tail -1",
     "test": "for f in tests/*.test.ts; do echo \"# $f\"; bun test \"$f\" || exit 1; done"
   },
   "dependencies": {
