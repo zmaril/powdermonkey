@@ -9,7 +9,30 @@ import { startSupervisorPty } from "./session-pty.ts";
 const PORT = Number(process.env.PORT ?? 4500);
 
 await ready();
-app.listen(PORT);
+
+// Bind the preferred port, but never crash if it's already taken — another
+// instance (a teleported worker, or just a second copy) may already hold it.
+// Elysia's .listen() silently swallows EADDRINUSE rather than throwing, so we
+// detect availability ourselves: probe the port with a throwaway Bun.serve, and
+// if it's busy hand Bun port 0 to get an OS-assigned free one. The actual port is
+// always read back from app.server?.port, so PM_URL (which spawned shells inherit)
+// and the browser's same-origin client follow along automatically.
+function portAvailable(port: number): boolean {
+  try {
+    Bun.serve({ port, fetch: () => new Response() }).stop(true);
+    return true;
+  } catch (e) {
+    if ((e as { code?: string }).code === "EADDRINUSE") return false;
+    throw e;
+  }
+}
+
+if (portAvailable(PORT)) {
+  app.listen(PORT);
+} else {
+  console.warn(`port ${PORT} is in use — starting on an OS-assigned free port instead`);
+  app.listen(0);
+}
 
 // Bring up the supervisor's own durable `claude` (in tmux, reserved id 0) so it's
 // already running before the browser shell attaches — and so it persists across
