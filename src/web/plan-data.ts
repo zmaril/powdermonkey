@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import type { CloudPr } from "../server/events.ts";
 import type { Goal, Milestone, Phase, Session, Task } from "../server/schema.ts";
 import { activeTaskIds } from "./active.ts";
 import { useStore } from "./store.ts";
@@ -16,6 +17,8 @@ export type Indexes = {
   tasksByMilestone: Map<number, Task[]>;
   phasesByTask: Map<number, Phase[]>;
   sessionByTask: Map<number, Session>;
+  // Live PR status (CI / mergeable / draft) for a task, when it has a tracked PR.
+  prByTask: Map<number, CloudPr>;
   // Goal/milestone a task hangs under — handy for the flat (ungrouped) views.
   milestoneById: Map<number, Milestone>;
   goalById: Map<number, Goal>;
@@ -31,6 +34,7 @@ export function buildIndexes(
   tasks: Task[],
   phases: Phase[],
   sessions: Session[],
+  cloudPrs: CloudPr[] = [],
 ): Indexes {
   const goalById = new Map<number, Goal>();
   for (const g of goals) goalById.set(g.id, g);
@@ -61,12 +65,21 @@ export function buildIndexes(
   const sessionByTask = new Map<number, Session>();
   for (const s of sessions) if (s.taskId != null) sessionByTask.set(s.taskId, s);
 
+  // Prefer a merged PR, else the highest-numbered (newest) one, if a task somehow
+  // has more than one tracked PR.
+  const prByTask = new Map<number, CloudPr>();
+  for (const pr of cloudPrs) {
+    const cur = prByTask.get(pr.taskId);
+    if (!cur || pr.merged || (!cur.merged && pr.number > cur.number)) prByTask.set(pr.taskId, pr);
+  }
+
   return {
     goals,
     milestonesByGoal,
     tasksByMilestone,
     phasesByTask,
     sessionByTask,
+    prByTask,
     milestoneById,
     goalById,
   };
@@ -87,12 +100,13 @@ export function usePlanData(): PlanData {
   const tasks = useStore((s) => s.tasks);
   const phases = useStore((s) => s.phases);
   const sessions = useStore((s) => s.sessions);
+  const cloudPrs = useStore((s) => s.cloudPrs);
   const loading = useStore((s) => s.loading);
   const error = useStore((s) => s.error);
 
   const idx = useMemo(
-    () => buildIndexes(goals, milestones, tasks, phases, sessions),
-    [goals, milestones, tasks, phases, sessions],
+    () => buildIndexes(goals, milestones, tasks, phases, sessions, cloudPrs),
+    [goals, milestones, tasks, phases, sessions, cloudPrs],
   );
   const activeIds = useMemo(() => activeTaskIds(sessions), [sessions]);
 

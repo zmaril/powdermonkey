@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { Goal, Milestone, Task } from "../server/schema.ts";
 import { partitionTasks } from "./active.ts";
 import { type Indexes, usePlanData } from "./plan-data.ts";
-import { IdTag, SessionActions, TaskBadges } from "./plan-ui.tsx";
+import { IdTag, PrStatus, SessionActions, TaskBadges } from "./plan-ui.tsx";
 
 // The Active pane is the live monitor — every task with a session running right
 // now (the derived-active set; see active.ts). Two views, toggled:
@@ -29,6 +29,7 @@ function ActiveRow({
   context?: string;
 }) {
   const session = idx.sessionByTask.get(task.id);
+  const pr = idx.prByTask.get(task.id);
   return (
     <Box px="sm" py={8} style={{ borderBottom: "1px solid #2c2e33" }}>
       <Group gap="sm" wrap="nowrap" align="flex-start">
@@ -58,6 +59,7 @@ function ActiveRow({
               PR ↗
             </Anchor>
           )}
+          {pr && <PrStatus pr={pr} />}
         </Group>
       )}
     </Box>

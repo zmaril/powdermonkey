@@ -17,6 +17,9 @@ export type CloudPr = {
   /** statusCheckRollup state (SUCCESS / FAILURE / PENDING / …), or null when the
    *  head commit has no checks configured. */
   checks: string | null;
+  /** Whether GitHub can merge this PR cleanly: MERGEABLE / CONFLICTING / UNKNOWN
+   *  (GitHub computes it lazily, so UNKNOWN just means "not yet"), or null. */
+  mergeable: string | null;
   headRefName: string;
   updatedAt: string;
 };

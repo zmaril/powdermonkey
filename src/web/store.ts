@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { CloudPr } from "../server/events.ts";
 import type { Goal, Milestone, Note, Phase, Session, Task } from "../server/schema.ts";
 import { api } from "./client.ts";
 
@@ -17,6 +18,9 @@ type State = {
   phases: Phase[];
   sessions: Session[];
   notes: Note[];
+  // Live PR status per task-linked PR (CI / mergeable / draft), served fresh from
+  // the github-watch loop — runtime data the Active panel reads, not persisted.
+  cloudPrs: CloudPr[];
   // The book of work: archived + finished rows (fetched with ?archived=true, which
   // returns live AND archived). The Archive pane reads this; the live panes don't.
   archive: {
@@ -93,6 +97,7 @@ export const useStore = create<State>((set, get) => ({
   phases: [],
   sessions: [],
   notes: [],
+  cloudPrs: [],
   archive: { goals: [], milestones: [], tasks: [], phases: [], sessions: [] },
   loading: false,
   error: null,
@@ -135,13 +140,14 @@ export const useStore = create<State>((set, get) => ({
   refresh: async () => {
     set({ loading: true, error: null });
     try {
-      const [goals, milestones, tasks, phases, sessions, notes] = await Promise.all([
+      const [goals, milestones, tasks, phases, sessions, notes, cloudPrs] = await Promise.all([
         api.goals.get(),
         api.milestones.get(),
         api.tasks.get(),
         api.phases.get(),
         api.sessions.get(),
         api.notes.get(),
+        api["cloud-prs"].get(),
       ]);
       const err =
         goals.error ??
@@ -158,6 +164,8 @@ export const useStore = create<State>((set, get) => ({
         phases: (phases.data ?? []) as Phase[],
         sessions: (sessions.data ?? []) as Session[],
         notes: (notes.data ?? []) as Note[],
+        // Non-fatal if it fails (watcher disabled / GitHub blip): keep status empty.
+        cloudPrs: (cloudPrs.data ?? []) as CloudPr[],
         loading: false,
       });
     } catch (e) {

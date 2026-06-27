@@ -8,7 +8,7 @@ import { join } from "node:path";
 // Importing the module still transitively opens db.ts (subscribers use the task
 // repo), so isolate it to a throwaway data dir to avoid the writer lock.
 process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
-const { diffCloudPrs } = await import("../src/server/github-watch.ts");
+const { diffCloudPrs, parseTrailerIds } = await import("../src/server/github-watch.ts");
 type CloudPr = import("../src/server/events.ts").CloudPr;
 
 function pr(over: Partial<CloudPr> & { number: number; taskId: number }): CloudPr {
@@ -18,6 +18,7 @@ function pr(over: Partial<CloudPr> & { number: number; taskId: number }): CloudP
     isDraft: false,
     merged: false,
     checks: null,
+    mergeable: null,
     headRefName: `pm/task-${over.taskId}-slug`,
     updatedAt: "2026-06-27T00:00:00Z",
     ...over,
@@ -64,6 +65,21 @@ test("open → closed without merge emits pr.closed", () => {
   const prev = index([pr({ number: 1, taskId: 10 })]);
   const next = [pr({ number: 1, taskId: 10, state: "CLOSED" })];
   expect(diffCloudPrs(prev, next).map((e) => e.type)).toEqual(["pr.closed"]);
+});
+
+test("parseTrailerIds pulls PM-Task and PM-Phase ids (the branch-name fallback)", () => {
+  const body = [
+    "CI: lint, format & tests",
+    "",
+    "PM-Phase: 142",
+    "PM-Phase: 143, 144",
+    "PM-Task: 105",
+  ].join("\n");
+  expect(parseTrailerIds(body)).toEqual({ taskIds: [105], phaseIds: [142, 143, 144] });
+});
+
+test("parseTrailerIds returns empties when there are no trailers", () => {
+  expect(parseTrailerIds("just a normal commit message")).toEqual({ taskIds: [], phaseIds: [] });
 });
 
 test("only the changed PR among many emits", () => {

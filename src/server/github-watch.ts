@@ -1,7 +1,10 @@
+import { inArray } from "drizzle-orm";
 import { taskRepo } from "./crud.ts";
+import { db } from "./db.ts";
 import { type CloudPr, bus } from "./events.ts";
 import { pullMain } from "./git.ts";
 import { reconcile } from "./reconcile.ts";
+import { phases } from "./schema.ts";
 
 // The one loop. It polls GitHub for the PRs our cloud workers open — branches
 // named `pm/task-<id>-<slug>` — diffs each tick against the last-seen state, and
@@ -30,8 +33,9 @@ const GQL = `query($owner:String!,$name:String!){
   repository(owner:$owner,name:$name){
     pullRequests(first:100, orderBy:{field:UPDATED_AT, direction:DESC}){
       nodes{
-        number url state isDraft merged updatedAt headRefName
-        commits(last:1){nodes{commit{statusCheckRollup{state}}}}
+        number url state isDraft merged mergeable updatedAt headRefName
+        checks: commits(last:1){nodes{commit{statusCheckRollup{state}}}}
+        history: commits(first:100){nodes{commit{messageBody}}}
       }
     }
   }
@@ -62,11 +66,14 @@ async function resolveRepo(): Promise<{ owner: string; name: string } | null> {
   return repoSlug;
 }
 
-/** Fetch the current state of every `pm/task-*` PR. Returns [] on any failure
- *  (no gh, no auth, network blip) — a failed tick is non-fatal; we retry next. */
-export async function fetchCloudPrs(): Promise<CloudPr[]> {
+/** Fetch the current state of every PR we can tie to a task — by branch name
+ *  (`pm/task-<id>-…`) or, failing that, its commit trailers (see resolveTaskId).
+ *  Returns `null` on a fetch failure (no gh, no auth, network blip, bad JSON) so
+ *  the caller can leave the last-known state untouched; an empty array means the
+ *  fetch succeeded and there genuinely are no matching PRs. */
+export async function fetchCloudPrs(): Promise<CloudPr[] | null> {
   const repo = await resolveRepo();
-  if (!repo) return [];
+  if (!repo) return null;
   const r = await gh([
     "api",
     "graphql",
@@ -79,28 +86,32 @@ export async function fetchCloudPrs(): Promise<CloudPr[]> {
   ]);
   if (!r.ok) {
     console.warn("github-watch: gh graphql failed:", r.stderr.trim().slice(0, 200));
-    return [];
+    return null;
   }
   // biome-ignore lint/suspicious/noExplicitAny: untyped GraphQL JSON, narrowed below.
   let data: any;
   try {
     data = JSON.parse(r.stdout);
   } catch {
-    return [];
+    return null;
   }
   const nodes = data?.data?.repository?.pullRequests?.nodes ?? [];
   const prs: CloudPr[] = [];
   for (const n of nodes) {
-    const m = BRANCH_RE.exec(n.headRefName ?? "");
-    if (!m) continue;
+    const commitText = (n.history?.nodes ?? [])
+      .map((c: { commit?: { messageBody?: string } }) => c.commit?.messageBody ?? "")
+      .join("\n");
+    const taskId = await resolveTaskId(n.headRefName ?? "", commitText);
+    if (taskId == null) continue; // can't tie this PR to a task — skip it
     prs.push({
-      taskId: Number(m[1]),
+      taskId,
       number: n.number,
       url: n.url,
       state: n.state,
       isDraft: !!n.isDraft,
       merged: !!n.merged,
-      checks: n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state ?? null,
+      checks: n.checks?.nodes?.[0]?.commit?.statusCheckRollup?.state ?? null,
+      mergeable: n.mergeable ?? null,
       headRefName: n.headRefName,
       updatedAt: n.updatedAt,
     });
@@ -108,10 +119,49 @@ export async function fetchCloudPrs(): Promise<CloudPr[]> {
   return prs;
 }
 
+/** Pull `PM-Task:` / `PM-Phase:` ids out of commit-trailer text (the same trailers
+ *  reconciliation reads off main). Each may be repeated or comma/space-separated.
+ *  Pure — exported for tests. */
+export function parseTrailerIds(text: string): { taskIds: number[]; phaseIds: number[] } {
+  const grab = (key: string): number[] => {
+    const ids: number[] = [];
+    const re = new RegExp(`^\\s*${key}:\\s*(.+)$`, "gim");
+    for (const m of text.matchAll(re)) {
+      for (const part of m[1].split(/[\s,]+/)) {
+        const id = Number(part);
+        if (Number.isInteger(id) && id > 0) ids.push(id);
+      }
+    }
+    return ids;
+  };
+  return { taskIds: grab("PM-Task"), phaseIds: grab("PM-Phase") };
+}
+
+async function taskIdForPhaseIds(ids: number[]): Promise<number | null> {
+  if (ids.length === 0) return null;
+  const rows = await db
+    .select({ taskId: phases.taskId })
+    .from(phases)
+    .where(inArray(phases.id, ids));
+  return rows[0]?.taskId ?? null;
+}
+
+/** Map a PR to its task. The branch name (`pm/task-<id>-…`) is the happy path, but
+ *  cloud workers don't always follow it (e.g. a default `claude/…` branch). When
+ *  the branch carries no id, fall back to the commit trailers, which always do:
+ *  a `PM-Task:` names the task directly; a `PM-Phase:` resolves through the DB. */
+async function resolveTaskId(headRefName: string, commitText: string): Promise<number | null> {
+  const m = BRANCH_RE.exec(headRefName);
+  if (m) return Number(m[1]);
+  const { taskIds, phaseIds } = parseTrailerIds(commitText);
+  if (taskIds.length > 0) return taskIds[0];
+  return taskIdForPhaseIds(phaseIds);
+}
+
 /** Signature of the fields whose change we care about — drives "did this PR
  *  actually change?" so we don't re-emit on irrelevant churn (e.g. updatedAt). */
 function sig(pr: CloudPr): string {
-  return `${pr.state}|${pr.merged}|${pr.isDraft}|${pr.checks}|${pr.url}`;
+  return `${pr.state}|${pr.merged}|${pr.isDraft}|${pr.checks}|${pr.mergeable}|${pr.url}`;
 }
 
 export type CloudEventType = "pr.opened" | "pr.updated" | "pr.merged" | "pr.closed";
@@ -143,11 +193,16 @@ export function diffCloudPrs(prev: Map<number, CloudPr>, next: CloudPr[]): Cloud
 // ---- the loop --------------------------------------------------------------
 let lastByNumber = new Map<number, CloudPr>();
 
+/** The watcher's latest known PR state, one per task-linked PR. Served live to the
+ *  UI (GET /cloud-prs) so the Active panel can show CI / merge-conflict status
+ *  without persisting this fast-moving data to the DB. */
+export function currentCloudPrs(): CloudPr[] {
+  return [...lastByNumber.values()];
+}
+
 async function tick(initial: boolean): Promise<number> {
   const prs = await fetchCloudPrs();
-  // Don't seed/clear on a failed fetch (empty result with nothing prior is
-  // indistinguishable, so just no-op until we get data).
-  if (prs.length === 0 && lastByNumber.size === 0) return 0;
+  if (prs === null) return 0; // fetch failed — keep last-known state untouched
   const events = diffCloudPrs(lastByNumber, prs);
   for (const ev of events) await bus.emit(ev.type, ev.pr, { initial });
   lastByNumber = new Map(prs.map((p) => [p.number, p]));

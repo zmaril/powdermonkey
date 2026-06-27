@@ -5,7 +5,7 @@ import { Elysia, t } from "elysia";
 import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
-import { syncCloudPrs } from "./github-watch.ts";
+import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
 import { models } from "./models.ts";
 import { loadPlan, planSchema } from "./plan.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
@@ -131,6 +131,9 @@ export const app = new Elysia()
   // Poll GitHub for pm/task-* PRs now (set prUrl, wake reconcile on merge). The
   // github-watch loop does this every 10s; this triggers a pass on demand.
   .post("/github-sync", () => syncCloudPrs())
+  // The watcher's latest PR state per task-linked PR (CI checks, mergeable, draft).
+  // Live runtime data, not persisted — the Active panel reads it for status badges.
+  .get("/cloud-prs", () => currentCloudPrs())
   // Image upload from the web shell. The browser is remote, so a dropped image
   // has to land on the server filesystem first; we save it under data/uploads/
   // and return the absolute path, which the client then types into the PTY for

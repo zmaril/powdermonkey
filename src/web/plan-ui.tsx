@@ -1,4 +1,5 @@
 import { Anchor, Badge, Button, Group, List, Progress, Text, ThemeIcon } from "@mantine/core";
+import type { CloudPr } from "../server/events.ts";
 import type { Phase, Session, Task } from "../server/schema.ts";
 import type { SessionState, TaskStatus } from "../shared/types.ts";
 import { rollup } from "./progress.ts";
@@ -195,6 +196,43 @@ export function LaunchActions({ taskId }: { taskId: number }) {
       <Button size="compact-xs" variant="subtle" color="gray" onClick={() => dispatch(taskId)}>
         Dispatch remote
       </Button>
+    </Group>
+  );
+}
+
+// GitHub's statusCheckRollup states → a compact CI chip.
+const CHECK_BADGE: Record<string, { label: string; color: string } | undefined> = {
+  SUCCESS: { label: "CI ✓", color: "green" },
+  FAILURE: { label: "CI ✗", color: "red" },
+  ERROR: { label: "CI ✗", color: "red" },
+  PENDING: { label: "CI …", color: "yellow" },
+  EXPECTED: { label: "CI …", color: "yellow" },
+};
+
+/** Live PR status chips for a task with a tracked PR — draft, merge conflicts, CI.
+ *  Fed from github-watch (idx.prByTask), so it trails GitHub by at most the poll
+ *  interval (~10s). Renders nothing when there's nothing noteworthy to show. */
+export function PrStatus({ pr }: { pr: CloudPr }) {
+  const ci = pr.checks ? CHECK_BADGE[pr.checks] : undefined;
+  const conflicting = pr.mergeable === "CONFLICTING";
+  if (!pr.isDraft && !conflicting && !ci) return null;
+  return (
+    <Group gap={4} wrap="nowrap">
+      {pr.isDraft && (
+        <Badge size="xs" variant="light" color="gray">
+          draft
+        </Badge>
+      )}
+      {conflicting && (
+        <Badge size="xs" variant="filled" color="red" title="Has merge conflicts with main">
+          conflicts
+        </Badge>
+      )}
+      {ci && (
+        <Badge size="xs" variant="light" color={ci.color} title={`CI: ${pr.checks}`}>
+          {ci.label}
+        </Badge>
+      )}
     </Group>
   );
 }
