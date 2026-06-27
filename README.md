@@ -36,12 +36,32 @@ next boot). Run the tests with `bun test`.
 
 ### Dispatching to the cloud
 
-Dispatch (`claude --remote`) and the Playwright status reader depend on two
-externally-defined specifics, both isolated and overridable via env:
+A dispatched task runs as a `claude --remote` cloud session in an **isolated
+workspace** — a fresh sandbox that clones the repo, does the work, and opens a PR.
 
-- `PM_DISPATCH_CMD` — argv that starts a remote session (default `claude --remote -p`).
-- `PM_CHROME_PATH` / `PM_BROWSER_PROFILE` — Chrome binary and a persistent
-  profile so the headless browser inherits your Claude login.
+> [!IMPORTANT]
+> **The Claude GitHub App must be installed on the repo, or cloud workers can't
+> push.** The sandbox pushes via the GitHub App, not your local `gh` token, and
+> app installs are scoped per account (each org and each personal user is
+> separate). If a repo's account doesn't have the app, the worker comes up with no
+> push auth/remote and fails with errors about not knowing which repo to push to —
+> even for a public repo (it can clone but not push).
+>
+> Fix: run **`/install-github-app`** inside Claude Code *from that repo* (or add
+> the repo under github.com → Settings → Applications → Claude). Repos under an org
+> that already has the app "just work"; a personal repo usually needs this once.
+
+Implementation notes:
+
+- Cloud sessions are **interactive-only** — `claude --remote` rejects `--print`/`-p`,
+  and the CLI needs a **TTY**, so dispatch runs the command in a PTY (spawned with
+  plain pipes it falls back to a bundled `cli.js` under whatever `node` is on PATH,
+  which may be an unsupported version that crashes). It prints a `View:` URL on
+  success, which is captured and stored on the session.
+- `PM_DISPATCH_CMD` — overrides the dispatch command (default
+  `claude --remote "$(cat {prompt_file})"`; `{prompt_file}` is the per-task prompt).
+- `PM_CHROME_PATH` / `PM_BROWSER_PROFILE` — Chrome binary and a persistent profile
+  so the headless Playwright status reader inherits your Claude login.
 
 Set `PM_DISPATCH_DRY_RUN=1` to exercise the dispatch flow without touching the
 cloud. `claude` must be installed and logged in.
