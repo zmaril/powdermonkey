@@ -1,19 +1,4 @@
-import {
-  Anchor,
-  Badge,
-  Button,
-  Card,
-  Code,
-  Container,
-  CopyButton,
-  Group,
-  List,
-  Progress,
-  Stack,
-  Text,
-  ThemeIcon,
-  Title,
-} from "@mantine/core";
+import { Button, Group, Text, Title } from "@mantine/core";
 import "dockview-core/dist/styles/dockview.css";
 import {
   type DockviewApi,
@@ -22,353 +7,18 @@ import {
   type IDockviewPanelProps,
   themeAbyss,
 } from "dockview-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { Goal, Milestone, Phase, Session, Task } from "../server/schema.ts";
-import type { SessionState, TaskStatus } from "../shared/types.ts";
+import { useEffect, useRef, useState } from "react";
+import { ActivePane } from "./ActivePane.tsx";
+import { ArchivePane } from "./ArchivePane.tsx";
+import { BacklogPane } from "./BacklogPane.tsx";
 import { ShellTerminal } from "./ShellTerminal.tsx";
-import { rollup } from "./progress.ts";
 import { useStore } from "./store.ts";
 
-const STATUS_COLOR: Record<TaskStatus, string> = {
-  pending: "gray",
-  dispatched: "blue",
-  merged: "green",
-};
-
-// "Try Again" is the user-facing label for a session parked waiting to resume.
-const SESSION_BADGE: Record<SessionState, { label: string; color: string }> = {
-  running: { label: "running", color: "blue" },
-  waiting: { label: "Try Again", color: "yellow" },
-  idle: { label: "idle", color: "gray" },
-  stopped: { label: "stopped", color: "red" },
-};
-
-const byPosition = <T extends { position: number }>(a: T, b: T) => a.position - b.position;
-
-function ProgressBar({ phases }: { phases: Phase[] }) {
-  const { done, total, pct } = rollup(phases);
-  return (
-    <Group gap="sm" wrap="nowrap" w="100%">
-      <Progress value={pct} size="lg" radius="sm" style={{ flex: 1 }} />
-      <Text size="sm" c="dimmed" w={60} ta="right">
-        {done}/{total}
-      </Text>
-    </Group>
-  );
-}
-
-function PhaseList({ phases }: { phases: Phase[] }) {
-  return (
-    <List spacing={2} size="sm" center>
-      {phases.map((p) => (
-        <List.Item
-          key={p.id}
-          icon={
-            <ThemeIcon color={p.status === "done" ? "green" : "gray"} size={16} radius="xl">
-              <Text size="9px">{p.status === "done" ? "✓" : "·"}</Text>
-            </ThemeIcon>
-          }
-        >
-          <Text
-            size="sm"
-            c={p.status === "done" ? "dimmed" : undefined}
-            td={p.status === "done" ? "line-through" : undefined}
-          >
-            {p.name}{" "}
-            <Text span c="dimmed" size="xs">
-              #{p.id}
-            </Text>
-          </Text>
-        </List.Item>
-      ))}
-    </List>
-  );
-}
-
-function TaskCard({ task, phases, session }: { task: Task; phases: Phase[]; session?: Session }) {
-  const { startLocal, dispatch, land, stop, openSessionTerminal, openEditor } = useStore();
-  return (
-    <Card withBorder radius="md" padding="sm">
-      <Group justify="space-between" wrap="nowrap" mb={6}>
-        <Text fw={500}>{task.title}</Text>
-        <Group gap={6} wrap="nowrap">
-          {session?.needsInput && (
-            <Badge color="yellow" variant="filled">
-              needs you
-            </Badge>
-          )}
-          {task.sessionState && (
-            <Badge color={SESSION_BADGE[task.sessionState].color} variant="filled">
-              {SESSION_BADGE[task.sessionState].label}
-            </Badge>
-          )}
-          <Badge color={STATUS_COLOR[task.status]} variant="light">
-            {task.status}
-          </Badge>
-        </Group>
-      </Group>
-
-      <PhaseList phases={phases} />
-
-      <Group gap="xs" mt={10} justify="space-between">
-        <Group gap="xs">
-          {session ? (
-            <>
-              <Badge variant="dot" color="teal" title={session.kind}>
-                <span aria-label={session.kind}>{session.kind === "local" ? "💻" : "☁️"}</span>{" "}
-                {session.branch}
-              </Badge>
-              <Button
-                size="compact-xs"
-                variant={session.needsInput ? "filled" : "light"}
-                color="grape"
-                onClick={() =>
-                  openSessionTerminal(
-                    session.id,
-                    `${session.kind} · ${session.branch}`.toUpperCase(),
-                  )
-                }
-              >
-                Shell
-              </Button>
-              <Button
-                size="compact-xs"
-                variant="light"
-                color="blue"
-                onClick={() => openEditor(session.id)}
-                title={
-                  session.kind === "local" ? "Open worktree in VS Code" : "Open PR in github.dev"
-                }
-              >
-                VS Code
-              </Button>
-              <Button
-                size="compact-xs"
-                variant="light"
-                color="teal"
-                onClick={() => land(session.id)}
-              >
-                Land
-              </Button>
-              <Button
-                size="compact-xs"
-                variant="light"
-                color="red"
-                title="Abort this session — kills the agent and re-pends the task"
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      "Stop this session? The agent is killed, its worktree discarded, and the task returns to pending.",
-                    )
-                  )
-                    stop(session.id);
-                }}
-              >
-                Stop
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button size="compact-xs" variant="light" onClick={() => startLocal(task.id)}>
-                Start local
-              </Button>
-              <Button
-                size="compact-xs"
-                variant="subtle"
-                color="gray"
-                onClick={() => dispatch(task.id)}
-              >
-                Dispatch remote
-              </Button>
-            </>
-          )}
-        </Group>
-        <Group gap="md">
-          {task.sessionUrl && (
-            <Anchor href={task.sessionUrl} target="_blank" size="sm">
-              session ↗
-            </Anchor>
-          )}
-          {task.prUrl && (
-            <Anchor href={task.prUrl} target="_blank" size="sm">
-              PR ↗
-            </Anchor>
-          )}
-        </Group>
-      </Group>
-    </Card>
-  );
-}
-
-type Indexes = {
-  milestonesByGoal: Map<number, Milestone[]>;
-  tasksByMilestone: Map<number, Task[]>;
-  phasesByTask: Map<number, Phase[]>;
-  sessionByTask: Map<number, Session>;
-};
-
-function phasesUnder(tasks: Task[], idx: Indexes): Phase[] {
-  return tasks.flatMap((t) => idx.phasesByTask.get(t.id) ?? []);
-}
-
-function GoalView({ goal, idx }: { goal: Goal; idx: Indexes }) {
-  const milestones = idx.milestonesByGoal.get(goal.id) ?? [];
-  const allTasks = milestones.flatMap((m) => idx.tasksByMilestone.get(m.id) ?? []);
-
-  return (
-    <Stack gap="lg">
-      <div>
-        <Title order={2}>{goal.title}</Title>
-        <Text c="dimmed" size="sm" mt={4}>
-          {goal.objective}
-        </Text>
-        <Stack mt="sm" gap={4}>
-          <ProgressBar phases={phasesUnder(allTasks, idx)} />
-        </Stack>
-      </div>
-
-      {milestones.map((m) => {
-        const tasks = idx.tasksByMilestone.get(m.id) ?? [];
-        return (
-          <Stack key={m.id} gap="xs">
-            <Title order={4}>{m.title}</Title>
-            <ProgressBar phases={phasesUnder(tasks, idx)} />
-            <Stack gap="xs" mt={4}>
-              {tasks.map((t) => (
-                <TaskCard
-                  key={t.id}
-                  task={t}
-                  phases={idx.phasesByTask.get(t.id) ?? []}
-                  session={idx.sessionByTask.get(t.id)}
-                />
-              ))}
-            </Stack>
-          </Stack>
-        );
-      })}
-    </Stack>
-  );
-}
-
-function StartPanel() {
-  const { lastStart, dismissStart } = useStore();
-  if (!lastStart) return null;
-  return (
-    <Card withBorder radius="md" mb="lg" bg="dark.6">
-      <Group justify="space-between" mb="xs">
-        <Text fw={600}>Local session ready · {lastStart.branch}</Text>
-        <Button size="compact-xs" variant="subtle" color="gray" onClick={dismissStart}>
-          dismiss
-        </Button>
-      </Group>
-      <Text size="sm" c="dimmed">
-        Worktree: <Code>{lastStart.worktreePath}</Code>
-      </Text>
-      <Text size="sm" mt="xs" mb={4}>
-        Paste this into a Claude session running in that worktree:
-      </Text>
-      <Code block style={{ whiteSpace: "pre-wrap" }}>
-        {lastStart.prompt}
-      </Code>
-      <CopyButton value={lastStart.prompt}>
-        {({ copied, copy }) => (
-          <Button size="compact-xs" mt="xs" variant="light" onClick={copy}>
-            {copied ? "copied" : "copy prompt"}
-          </Button>
-        )}
-      </CopyButton>
-    </Card>
-  );
-}
-
-function PlanView() {
-  const {
-    goals,
-    milestones,
-    tasks,
-    phases,
-    sessions,
-    loading,
-    error,
-    refresh,
-    reconcile,
-    openTerminal,
-    openNotes,
-  } = useStore();
-
-  // Refresh on mount and on a light poll so progress appears as branches land.
-  useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, 4000);
-    return () => clearInterval(id);
-  }, [refresh]);
-
-  const idx = useMemo<Indexes>(() => {
-    const milestonesByGoal = new Map<number, Milestone[]>();
-    for (const m of [...milestones].sort(byPosition)) {
-      const list = milestonesByGoal.get(m.goalId) ?? [];
-      list.push(m);
-      milestonesByGoal.set(m.goalId, list);
-    }
-    const tasksByMilestone = new Map<number, Task[]>();
-    for (const t of [...tasks].sort(byPosition)) {
-      const list = tasksByMilestone.get(t.milestoneId) ?? [];
-      list.push(t);
-      tasksByMilestone.set(t.milestoneId, list);
-    }
-    const phasesByTask = new Map<number, Phase[]>();
-    for (const p of [...phases].sort(byPosition)) {
-      const list = phasesByTask.get(p.taskId) ?? [];
-      list.push(p);
-      phasesByTask.set(p.taskId, list);
-    }
-    const sessionByTask = new Map<number, Session>();
-    for (const s of sessions) if (s.taskId != null) sessionByTask.set(s.taskId, s);
-    return { milestonesByGoal, tasksByMilestone, phasesByTask, sessionByTask };
-  }, [milestones, tasks, phases, sessions]);
-
-  return (
-    <Container size="md" py="xl" style={{ height: "100%", overflowY: "auto" }}>
-      <Group justify="space-between" mb="xl">
-        <Title order={1}>PowderMonkey</Title>
-        <Group gap="sm">
-          {loading && (
-            <Text size="sm" c="dimmed">
-              loading…
-            </Text>
-          )}
-          <Button size="xs" variant="default" onClick={() => openTerminal("")}>
-            Shell
-          </Button>
-          <Button size="xs" variant="default" onClick={openNotes}>
-            Scratch
-          </Button>
-          <Button size="xs" variant="default" onClick={reconcile}>
-            Reconcile
-          </Button>
-        </Group>
-      </Group>
-
-      {error && (
-        <Text c="red" mb="md">
-          {error}
-        </Text>
-      )}
-
-      <StartPanel />
-
-      {goals.length === 0 && !loading ? (
-        <Text c="dimmed">No plan loaded. POST one to /plan.</Text>
-      ) : (
-        <Stack gap="xl">
-          {goals.map((g) => (
-            <GoalView key={g.id} goal={g} idx={idx} />
-          ))}
-        </Stack>
-      )}
-    </Container>
-  );
-}
+// The single pane of glass. The plan is split into three panels — a live ACTIVE
+// monitor, a launchpad BACKLOG editor, and the ARCHIVE book of work — alongside
+// the scratchpad and the supervisor shell. One poll (here) keeps the live panels'
+// store-derived views fresh (Archive runs its own slower poll for archived rows);
+// the panes themselves are pure derivations off the store (see plan-data.ts).
 
 // The scratchpad: one note, one big textarea. Holds its own draft state seeded
 // once from the server so the 4s background poll can't clobber what you're typing;
@@ -450,31 +100,103 @@ function ShellPanel(props: IDockviewPanelProps<{ cwd: string; session: number | 
   );
 }
 
-function PlanPanel() {
-  return <PlanView />;
+function ActivePanel() {
+  return <ActivePane />;
+}
+
+function BacklogPanel() {
+  return <BacklogPane />;
+}
+
+function ArchivePanel() {
+  return <ArchivePane />;
 }
 
 function ScratchPanel() {
   return <ScratchPad />;
 }
 
-const dockComponents = { shell: ShellPanel, plan: PlanPanel, scratch: ScratchPanel };
+const dockComponents = {
+  shell: ShellPanel,
+  active: ActivePanel,
+  backlog: BacklogPanel,
+  archive: ArchivePanel,
+  scratch: ScratchPanel,
+};
+
+// Slim global toolbar: the app title, the cross-cutting actions (Shell / Scratch /
+// Reconcile), and the error banner. Lives above the dockview so it's always visible
+// regardless of which panel is focused.
+function TopBar() {
+  const { error, loading, reconcile, openTerminal, openNotes } = useStore();
+  return (
+    <div style={{ flex: "0 0 auto", borderBottom: "1px solid #2c2e33", background: "#141517" }}>
+      <Group justify="space-between" px="md" py={6} wrap="nowrap">
+        <Group gap="sm" wrap="nowrap">
+          <Title order={5}>PowderMonkey</Title>
+          {loading && (
+            <Text size="xs" c="dimmed">
+              loading…
+            </Text>
+          )}
+          {error && (
+            <Text size="xs" c="red" truncate maw={420} title={error}>
+              {error}
+            </Text>
+          )}
+        </Group>
+        <Group gap={6} wrap="nowrap">
+          <Button size="compact-xs" variant="default" onClick={() => openTerminal("")}>
+            Shell
+          </Button>
+          <Button size="compact-xs" variant="default" onClick={openNotes}>
+            Scratch
+          </Button>
+          <Button size="compact-xs" variant="default" onClick={reconcile}>
+            Reconcile
+          </Button>
+        </Group>
+      </Group>
+    </div>
+  );
+}
 
 export function App() {
   const apiRef = useRef<DockviewApi | null>(null);
   const shellReq = useStore((s) => s.shellReq);
   const notesReq = useStore((s) => s.notesReq);
+  const refresh = useStore((s) => s.refresh);
+
+  // The one poll for the whole app. Every panel renders off the store, so this
+  // keeps Active/Backlog/Scratch current as branches land and sessions change.
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 4000);
+    return () => clearInterval(id);
+  }, [refresh]);
 
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;
-    // Layout: Plan on the right (main); the left column is split horizontally with
-    // the scratchpad on top and the supervisor shell below it.
-    event.api.addPanel({ id: "plan", component: "plan", title: "Plan" });
+    // Layout: Active + Backlog + Archive as tabs in the main (right) group; the
+    // left column is the scratchpad over the supervisor shell.
+    const active = event.api.addPanel({ id: "active", component: "active", title: "Active" });
+    event.api.addPanel({
+      id: "backlog",
+      component: "backlog",
+      title: "Backlog",
+      position: { direction: "within", referencePanel: "active" },
+    });
+    event.api.addPanel({
+      id: "archive",
+      component: "archive",
+      title: "Archive",
+      position: { direction: "within", referencePanel: "active" },
+    });
     event.api.addPanel({
       id: "scratch",
       component: "scratch",
       title: "Scratch",
-      position: { direction: "left", referencePanel: "plan" },
+      position: { direction: "left", referencePanel: "active" },
     });
     event.api.addPanel({
       id: "shell-0",
@@ -483,6 +205,8 @@ export function App() {
       title: "supervisor",
       position: { direction: "below", referencePanel: "scratch" },
     });
+    // Show Active first (adding Backlog "within" would otherwise leave it focused).
+    active.api.setActive();
   };
 
   // Each open*Terminal() adds (or focuses) a shell panel keyed by shellReq.key.
@@ -519,13 +243,16 @@ export function App() {
       id: "scratch",
       component: "scratch",
       title: "Scratch",
-      position: { referencePanel: "plan", direction: "left" },
+      position: { referencePanel: "active", direction: "left" },
     });
   }, [notesReq]);
 
   return (
-    <div style={{ height: "100vh", width: "100vw" }}>
-      <DockviewReact components={dockComponents} onReady={onReady} theme={themeAbyss} />
+    <div style={{ height: "100vh", width: "100vw", display: "flex", flexDirection: "column" }}>
+      <TopBar />
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <DockviewReact components={dockComponents} onReady={onReady} theme={themeAbyss} />
+      </div>
     </div>
   );
 }

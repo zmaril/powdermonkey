@@ -17,6 +17,15 @@ type State = {
   phases: Phase[];
   sessions: Session[];
   notes: Note[];
+  // The book of work: archived + finished rows (fetched with ?archived=true, which
+  // returns live AND archived). The Archive pane reads this; the live panes don't.
+  archive: {
+    goals: Goal[];
+    milestones: Milestone[];
+    tasks: Task[];
+    phases: Phase[];
+    sessions: Session[];
+  };
   loading: boolean;
   error: string | null;
   lastStart: StartInfo | null;
@@ -30,6 +39,7 @@ type State = {
   openSessionTerminal: (sessionId: number, title: string) => void;
   openNotes: () => void;
   refresh: () => Promise<void>;
+  refreshArchive: () => Promise<void>;
   refreshNotes: () => Promise<void>;
   // The scratchpad is a single note. Returns it, creating the row on first use.
   ensureScratch: () => Promise<Note | null>;
@@ -41,6 +51,7 @@ type State = {
   openEditor: (sessionId: number) => Promise<void>;
   reconcile: () => Promise<void>;
   dismissStart: () => void;
+  setError: (error: string | null) => void;
 };
 
 // Single-flight: the scratchpad is exactly one note. The first caller that finds
@@ -81,6 +92,7 @@ export const useStore = create<State>((set, get) => ({
   phases: [],
   sessions: [],
   notes: [],
+  archive: { goals: [], milestones: [], tasks: [], phases: [], sessions: [] },
   loading: false,
   error: null,
   lastStart: null,
@@ -151,6 +163,30 @@ export const useStore = create<State>((set, get) => ({
       set({ error: e instanceof Error ? e.message : String(e), loading: false });
     }
   },
+  refreshArchive: async () => {
+    // ?archived=true returns live AND archived rows; the pane filters to the
+    // finished/archived set. We pull the full hierarchy so a task whose goal or
+    // milestone was archived still resolves its context.
+    const q = { query: { archived: "true" } };
+    const [goals, milestones, tasks, phases, sessions] = await Promise.all([
+      api.goals.get(q),
+      api.milestones.get(q),
+      api.tasks.get(q),
+      api.phases.get(q),
+      api.sessions.get(q),
+    ]);
+    const err = goals.error ?? milestones.error ?? tasks.error ?? phases.error ?? sessions.error;
+    if (err) return set({ error: String(err.value ?? err.status) });
+    set({
+      archive: {
+        goals: (goals.data ?? []) as Goal[],
+        milestones: (milestones.data ?? []) as Milestone[],
+        tasks: (tasks.data ?? []) as Task[],
+        phases: (phases.data ?? []) as Phase[],
+        sessions: (sessions.data ?? []) as Session[],
+      },
+    });
+  },
   startLocal: async (taskId) => {
     const { data, error } = await api.tasks({ id: taskId })["start-local"].post();
     if (error) return set({ error: String(error.value ?? error.status) });
@@ -193,4 +229,5 @@ export const useStore = create<State>((set, get) => ({
     await get().refresh();
   },
   dismissStart: () => set({ lastStart: null }),
+  setError: (error) => set({ error }),
 }));
