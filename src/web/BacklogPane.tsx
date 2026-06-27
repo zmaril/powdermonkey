@@ -2,7 +2,7 @@ import { Box, Button, Card, Code, CopyButton, Group, Stack, Text, Title } from "
 import type { Goal, Phase, Task } from "../server/schema.ts";
 import { partitionTasks } from "./active.ts";
 import { type Indexes, usePlanData } from "./plan-data.ts";
-import { LaunchActions, PhaseList, TaskBadges, TaskLinks } from "./plan-ui.tsx";
+import { IdTag, LaunchActions, PhaseList, TaskBadges, TaskLinks } from "./plan-ui.tsx";
 import { useStore } from "./store.ts";
 
 // The Backlog pane is the launchpad — everything to-be-worked (not active),
@@ -17,7 +17,12 @@ function BacklogCard({ task, phases }: { task: Task; phases: Phase[] }) {
   return (
     <Card withBorder radius="md" padding="sm">
       <Group justify="space-between" wrap="nowrap" mb={6}>
-        <Text fw={500}>{task.title}</Text>
+        <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
+          <IdTag prefix="t" id={task.id} />
+          <Text fw={500} truncate>
+            {task.title}
+          </Text>
+        </Group>
         <TaskBadges task={task} />
       </Group>
       <PhaseList phases={phases} />
@@ -45,7 +50,10 @@ function GoalGroup({ goal, idx, backlog }: { goal: Goal; idx: Indexes; backlog: 
   return (
     <Stack gap="md">
       <div>
-        <Title order={3}>{goal.title}</Title>
+        <Group gap={8} wrap="nowrap" align="baseline">
+          <IdTag prefix="g" id={goal.id} />
+          <Title order={3}>{goal.title}</Title>
+        </Group>
         {goal.objective && (
           <Text c="dimmed" size="sm" mt={4}>
             {goal.objective}
@@ -55,7 +63,10 @@ function GoalGroup({ goal, idx, backlog }: { goal: Goal; idx: Indexes; backlog: 
 
       {milestones.map(({ m, tasks }) => (
         <Stack key={m.id} gap="xs">
-          <Title order={5}>{m.title}</Title>
+          <Group gap={8} wrap="nowrap" align="baseline">
+            <IdTag prefix="m" id={m.id} />
+            <Title order={5}>{m.title}</Title>
+          </Group>
           <Stack gap="xs">
             {tasks.map((t) => (
               <BacklogCard key={t.id} task={t} phases={idx.phasesByTask.get(t.id) ?? []} />
