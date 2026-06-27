@@ -54,3 +54,75 @@ mode), and switch sessions with `Ctrl-b (` / `Ctrl-b )`.
 > **Shell** on a task opens an attach onto that task's `pm-session-<id>`. Your
 > terminal attach and the browser share one live session, so you'll see the same
 > screen in both.
+
+## Recovery
+
+### Detach without killing anything
+
+Attaching does **not** take ownership — the session keeps running whether or not
+anyone's looking at it. To leave, detach with the prefix:
+
+```
+Ctrl-b d        # detach this client; the session (and its agent) keeps running
+```
+
+Detaching is always safe. The supervisor only ever *attaches* to these sessions;
+the agent inside lives independently, which is the whole point of running them in
+tmux — they survive a supervisor restart (`bun run --watch` reloads on every
+source edit) and a closed terminal alike. So when in doubt, `Ctrl-b d` and walk
+away rather than killing.
+
+### Kill a stuck session
+
+If a worker agent is wedged — spinning, ignoring input, or you just want to start
+it over — kill its session by name. This ends the `claude` inside it:
+
+```sh
+tmux -L powdermonkey kill-session -t pm-session-7   # kill worker for session 7
+```
+
+The clean way to retire a finished local session is the API
+(`POST $PM_URL/sessions/:id/land`), which kills the tmux session *and* tears down
+the worktree. Reach for a raw `kill-session` only when the server itself is
+unresponsive and you need to free the agent by hand.
+
+To restart the **server** specifically, kill its pane — the auto-restart loop is
+gone with it, so relaunch:
+
+```sh
+tmux -L powdermonkey kill-session -t pm-server   # stop the server + its restart loop
+bun run serve                                    # bring it back up (idempotent)
+```
+
+Nuke everything PM-managed in one shot (server, supervisor claude, all workers)
+without touching your own tmux:
+
+```sh
+tmux -L powdermonkey kill-server
+```
+
+### Find the supervisor pane
+
+There are **two** "supervisor" things, and which one you want depends on the
+symptom:
+
+- **The server console** lives in `pm-server`. Attach here when the UI is down,
+  the API isn't answering, or you want to read crash logs / watch the restart
+  backoff:
+
+  ```sh
+  tmux -L powdermonkey attach -t pm-server
+  ```
+
+- **The supervisor's own `claude`** (the agent you drive PowderMonkey from) lives
+  in `pm-session-0` — reserved id 0, so it never collides with a real task.
+  Attach here to pick the conversation back up after a restart or a closed
+  terminal:
+
+  ```sh
+  tmux -L powdermonkey attach -t pm-session-0
+  ```
+
+If `tmux -L powdermonkey ls` shows nothing at all, the socket's server isn't
+running — nothing is wedged, it's just down. Start it with `bun run serve` (or
+`bun run dev` for a foreground supervisor) and the sessions come back.
