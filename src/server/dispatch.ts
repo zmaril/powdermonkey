@@ -4,6 +4,7 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "./db.ts";
 import { pullMain } from "./git.ts";
 import { type Phase, type Session, type Task, phases, sessions, tasks } from "./schema.ts";
+import { linkSessionTasks } from "./session-tasks.ts";
 
 const SHELL = process.env.SHELL || "bash";
 
@@ -203,12 +204,13 @@ export async function dispatchTask(taskIds: number | number[]): Promise<Dispatch
   // live in one place and "active" can be derived uniformly from a live session.
   // No worktree/branch on this side: the cloud session works against main and opens
   // its own PR, so `url` (the session) is what we hold; branch arrives via the PR.
-  // Every dispatched task is marked dispatched and points at the one session; the
-  // session row carries the primary task id (a full session↔task join comes later).
+  // One session row, linked to every dispatched task via the session_tasks join, so
+  // each task surfaces the shared cloud run. Each task is also marked dispatched.
   const [session] = await db
     .insert(sessions)
-    .values({ kind: "remote", state: "running", taskId: primary, url: sessionUrl })
+    .values({ kind: "remote", state: "running", url: sessionUrl })
     .returning();
+  await linkSessionTasks(session.id, ids);
   await db
     .update(tasks)
     .set({ sessionUrl, status: "dispatched", sessionState: "running", updatedAt: new Date() })

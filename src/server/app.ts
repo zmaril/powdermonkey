@@ -17,6 +17,8 @@ import {
   startSupervisorPty,
   writeSessionPty,
 } from "./session-pty.ts";
+import { readSessionStatus } from "./session-status.ts";
+import { listSessionTasks } from "./session-tasks.ts";
 import { teleportTask } from "./teleport.ts";
 import { landSession, startLocalSession, stopSession } from "./worktree.ts";
 
@@ -162,6 +164,10 @@ export const app = new Elysia()
   // The watcher's latest PR state per task-linked PR (CI checks, mergeable, draft).
   // Live runtime data, not persisted — the Active panel reads it for status badges.
   .get("/cloud-prs", () => currentCloudPrs())
+  // Every session↔task link. The browser intersects these with the sessions it
+  // already holds to learn which tasks are active and which session each surfaces,
+  // so one flat list serves both the live panes and the archive view.
+  .get("/session-tasks", () => listSessionTasks())
   // Image upload from the web shell. The browser is remote, so a dropped image
   // has to land on the server filesystem first; we save it under data/uploads/
   // and return the absolute path, which the client then types into the PTY for

@@ -54,7 +54,7 @@ function ActiveRow({
       </Group>
       {(session || task.prUrl) && (
         <Group gap="xs" wrap="wrap" justify="flex-end" mt={6}>
-          {session && <SessionActions session={session} />}
+          {session && <SessionActions session={session} taskId={task.id} />}
           {task.prUrl && (
             <Anchor href={task.prUrl} target="_blank" size="sm" fw={500}>
               PR ↗

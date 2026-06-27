@@ -19,6 +19,7 @@ const { taskRepo, sessionRepo } = await import("../src/server/crud.ts");
 const { parseTeleportId, pickWorkerBranch, teleportTask } = await import(
   "../src/server/teleport.ts"
 );
+const { linkSessionTasks, taskIdsForSession } = await import("../src/server/session-tasks.ts");
 const { killSessionPty } = await import("../src/server/session-pty.ts");
 
 async function git(cwd: string, ...args: string[]): Promise<void> {
@@ -82,13 +83,13 @@ test("pickWorkerBranch prefers a descriptive slug and ignores look-alikes", () =
 
 test("teleport falls back to a fresh pm/task-<id> branch when nothing was pushed", async () => {
   const [task] = (await taskRepo.list()).sort((a, b) => a.id - b.id);
-  // Stand in for a dispatched cloud session.
+  // Stand in for a dispatched cloud session, linked to its task via the join.
   const remote = await sessionRepo.create({
     kind: "remote",
     state: "running",
-    taskId: task.id,
     url: "https://claude.ai/code/session_fallback1",
   });
+  await linkSessionTasks(remote.id, [task.id]);
   await taskRepo.update(task.id, {
     sessionUrl: "https://claude.ai/code/session_fallback1",
     sessionState: "running",
@@ -103,9 +104,11 @@ test("teleport falls back to a fresh pm/task-<id> branch when nothing was pushed
   expect(existsSync(result.session.worktreePath ?? "")).toBe(true);
   expect(result.session.kind).toBe("local");
 
-  // Remote session archived, replaced by the new local one.
+  // Remote session archived, replaced by the new local one — which is linked to
+  // the same task through the join.
   expect((await sessionRepo.get(remote.id))?.archivedAt).toBeTruthy();
   expect(await sessionRepo.get(result.session.id)).toBeTruthy();
+  expect(await taskIdsForSession(result.session.id)).toContain(task.id);
   // Task's remote runtime state cleared.
   expect((await taskRepo.get(task.id))?.sessionState).toBeNull();
 
@@ -127,12 +130,12 @@ test("teleport discovers and checks out the cloud worker's pushed branch", async
   await git(repoDir, "checkout", "main");
   await git(repoDir, "branch", "-D", branch);
 
-  await sessionRepo.create({
+  const remote = await sessionRepo.create({
     kind: "remote",
     state: "running",
-    taskId: task.id,
     url: "https://claude.ai/code/session_discovered1",
   });
+  await linkSessionTasks(remote.id, [task.id]);
   await taskRepo.update(task.id, {
     sessionUrl: "https://claude.ai/code/session_discovered1",
     status: "dispatched",

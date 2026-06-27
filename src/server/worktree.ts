@@ -6,6 +6,7 @@ import { loadTaskPrompt } from "./dispatch.ts";
 import { worktreeAdd, worktreeAddRemote, worktreeRemove } from "./git.ts";
 import { type Session, sessions, tasks } from "./schema.ts";
 import { killSessionPty, startSessionPty } from "./session-pty.ts";
+import { linkSessionTasks, taskIdsForSession } from "./session-tasks.ts";
 
 // A local session is the on-laptop mirror of `claude --remote`: an isolated git
 // worktree on `pm/task-<id>`, branched off main, where work happens without
@@ -87,12 +88,13 @@ export async function startLocalSession(
     : await worktreeAdd(worktreePath, branch, MAIN_BRANCH);
   if (!add.ok) return { ok: false, error: "git worktree add failed", output: add.output };
 
-  // One session row (carrying the primary task id) for all the tasks; each task is
-  // marked dispatched so the whole batch moves to Active together.
+  // One session row for all the tasks, linked through the session_tasks join; each
+  // task is marked dispatched so the whole batch moves to Active together.
   const [session] = await db
     .insert(sessions)
-    .values({ kind: "local", state: "running", taskId: primary, branch, worktreePath })
+    .values({ kind: "local", state: "running", branch, worktreePath })
     .returning();
+  await linkSessionTasks(session.id, ids);
   await db
     .update(tasks)
     .set({ status: "dispatched", updatedAt: new Date() })
@@ -177,9 +179,11 @@ export async function stopSession(sessionId: number): Promise<StopResult> {
     .where(eq(sessions.id, sessionId))
     .returning();
 
-  // Roll the task back to pending so it's dispatchable again, and clear the runtime
-  // session fields that pointed at this aborted run (a remote session set these).
-  if (session.taskId != null) {
+  // Roll every task this session was working back to pending so they're
+  // dispatchable again, and clear the runtime session fields that pointed at this
+  // aborted run (a remote session set these).
+  const taskIds = await taskIdsForSession(sessionId);
+  if (taskIds.length > 0) {
     await db
       .update(tasks)
       .set({
@@ -188,7 +192,7 @@ export async function stopSession(sessionId: number): Promise<StopResult> {
         sessionUrl: null,
         updatedAt: new Date(),
       })
-      .where(eq(tasks.id, session.taskId));
+      .where(inArray(tasks.id, taskIds));
   }
 
   return { ok: true, session: updated };

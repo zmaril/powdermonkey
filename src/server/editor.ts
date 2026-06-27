@@ -1,6 +1,7 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "./db.ts";
 import { sessions, tasks } from "./schema.ts";
+import { taskIdsForSession } from "./session-tasks.ts";
 
 // Open a session's work in VS Code on the operator's machine. The supervisor runs
 // locally, so it can spawn GUI apps directly. A `local` session opens its git
@@ -36,9 +37,13 @@ export async function openSessionEditor(sessionId: number): Promise<OpenEditorRe
     return { ok: true, target: session.worktreePath };
   }
 
-  // remote: open the task's PR in github.dev (web VS Code).
-  const [task] =
-    session.taskId != null ? await db.select().from(tasks).where(eq(tasks.id, session.taskId)) : [];
+  // remote: open the PR in github.dev (web VS Code). A session can cover several
+  // tasks; open the first linked task that has a PR.
+  const taskIds = await taskIdsForSession(sessionId);
+  const linked = taskIds.length
+    ? await db.select().from(tasks).where(inArray(tasks.id, taskIds))
+    : [];
+  const task = taskIds.map((id) => linked.find((t) => t.id === id)).find((t) => t?.prUrl);
   if (!task?.prUrl) return { ok: false, error: "no PR for this task yet" };
   const target = task.prUrl.replace("://github.com/", "://github.dev/");
   spawnDetached([urlOpener(), target]);

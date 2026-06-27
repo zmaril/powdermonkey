@@ -154,8 +154,10 @@ export function TaskBadges({
 /** Actions for a task that currently HAS a live session. A local session runs in a
  *  worktree, so it gets Shell + VS Code; a remote (cloud) session has neither — it
  *  lives on claude.ai, so it gets a link out to the session plus Teleport to pull
- *  it down. Both get Land / Stop. */
-export function SessionActions({ session }: { session: Session }) {
+ *  it down. Both get Land / Stop. `taskId` is the row's task — a session can cover
+ *  several, so teleport pulls down the one the operator clicked from (its whole
+ *  batch follows). */
+export function SessionActions({ session, taskId }: { session: Session; taskId: number }) {
   const { land, stop, teleport, openSessionTerminal, openEditor } = useStore();
   const isRemote = session.kind === "remote";
   return (
@@ -170,17 +172,15 @@ export function SessionActions({ session }: { session: Session }) {
               session ↗
             </Anchor>
           )}
-          {session.taskId != null && (
-            <Button
-              size="compact-xs"
-              variant="light"
-              color="grape"
-              title="Pull this cloud session down to a local worktree (claude --teleport)"
-              onClick={() => teleport(session.taskId as number)}
-            >
-              Teleport
-            </Button>
-          )}
+          <Button
+            size="compact-xs"
+            variant="light"
+            color="grape"
+            title="Pull this cloud session down to a local worktree (claude --teleport)"
+            onClick={() => teleport(taskId)}
+          >
+            Teleport
+          </Button>
         </>
       ) : (
         <>

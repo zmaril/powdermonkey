@@ -36,6 +36,13 @@
       "when": 1782603177338,
       "tag": "0004_mixed_starbolt",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1782603889487,
+      "tag": "0005_thick_nocturne",
+      "breakpoints": true
     }
   ]
 }
