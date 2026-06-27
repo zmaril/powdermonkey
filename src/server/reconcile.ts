@@ -27,7 +27,7 @@ export type ReconcileResult = {
 function parseIds(raw: string): number[] {
   return raw
     .split(/[\s,]+/)
-    .map((s) => Number(s))
+    .map(Number)
     .filter((n) => Number.isInteger(n) && n > 0);
 }
 
