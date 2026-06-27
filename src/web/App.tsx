@@ -40,6 +40,7 @@ const SESSION_BADGE: Record<SessionState, { label: string; color: string }> = {
   running: { label: "running", color: "blue" },
   waiting: { label: "Try Again", color: "yellow" },
   idle: { label: "idle", color: "gray" },
+  stopped: { label: "stopped", color: "red" },
 };
 
 const byPosition = <T extends { position: number }>(a: T, b: T) => a.position - b.position;
@@ -85,7 +86,7 @@ function PhaseList({ phases }: { phases: Phase[] }) {
 }
 
 function TaskCard({ task, phases, session }: { task: Task; phases: Phase[]; session?: Session }) {
-  const { startLocal, dispatch, land, openSessionTerminal, openEditor } = useStore();
+  const { startLocal, dispatch, land, stop, openSessionTerminal, openEditor } = useStore();
   return (
     <Card withBorder radius="md" padding="sm">
       <Group justify="space-between" wrap="nowrap" mb={6}>
@@ -148,6 +149,22 @@ function TaskCard({ task, phases, session }: { task: Task; phases: Phase[]; sess
                 onClick={() => land(session.id)}
               >
                 Land
+              </Button>
+              <Button
+                size="compact-xs"
+                variant="light"
+                color="red"
+                title="Abort this session — kills the agent and re-pends the task"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "Stop this session? The agent is killed, its worktree discarded, and the task returns to pending.",
+                    )
+                  )
+                    stop(session.id);
+                }}
+              >
+                Stop
               </Button>
             </>
           ) : (
