@@ -2,7 +2,7 @@ import { Badge, Box, Group, SegmentedControl, Stack, Text, Title } from "@mantin
 import { useEffect, useState } from "react";
 import type { Goal, Milestone, Task } from "../server/schema.ts";
 import { type Indexes, useArchiveData } from "./plan-data.ts";
-import { ProgressPill, STATUS_COLOR, TaskLinks } from "./plan-ui.tsx";
+import { STATUS_COLOR, TaskLinks } from "./plan-ui.tsx";
 import { useStore } from "./store.ts";
 
 // The Archive pane is the book of work — everything finished (merged) or archived.
@@ -14,16 +14,7 @@ import { useStore } from "./store.ts";
 type View = "flat" | "grouped";
 
 /** One read-only archived/finished task row. */
-function ArchiveRow({
-  task,
-  idx,
-  context,
-}: {
-  task: Task;
-  idx: Indexes;
-  context?: string;
-}) {
-  const phases = idx.phasesByTask.get(task.id) ?? [];
+function ArchiveRow({ task, context }: { task: Task; context?: string }) {
   const archived = task.archivedAt != null;
   return (
     <Group
@@ -46,7 +37,6 @@ function ArchiveRow({
           </Text>
         )}
       </Box>
-      <ProgressPill phases={phases} />
       <Badge size="sm" variant="light" color={archived ? "gray" : STATUS_COLOR[task.status]}>
         {archived ? "archived" : task.status}
       </Badge>
@@ -64,7 +54,7 @@ function FlatView({ tasks, idx }: { tasks: Task[]; idx: Indexes }) {
         const m = idx.milestoneById.get(t.milestoneId);
         const g = m ? idx.goalById.get(m.goalId) : undefined;
         const context = [g?.title, m?.title].filter(Boolean).join(" › ");
-        return <ArchiveRow key={t.id} task={t} idx={idx} context={context} />;
+        return <ArchiveRow key={t.id} task={t} context={context} />;
       })}
     </Stack>
   );
@@ -92,7 +82,7 @@ function GroupedView({ tasks, idx }: { tasks: Task[]; idx: Indexes }) {
           </Title>
           <Stack gap={0}>
             {ts.map((t) => (
-              <ArchiveRow key={t.id} task={t} idx={idx} />
+              <ArchiveRow key={t.id} task={t} />
             ))}
           </Stack>
         </Box>

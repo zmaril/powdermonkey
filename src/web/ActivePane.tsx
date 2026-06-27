@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { Goal, Milestone, Task } from "../server/schema.ts";
 import { partitionTasks } from "./active.ts";
 import { type Indexes, usePlanData } from "./plan-data.ts";
-import { ProgressPill, SessionActions, TaskBadges } from "./plan-ui.tsx";
+import { SessionActions, TaskBadges } from "./plan-ui.tsx";
 
 // The Active pane is the live monitor — every task with a session running right
 // now (the derived-active set; see active.ts). Two views, toggled:
@@ -14,8 +14,11 @@ import { ProgressPill, SessionActions, TaskBadges } from "./plan-ui.tsx";
 
 type View = "flat" | "grouped";
 
-/** One dense active-task row. `context` shows the goal › milestone trail in the
- *  flat view (redundant under headings in the grouped view, so it's omitted). */
+/** One active-task row. Two lines so nothing clips in a narrow pane: line 1 is
+ *  the identity + status (icon · title/context · progress · badges), line 2 is the
+ *  action cluster (branch · Shell · VS Code · Land · Stop), which wraps rather than
+ *  overflow. `context` shows the goal › milestone trail in the flat view (redundant
+ *  under headings in the grouped view, so it's omitted there). */
 function ActiveRow({
   task,
   idx,
@@ -26,32 +29,30 @@ function ActiveRow({
   context?: string;
 }) {
   const session = idx.sessionByTask.get(task.id);
-  const phases = idx.phasesByTask.get(task.id) ?? [];
   return (
-    <Group
-      gap="sm"
-      wrap="nowrap"
-      px="sm"
-      py={6}
-      style={{ borderBottom: "1px solid #2c2e33", minHeight: 38 }}
-    >
-      <Text size="sm" title={session?.kind}>
-        {session?.kind === "remote" ? "☁️" : "💻"}
-      </Text>
-      <Box style={{ flex: 1, minWidth: 0 }}>
-        <Text size="sm" fw={500} truncate>
-          {task.title}
+    <Box px="sm" py={8} style={{ borderBottom: "1px solid #2c2e33" }}>
+      <Group gap="sm" wrap="nowrap" align="flex-start">
+        <Text size="sm" title={session?.kind}>
+          {session?.kind === "remote" ? "☁️" : "💻"}
         </Text>
-        {context && (
-          <Text size="xs" c="dimmed" truncate>
-            {context}
+        <Box style={{ flex: 1, minWidth: 0 }}>
+          <Text size="sm" fw={500} truncate>
+            {task.title}
           </Text>
-        )}
-      </Box>
-      <ProgressPill phases={phases} />
-      <TaskBadges task={task} session={session} />
-      {session && <SessionActions session={session} />}
-    </Group>
+          {context && (
+            <Text size="xs" c="dimmed" truncate>
+              {context}
+            </Text>
+          )}
+        </Box>
+        <TaskBadges task={task} session={session} />
+      </Group>
+      {session && (
+        <Group gap="xs" wrap="wrap" justify="flex-end" mt={6}>
+          <SessionActions session={session} />
+        </Group>
+      )}
+    </Box>
   );
 }
 
