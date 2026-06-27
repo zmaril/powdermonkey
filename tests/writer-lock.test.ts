@@ -2,11 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  WriterLockError,
-  acquireWriterLock,
-  lockPathFor,
-} from "../src/server/writer-lock.ts";
+import { WriterLockError, acquireWriterLock, lockPathFor } from "../src/server/writer-lock.ts";
 
 function freshDataDir(): string {
   return join(mkdtempSync(join(tmpdir(), "pm-lock-")), "pg");

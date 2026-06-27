@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "./db.ts";
 import { loadTaskPrompt } from "./dispatch.ts";
 import { worktreeAdd, worktreeAddRemote, worktreeRemove } from "./git.ts";
@@ -68,15 +68,18 @@ export type StartLocalResult =
   | { ok: false; error: string; output?: string };
 
 export async function startLocalSession(
-  taskId: number,
+  taskIds: number | number[],
   opts: StartLocalOpts = {},
 ): Promise<StartLocalResult> {
-  const built = await loadTaskPrompt(taskId);
-  if (!built) return { ok: false, error: `unknown task "${taskId}"` };
+  const built = await loadTaskPrompt(taskIds);
+  if (!built) return { ok: false, error: `unknown task "${[taskIds].flat().join(", ")}"` };
   const { prompt, trailers } = built;
+  const ids = built.tasks.map((t) => t.id);
+  const primary = ids[0];
 
-  const branch = opts.branch ?? `pm/task-${taskId}`;
-  const worktreePath = worktreePathFor(taskId);
+  // One worktree + branch for all selected tasks, named after the primary task.
+  const branch = opts.branch ?? `pm/task-${primary}`;
+  const worktreePath = worktreePathFor(primary);
   mkdirSync(worktreeBase(), { recursive: true });
 
   const add = opts.fetchRemote
@@ -84,14 +87,16 @@ export async function startLocalSession(
     : await worktreeAdd(worktreePath, branch, MAIN_BRANCH);
   if (!add.ok) return { ok: false, error: "git worktree add failed", output: add.output };
 
+  // One session row (carrying the primary task id) for all the tasks; each task is
+  // marked dispatched so the whole batch moves to Active together.
   const [session] = await db
     .insert(sessions)
-    .values({ kind: "local", state: "running", taskId, branch, worktreePath })
+    .values({ kind: "local", state: "running", taskId: primary, branch, worktreePath })
     .returning();
   await db
     .update(tasks)
     .set({ status: "dispatched", updatedAt: new Date() })
-    .where(eq(tasks.id, taskId));
+    .where(inArray(tasks.id, ids));
 
   // Stash the prompt where the startup command can reach it, then bring up the
   // session's persistent interactive PTY in the worktree. Clients attach to this

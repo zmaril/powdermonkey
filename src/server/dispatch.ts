@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "./db.ts";
 import { pullMain } from "./git.ts";
 import { type Phase, type Session, type Task, phases, sessions, tasks } from "./schema.ts";
@@ -164,9 +164,15 @@ export type DispatchResult =
   | { ok: true; sessionUrl: string; session: Session }
   | { ok: false; error: string; output?: string };
 
-export async function dispatchTask(taskId: number): Promise<DispatchResult> {
-  const built = await loadTaskPrompt(taskId);
-  if (!built) return { ok: false, error: `unknown task "${taskId}"` };
+/** Dispatch one or more tasks as a SINGLE `claude --remote` session against main.
+ *  All selected tasks share the one cloud run (the combined brief lists each), and
+ *  each surfaces that session. The first task is the "primary" — it names the
+ *  prompt file and the dry-run URL. */
+export async function dispatchTask(taskIds: number | number[]): Promise<DispatchResult> {
+  const built = await loadTaskPrompt(taskIds);
+  if (!built) return { ok: false, error: `unknown task "${[taskIds].flat().join(", ")}"` };
+  const ids = built.tasks.map((t) => t.id);
+  const primary = ids[0];
 
   // Know the repo's current state before dispatching. A non-ff pull is logged
   // but not fatal — dispatch still execs against main in the cloud.
@@ -177,13 +183,13 @@ export async function dispatchTask(taskId: number): Promise<DispatchResult> {
   let output: string;
 
   if (process.env.PM_DISPATCH_DRY_RUN) {
-    output = `Created cloud session\nView: https://claude.ai/code/dry-run-${taskId}`;
+    output = `Created cloud session\nView: https://claude.ai/code/dry-run-${primary}`;
   } else {
     // Stash the prompt in a file so a multi-line prompt never has to survive shell
     // quoting, then run the dispatch command in a PTY (claude needs a TTY).
     const dir = join(repoDir(), "data", "prompts");
     mkdirSync(dir, { recursive: true });
-    const promptPath = join(dir, `dispatch-${taskId}.md`);
+    const promptPath = join(dir, `dispatch-${primary}.md`);
     writeFileSync(promptPath, `${prompt}\n`);
     const { code, output: out } = await runInPty(dispatchCmd(promptPath));
     output = out;
@@ -197,14 +203,16 @@ export async function dispatchTask(taskId: number): Promise<DispatchResult> {
   // live in one place and "active" can be derived uniformly from a live session.
   // No worktree/branch on this side: the cloud session works against main and opens
   // its own PR, so `url` (the session) is what we hold; branch arrives via the PR.
+  // Every dispatched task is marked dispatched and points at the one session; the
+  // session row carries the primary task id (a full session↔task join comes later).
   const [session] = await db
     .insert(sessions)
-    .values({ kind: "remote", state: "running", taskId, url: sessionUrl })
+    .values({ kind: "remote", state: "running", taskId: primary, url: sessionUrl })
     .returning();
   await db
     .update(tasks)
     .set({ sessionUrl, status: "dispatched", sessionState: "running", updatedAt: new Date() })
-    .where(eq(tasks.id, taskId));
+    .where(inArray(tasks.id, ids));
 
   return { ok: true, sessionUrl, session };
 }

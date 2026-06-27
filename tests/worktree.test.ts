@@ -18,9 +18,7 @@ process.env.PM_SESSION_CMD = "";
 const { ready } = await import("../src/server/db.ts");
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
 const { taskRepo, sessionRepo } = await import("../src/server/crud.ts");
-const { startLocalSession, landSession, stopSession } = await import(
-  "../src/server/worktree.ts"
-);
+const { startLocalSession, landSession, stopSession } = await import("../src/server/worktree.ts");
 
 async function git(...args: string[]): Promise<void> {
   const proc = Bun.spawn(["git", ...args], {
@@ -47,7 +45,15 @@ beforeAll(async () => {
       goals: [
         {
           title: "G",
-          milestones: [{ title: "m", tasks: [{ title: "t", phases: [{ name: "x" }] }] }],
+          milestones: [
+            {
+              title: "m",
+              tasks: [
+                { title: "t", phases: [{ name: "x" }] },
+                { title: "t2", phases: [{ name: "y" }] },
+              ],
+            },
+          ],
         },
       ],
     }),
@@ -82,6 +88,31 @@ test("land tears down the worktree and archives the session", async () => {
   // archived → excluded from default list
   expect((await sessionRepo.list()).some((s) => s.id === session.id)).toBe(false);
   expect((await sessionRepo.get(session.id))?.archivedAt).toBeTruthy();
+});
+
+test("start-local with several task ids starts ONE session for all of them", async () => {
+  const all = (await taskRepo.list()).sort((a, b) => a.id - b.id);
+  const ids = all.map((t) => t.id);
+
+  const result = await startLocalSession(ids);
+  if (!result.ok) throw new Error(result.error);
+
+  // One worktree/branch, named after the primary (first) task.
+  expect(result.branch).toBe(`pm/task-${ids[0]}`);
+  expect(result.session.kind).toBe("local");
+  // The brief covers every task; trailers span all their phases.
+  expect(result.prompt).toContain("t2");
+  expect(result.trailers).toHaveLength(2);
+
+  // Every selected task moved off pending — they all surface the shared session.
+  for (const id of ids) {
+    expect((await taskRepo.get(id))?.status).toBe("dispatched");
+  }
+  // Exactly one session row was created for the batch.
+  const live = (await sessionRepo.list()).filter((s) => s.kind === "local");
+  expect(live).toHaveLength(1);
+
+  await landSession(result.session.id);
 });
 
 test("stop aborts a session without a clean worktree and re-pends the task", async () => {
