@@ -1,7 +1,15 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "./db.ts";
 import { pullMain } from "./git.ts";
-import { type Phase, type Task, phases, tasks } from "./schema.ts";
+import { type Phase, type Session, type Task, phases, sessions, tasks } from "./schema.ts";
+
+const SHELL = process.env.SHELL || "bash";
+
+function repoDir(): string {
+  return process.env.PM_REPO_DIR ?? process.cwd();
+}
 
 // Dispatches a Task as a `claude --remote` session against main.
 //
@@ -60,20 +68,51 @@ export async function loadTaskPrompt(
   return buildTaskPrompt(task, taskPhases);
 }
 
-/** Default argv. Override the leading args with PM_DISPATCH_CMD (space-split). */
-function dispatchArgv(prompt: string): string[] {
-  const base = (process.env.PM_DISPATCH_CMD ?? "claude --remote -p").split(/\s+/).filter(Boolean);
-  return [...base, prompt];
+/** The dispatch command, with the prompt sourced from a file so a multi-line
+ *  prompt never has to be shell-quoted. `{prompt_file}` is replaced with the path.
+ *  NB: `claude --remote` (cloud) is interactive-only and rejects `--print`/`-p`;
+ *  run without it and it creates the session, prints a `View:` URL, and exits. */
+function dispatchCmd(promptPath: string): string {
+  const tmpl = process.env.PM_DISPATCH_CMD ?? `claude --remote "$(cat {prompt_file})"`;
+  return tmpl.replaceAll("{prompt_file}", promptPath);
 }
 
-/** Pull the first URL out of the command output. The session lives at that URL. */
+/** Run a command in a PTY and collect its output until it exits. `claude` needs a
+ *  TTY: spawned with plain pipes it falls back to a bundled `cli.js` under whatever
+ *  `node` is on PATH (which may be an unsupported version that crashes on startup).
+ *  Given a real terminal it uses its own runtime — same as an interactive shell.
+ *  We run through a login shell so PATH/profile resolve `claude`, and DON'T fall
+ *  through to an interactive shell, so the process exits once the command returns. */
+function runInPty(launch: string): Promise<{ code: number; output: string }> {
+  let buf = "";
+  const options = {
+    cwd: repoDir(),
+    env: { ...process.env, TERM: "xterm-256color" },
+    terminal: {
+      cols: 120,
+      rows: 40,
+      data(_t: unknown, d: unknown) {
+        buf += typeof d === "string" ? d : new TextDecoder().decode(d as Uint8Array);
+      },
+    },
+    // biome-ignore lint/suspicious/noExplicitAny: native PTY option not typed yet.
+  } as any;
+  const proc = Bun.spawn([SHELL, "-l", "-c", launch], options);
+  return proc.exited.then((code: number) => ({ code, output: buf }));
+}
+
+/** Pull the first URL out of the command output. The session lives at that URL.
+ *  Strips ANSI control sequences first (PTY output is full of them) and stops the
+ *  match at quote/escape chars so a trailing reset code can't get glued on. */
 export function parseSessionUrl(output: string): string | null {
-  const m = output.match(/https?:\/\/\S+/);
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes.
+  const clean = output.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
+  const m = clean.match(/https?:\/\/[^\s"'\\]+/);
   return m ? m[0] : null;
 }
 
 export type DispatchResult =
-  | { ok: true; sessionUrl: string }
+  | { ok: true; sessionUrl: string; session: Session }
   | { ok: false; error: string; output?: string };
 
 export async function dispatchTask(taskId: number): Promise<DispatchResult> {
@@ -89,29 +128,34 @@ export async function dispatchTask(taskId: number): Promise<DispatchResult> {
   let output: string;
 
   if (process.env.PM_DISPATCH_DRY_RUN) {
-    output = `https://claude.ai/code/dry-run-${taskId}`;
+    output = `Created cloud session\nView: https://claude.ai/code/dry-run-${taskId}`;
   } else {
-    const proc = Bun.spawn(dispatchArgv(prompt), {
-      cwd: process.env.PM_REPO_DIR ?? process.cwd(),
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [out, err] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    const code = await proc.exited;
-    output = (out + err).trim();
+    // Stash the prompt in a file so a multi-line prompt never has to survive shell
+    // quoting, then run the dispatch command in a PTY (claude needs a TTY).
+    const dir = join(repoDir(), "data", "prompts");
+    mkdirSync(dir, { recursive: true });
+    const promptPath = join(dir, `dispatch-${taskId}.md`);
+    writeFileSync(promptPath, `${prompt}\n`);
+    const { code, output: out } = await runInPty(dispatchCmd(promptPath));
+    output = out;
     if (code !== 0) return { ok: false, error: `dispatch exited ${code}`, output };
   }
 
   const sessionUrl = parseSessionUrl(output);
   if (!sessionUrl) return { ok: false, error: "no session URL in output", output };
 
+  // A remote session gets a sessions row too — same as a local one — so both kinds
+  // live in one place and "active" can be derived uniformly from a live session.
+  // No worktree/branch on this side: the cloud session works against main and opens
+  // its own PR, so `url` (the session) is what we hold; branch arrives via the PR.
+  const [session] = await db
+    .insert(sessions)
+    .values({ kind: "remote", state: "running", taskId, url: sessionUrl })
+    .returning();
   await db
     .update(tasks)
     .set({ sessionUrl, status: "dispatched", sessionState: "running", updatedAt: new Date() })
     .where(eq(tasks.id, taskId));
 
-  return { ok: true, sessionUrl };
+  return { ok: true, sessionUrl, session };
 }
