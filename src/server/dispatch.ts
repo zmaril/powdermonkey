@@ -15,17 +15,49 @@ import { type Phase, type Task, phases, tasks } from "./schema.ts";
 // │ (pull → spawn → parse → persist) without touching the cloud.             │
 // └──────────────────────────────────────────────────────────────────────────┘
 
-/** Build the prompt the remote session runs: do the task, open a PR. */
-export function taskPrompt(task: Task, taskPhases: Phase[]): string {
+/** Build the full worker prompt + per-phase trailer lines for a task. Shared by
+ *  start-local and dispatch so a worker — local or remote — gets identical
+ *  instructions and the same PM-Phase trailers to stamp finished phases with;
+ *  reconciliation reads those trailers back once the branch lands on main. */
+export function buildTaskPrompt(
+  task: Task,
+  taskPhases: Phase[],
+): { prompt: string; trailers: string[] } {
   const phaseLines = taskPhases.map((p) => `- ${p.name}`).join("\n");
-  return [
+  // Per-phase trailer lines so each finished phase can stamp its commit.
+  const trailers = taskPhases.map((p) => `PM-Phase: ${p.id}   # ${p.name}`);
+  const prompt = [
     `Task: ${task.title}`,
     "",
     "Phases:",
     phaseLines,
     "",
     "Work against main and open a pull request when done.",
+    "",
+    "Follow the `powdermonkey` skill. As you finish each phase, add its trailer to",
+    "the commit that completes it (progress is read off these once they land on main):",
+    ...trailers,
   ].join("\n");
+  return { prompt, trailers };
+}
+
+/** Fetch a task + its live (non-archived, ordered) phases and build the prompt
+ *  and trailers. Returns null when the task doesn't exist. The single place that
+ *  loads a task's phases for prompting — start-local, dispatch and the
+ *  `GET /tasks/:id/prompt` route all go through here. */
+export async function loadTaskPrompt(
+  taskId: number,
+): Promise<{ prompt: string; trailers: string[] } | null> {
+  const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId));
+  if (!task) return null;
+
+  const taskPhases = await db
+    .select()
+    .from(phases)
+    .where(and(eq(phases.taskId, taskId), isNull(phases.archivedAt)))
+    .orderBy(asc(phases.position));
+
+  return buildTaskPrompt(task, taskPhases);
 }
 
 /** Default argv. Override the leading args with PM_DISPATCH_CMD (space-split). */
@@ -45,21 +77,15 @@ export type DispatchResult =
   | { ok: false; error: string; output?: string };
 
 export async function dispatchTask(taskId: number): Promise<DispatchResult> {
-  const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId));
-  if (!task) return { ok: false, error: `unknown task "${taskId}"` };
-
-  const taskPhases = await db
-    .select()
-    .from(phases)
-    .where(and(eq(phases.taskId, taskId), isNull(phases.archivedAt)))
-    .orderBy(asc(phases.position));
+  const built = await loadTaskPrompt(taskId);
+  if (!built) return { ok: false, error: `unknown task "${taskId}"` };
 
   // Know the repo's current state before dispatching. A non-ff pull is logged
   // but not fatal — dispatch still execs against main in the cloud.
   const pull = await pullMain();
   if (!pull.ok) console.warn(`git pull (non-fatal): ${pull.output}`);
 
-  const prompt = taskPrompt(task, taskPhases);
+  const { prompt } = built;
   let output: string;
 
   if (process.env.PM_DISPATCH_DRY_RUN) {

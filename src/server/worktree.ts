@@ -1,10 +1,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "./db.ts";
-import { taskPrompt } from "./dispatch.ts";
+import { loadTaskPrompt } from "./dispatch.ts";
 import { worktreeAdd, worktreeRemove } from "./git.ts";
-import { type Session, phases, sessions, tasks } from "./schema.ts";
+import { type Session, sessions, tasks } from "./schema.ts";
 import { killSessionPty, startSessionPty } from "./session-pty.ts";
 
 // A local session is the on-laptop mirror of `claude --remote`: an isolated git
@@ -49,14 +49,9 @@ export type StartLocalResult =
   | { ok: false; error: string; output?: string };
 
 export async function startLocalSession(taskId: number): Promise<StartLocalResult> {
-  const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId));
-  if (!task) return { ok: false, error: `unknown task "${taskId}"` };
-
-  const taskPhases = await db
-    .select()
-    .from(phases)
-    .where(and(eq(phases.taskId, taskId), isNull(phases.archivedAt)))
-    .orderBy(asc(phases.position));
+  const built = await loadTaskPrompt(taskId);
+  if (!built) return { ok: false, error: `unknown task "${taskId}"` };
+  const { prompt, trailers } = built;
 
   const branch = `pm/task-${taskId}`;
   const worktreePath = join(worktreeBase(), `task-${taskId}`);
@@ -73,17 +68,6 @@ export async function startLocalSession(taskId: number): Promise<StartLocalResul
     .update(tasks)
     .set({ status: "dispatched", updatedAt: new Date() })
     .where(eq(tasks.id, taskId));
-
-  // Hand over the per-phase trailer lines so each finished phase can stamp its
-  // commit; reconciliation reads these back once the branch lands on main.
-  const trailers = taskPhases.map((p) => `PM-Phase: ${p.id}   # ${p.name}`);
-  const prompt = [
-    taskPrompt(task, taskPhases),
-    "",
-    "Follow the `powdermonkey` skill. As you finish each phase, add its trailer to",
-    "the commit that completes it (progress is read off these once they land on main):",
-    ...trailers,
-  ].join("\n");
 
   // Stash the prompt where the startup command can reach it, then bring up the
   // session's persistent interactive PTY in the worktree. Clients attach to this
