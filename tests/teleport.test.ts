@@ -16,7 +16,7 @@ process.env.PM_TMUX_SOCKET = `pm-test-${process.pid}`;
 const { ready } = await import("../src/server/db.ts");
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
 const { taskRepo, sessionRepo } = await import("../src/server/crud.ts");
-const { parseTeleportId, pickWorkerBranch, findFreePort, teleportTask } = await import(
+const { parseTeleportId, pickWorkerBranch, teleportTask } = await import(
   "../src/server/teleport.ts"
 );
 const { killSessionPty } = await import("../src/server/session-pty.ts");
@@ -80,11 +80,6 @@ test("pickWorkerBranch prefers a descriptive slug and ignores look-alikes", () =
   expect(pickWorkerBranch([], 12)).toBeNull();
 });
 
-test("findFreePort returns a bindable port at or above the base", async () => {
-  const p = await findFreePort(4600);
-  expect(p).toBeGreaterThanOrEqual(4600);
-});
-
 test("teleport falls back to a fresh pm/task-<id> branch when nothing was pushed", async () => {
   const [task] = (await taskRepo.list()).sort((a, b) => a.id - b.id);
   // Stand in for a dispatched cloud session.
@@ -105,7 +100,6 @@ test("teleport falls back to a fresh pm/task-<id> branch when nothing was pushed
 
   expect(result.branch).toBe(`pm/task-${task.id}`);
   expect(result.teleportId).toBe("session_fallback1");
-  expect(result.port).toBeGreaterThanOrEqual(4600);
   expect(existsSync(result.session.worktreePath ?? "")).toBe(true);
   expect(result.session.kind).toBe("local");
 

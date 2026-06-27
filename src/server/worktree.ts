@@ -19,10 +19,8 @@ function worktreeBase(): string {
   return process.env.PM_WORKTREE_DIR ?? join(repo, "..", "pm-worktrees");
 }
 
-/** The on-disk worktree path a task's local session lives in. Exposed so the
- *  teleport flow can derive the same path (and a data dir under it) before the
- *  session is created. */
-export function worktreePathFor(taskId: number): string {
+/** The on-disk worktree path a task's local session lives in. */
+function worktreePathFor(taskId: number): string {
   return join(worktreeBase(), `task-${taskId}`);
 }
 
@@ -46,8 +44,8 @@ function sessionStartup(promptPath: string, override?: string): string {
 
 /** Overrides for a non-default local session. Plain `start-local` passes none and
  *  gets a fresh `pm/task-<id>` branch off main running the task prompt. Teleport
- *  passes a discovered cloud branch (fetched from the remote), a `claude --teleport`
- *  startup, and env so the worktree's dev server runs isolated. */
+ *  passes a discovered cloud branch (fetched from the remote) and a
+ *  `claude --teleport` startup. */
 export type StartLocalOpts = {
   // Branch to check out (default `pm/task-<id>`).
   branch?: string;
@@ -56,8 +54,6 @@ export type StartLocalOpts = {
   fetchRemote?: boolean;
   // Startup command template (overrides PM_SESSION_CMD); `{prompt_file}` is replaced.
   startup?: string;
-  // Extra env exported into the session shell (e.g. PORT, PM_DATA_DIR).
-  env?: Record<string, string>;
 };
 
 export type StartLocalResult =
@@ -103,7 +99,7 @@ export async function startLocalSession(
   mkdirSync(promptDir(), { recursive: true });
   const promptPath = join(promptDir(), `session-${session.id}.md`);
   writeFileSync(promptPath, `${prompt}\n`);
-  startSessionPty(session.id, worktreePath, sessionStartup(promptPath, opts.startup), opts.env);
+  startSessionPty(session.id, worktreePath, sessionStartup(promptPath, opts.startup));
 
   return { ok: true, session, worktreePath, branch, prompt, trailers };
 }
