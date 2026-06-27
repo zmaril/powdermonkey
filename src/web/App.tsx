@@ -30,6 +30,14 @@ function ScratchPad() {
   const [body, setBody] = useState("");
   const [saved, setSaved] = useState(true);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The server value we're synced with. We only adopt an incoming change when the
+  // local draft still equals this — i.e. there are no unsaved keystrokes to lose.
+  const serverBody = useRef("");
+  // The scratch note as the 4s poll keeps it in the store. Watching it lets
+  // out-of-band edits (another tab, or the supervisor editing @notes) show up here.
+  const storeBody = useStore((s) =>
+    id == null ? undefined : s.notes.find((n) => n.id === id)?.body,
+  );
 
   useEffect(() => {
     let active = true;
@@ -37,6 +45,7 @@ function ScratchPad() {
       if (!active || !note) return;
       setId(note.id);
       setBody(note.body);
+      serverBody.current = note.body;
     });
     return () => {
       active = false;
@@ -44,13 +53,25 @@ function ScratchPad() {
     };
   }, [ensureScratch]);
 
+  // Adopt a server-side change (poll / out-of-band CRUD) only when nothing local
+  // is pending — if the draft has diverged, the operator is mid-edit; don't clobber.
+  useEffect(() => {
+    if (storeBody != null && storeBody !== body && body === serverBody.current) {
+      setBody(storeBody);
+      serverBody.current = storeBody;
+    }
+  }, [storeBody, body]);
+
   const onChange = (next: string) => {
     setBody(next);
     if (id == null) return;
     setSaved(false);
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
-      saveNote(id, { body: next }).then(() => setSaved(true));
+      saveNote(id, { body: next }).then(() => {
+        serverBody.current = next;
+        setSaved(true);
+      });
     }, 500);
   };
 
