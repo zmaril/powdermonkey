@@ -9,14 +9,16 @@ import {
 } from "dockview-react";
 import { useEffect, useRef, useState } from "react";
 import { ActivePane } from "./ActivePane.tsx";
+import { ArchivePane } from "./ArchivePane.tsx";
 import { BacklogPane } from "./BacklogPane.tsx";
 import { ShellTerminal } from "./ShellTerminal.tsx";
 import { useStore } from "./store.ts";
 
-// The single pane of glass. The plan is split into two panels — a live ACTIVE
-// monitor and a launchpad BACKLOG editor — alongside the scratchpad and the
-// supervisor shell. One poll (here) keeps every panel's store-derived view fresh;
-// the panes themselves are pure derivations off that store (see plan-data.ts).
+// The single pane of glass. The plan is split into three panels — a live ACTIVE
+// monitor, a launchpad BACKLOG editor, and the ARCHIVE book of work — alongside
+// the scratchpad and the supervisor shell. One poll (here) keeps the live panels'
+// store-derived views fresh (Archive runs its own slower poll for archived rows);
+// the panes themselves are pure derivations off the store (see plan-data.ts).
 
 // The scratchpad: one note, one big textarea. Holds its own draft state seeded
 // once from the server so the 4s background poll can't clobber what you're typing;
@@ -106,6 +108,10 @@ function BacklogPanel() {
   return <BacklogPane />;
 }
 
+function ArchivePanel() {
+  return <ArchivePane />;
+}
+
 function ScratchPanel() {
   return <ScratchPad />;
 }
@@ -114,6 +120,7 @@ const dockComponents = {
   shell: ShellPanel,
   active: ActivePanel,
   backlog: BacklogPanel,
+  archive: ArchivePanel,
   scratch: ScratchPanel,
 };
 
@@ -170,13 +177,19 @@ export function App() {
 
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;
-    // Layout: Active + Backlog as two tabs in the main (right) group; the left
-    // column is the scratchpad over the supervisor shell.
+    // Layout: Active + Backlog + Archive as tabs in the main (right) group; the
+    // left column is the scratchpad over the supervisor shell.
     const active = event.api.addPanel({ id: "active", component: "active", title: "Active" });
     event.api.addPanel({
       id: "backlog",
       component: "backlog",
       title: "Backlog",
+      position: { direction: "within", referencePanel: "active" },
+    });
+    event.api.addPanel({
+      id: "archive",
+      component: "archive",
+      title: "Archive",
       position: { direction: "within", referencePanel: "active" },
     });
     event.api.addPanel({

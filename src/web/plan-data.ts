@@ -25,7 +25,7 @@ export function phasesUnder(tasks: Task[], idx: Indexes): Phase[] {
   return tasks.flatMap((t) => idx.phasesByTask.get(t.id) ?? []);
 }
 
-function buildIndexes(
+export function buildIndexes(
   goals: Goal[],
   milestones: Milestone[],
   tasks: Task[],
@@ -97,4 +97,27 @@ export function usePlanData(): PlanData {
   const activeIds = useMemo(() => activeTaskIds(sessions), [sessions]);
 
   return { idx, activeIds, loading, error };
+}
+
+/** Derivation off the archive slice (live + archived rows). `tasks` is the book of
+ *  work: everything finished (merged) or archived. Indexes cover the full
+ *  hierarchy so a task under an archived goal/milestone still resolves context. */
+export function useArchiveData(): { idx: Indexes; tasks: Task[] } {
+  const archive = useStore((s) => s.archive);
+  const idx = useMemo(
+    () =>
+      buildIndexes(
+        archive.goals,
+        archive.milestones,
+        archive.tasks,
+        archive.phases,
+        archive.sessions,
+      ),
+    [archive],
+  );
+  const tasks = useMemo(
+    () => archive.tasks.filter((t) => t.archivedAt != null || t.status === "merged"),
+    [archive.tasks],
+  );
+  return { idx, tasks };
 }
