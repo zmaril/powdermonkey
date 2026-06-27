@@ -48,6 +48,7 @@ type State = {
   // The scratchpad is a single note. Returns it, creating the row on first use.
   ensureScratch: () => Promise<Note | null>;
   saveNote: (id: number, values: { title?: string; body?: string }) => Promise<void>;
+  toggleStar: (taskId: number, starred: boolean) => Promise<void>;
   startLocal: (taskId: number) => Promise<void>;
   dispatch: (taskId: number) => Promise<void>;
   teleport: (taskId: number) => Promise<void>;
@@ -195,6 +196,16 @@ export const useStore = create<State>((set, get) => ({
         sessions: (sessions.data ?? []) as Session[],
       },
     });
+  },
+  toggleStar: async (taskId, starred) => {
+    // Optimistic: flip it locally so the row re-sorts instantly, then PATCH. The
+    // panes derive their order off store.tasks, so this re-sorts on the spot.
+    set((s) => ({ tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, starred } : t)) }));
+    const { error } = await api.tasks({ id: taskId }).patch({ starred });
+    if (error) {
+      set({ error: String(error.value ?? error.status) });
+      await get().refresh(); // revert to server truth on failure
+    }
   },
   startLocal: async (taskId) => {
     const { data, error } = await api.tasks({ id: taskId })["start-local"].post();

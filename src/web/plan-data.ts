@@ -11,6 +11,11 @@ import { useStore } from "./store.ts";
 
 export const byPosition = <T extends { position: number }>(a: T, b: T) => a.position - b.position;
 
+/** Stable "starred first" ordering for a group of tasks — starred ones float to
+ *  the top, everything else keeps its existing relative order (JS sort is stable). */
+export const starFirst = <T extends { starred: boolean }>(tasks: T[]): T[] =>
+  [...tasks].sort((a, b) => Number(b.starred) - Number(a.starred));
+
 export type Indexes = {
   goals: Goal[];
   milestonesByGoal: Map<number, Milestone[]>;

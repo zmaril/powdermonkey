@@ -1,4 +1,14 @@
-import { Anchor, Badge, Button, Group, List, Progress, Text, ThemeIcon } from "@mantine/core";
+import {
+  Anchor,
+  Badge,
+  Button,
+  Group,
+  List,
+  Progress,
+  Text,
+  ThemeIcon,
+  UnstyledButton,
+} from "@mantine/core";
 import type { CloudPr } from "../server/events.ts";
 import type { Phase, Session, Task } from "../server/schema.ts";
 import type { SessionState, TaskStatus } from "../shared/types.ts";
@@ -31,6 +41,27 @@ export function IdTag({ prefix, id }: { prefix: string; id: number }) {
       {prefix}
       {id}
     </Text>
+  );
+}
+
+/** A click-to-toggle priority star. Starred tasks sort to the top of their group
+ *  (active / backlog). `flexShrink: 0` so it never collapses in a tight row. */
+export function StarToggle({ task }: { task: Task }) {
+  const toggleStar = useStore((s) => s.toggleStar);
+  return (
+    <UnstyledButton
+      aria-label={task.starred ? "Unstar task" : "Star task"}
+      title={task.starred ? "Unstar" : "Star — sorts to the top of its group"}
+      onClick={(e) => {
+        e.stopPropagation();
+        toggleStar(task.id, !task.starred);
+      }}
+      style={{ flexShrink: 0, lineHeight: 1 }}
+    >
+      <Text span c={task.starred ? "yellow" : "dimmed"} style={{ userSelect: "none" }}>
+        {task.starred ? "★" : "☆"}
+      </Text>
+    </UnstyledButton>
   );
 }
 

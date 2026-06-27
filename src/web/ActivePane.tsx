@@ -2,8 +2,8 @@ import { Anchor, Badge, Box, Group, SegmentedControl, Stack, Text, Title } from 
 import { useState } from "react";
 import type { Goal, Milestone, Task } from "../server/schema.ts";
 import { partitionTasks } from "./active.ts";
-import { type Indexes, usePlanData } from "./plan-data.ts";
-import { IdTag, PrStatus, SessionActions, TaskBadges } from "./plan-ui.tsx";
+import { type Indexes, starFirst, usePlanData } from "./plan-data.ts";
+import { IdTag, PrStatus, SessionActions, StarToggle, TaskBadges } from "./plan-ui.tsx";
 
 // The Active pane is the live monitor — every task with a session running right
 // now (the derived-active set; see active.ts). Two views, toggled:
@@ -33,6 +33,7 @@ function ActiveRow({
   return (
     <Box px="sm" py={8} style={{ borderBottom: "1px solid #2c2e33" }}>
       <Group gap="sm" wrap="nowrap" align="flex-start">
+        <StarToggle task={task} />
         <Text size="sm" title={session?.kind}>
           {session?.kind === "remote" ? "☁️" : "💻"}
         </Text>
@@ -69,7 +70,7 @@ function ActiveRow({
 function FlatView({ tasks, idx }: { tasks: Task[]; idx: Indexes }) {
   return (
     <Stack gap={0}>
-      {tasks.map((t) => {
+      {starFirst(tasks).map((t) => {
         const m = idx.milestoneById.get(t.milestoneId);
         const g = m ? idx.goalById.get(m.goalId) : undefined;
         const context = [g?.title, m?.title].filter(Boolean).join(" › ");
@@ -84,7 +85,9 @@ function GroupedView({ activeIds, idx }: { activeIds: Set<number>; idx: Indexes 
   const sections: { goal: Goal; milestone: Milestone; tasks: Task[] }[] = [];
   for (const goal of goals) {
     for (const m of idx.milestonesByGoal.get(goal.id) ?? []) {
-      const tasks = (idx.tasksByMilestone.get(m.id) ?? []).filter((t) => activeIds.has(t.id));
+      const tasks = starFirst(
+        (idx.tasksByMilestone.get(m.id) ?? []).filter((t) => activeIds.has(t.id)),
+      );
       if (tasks.length > 0) sections.push({ goal, milestone: m, tasks });
     }
   }

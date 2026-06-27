@@ -37,6 +37,8 @@ export const tasks = pgTable("tasks", {
     .references(() => milestones.id),
   title: text("title").notNull(),
   position: integer("position").notNull().default(0),
+  // Operator priority: a starred task sorts to the top of its group (active/backlog).
+  starred: boolean("starred").notNull().default(false),
   // Progress is set during reconciliation when a PR merges, never self-reported.
   status: text("status").$type<TaskStatus>().notNull().default("pending"),
   // Runtime session fields (a session is attached to the task it was dispatched
