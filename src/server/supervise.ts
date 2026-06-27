@@ -9,10 +9,14 @@
 //   bun run src/server/supervise.ts          # launch (idempotent) + print attach
 //   tmux -L powdermonkey attach -t pm-server  # watch the server's console
 //
+// Inside the pane the server runs under an auto-restart loop (`--loop`): if it
+// crashes it's brought straight back up, backing off exponentially so a crash
+// loop doesn't spin hot, and resetting once a run has stayed healthy.
+//
 // Reserved tmux names on the socket: `pm-server` (this), `pm-session-0` (the
 // supervisor's own `claude`), `pm-session-<id>` (per-task workers).
 
-import { SOCKET, TMUX_BIN, hasSession, shq, tmux } from "./tmux.ts";
+import { SOCKET, hasSession, shq, tmux } from "./tmux.ts";
 
 const SHELL = process.env.SHELL || "bash";
 
@@ -20,8 +24,17 @@ const SHELL = process.env.SHELL || "bash";
 // sessions so it never collides with a worker id.
 export const SERVER_SESSION = process.env.PM_SERVER_SESSION ?? "pm-server";
 
-// The server entrypoint this launcher boots inside the pane.
-const SERVER_ENTRY = new URL("./index.ts", import.meta.url).pathname;
+// The server entrypoint the restart loop boots. Overridable mainly for tests.
+const SERVER_ENTRY = process.env.PM_SERVER_ENTRY ?? new URL("./index.ts", import.meta.url).pathname;
+// This module's own path, so the pane can re-invoke it in `--loop` mode.
+const SELF = new URL(import.meta.url).pathname;
+
+// Backoff bounds for the auto-restart loop. After a crash we wait `backoff` and
+// double it (capped at MAX); a run that stays up at least HEALTHY_MS is treated
+// as a good boot and resets the backoff to MIN.
+const BACKOFF_MIN_MS = Number(process.env.PM_BACKOFF_MIN_MS ?? 1000);
+const BACKOFF_MAX_MS = Number(process.env.PM_BACKOFF_MAX_MS ?? 30_000);
+const HEALTHY_MS = Number(process.env.PM_HEALTHY_MS ?? 60_000);
 
 function repoDir(): string {
   return process.env.PM_REPO_DIR ?? process.cwd();
@@ -36,9 +49,57 @@ export type LaunchResult =
   | { ok: true; created: boolean; session: string; socket: string }
   | { ok: false; error: string };
 
-/** The command tmux runs inside the server pane. */
+/** The command tmux runs inside the server pane: the auto-restart loop. */
 function paneCommand(): string {
-  return `bun run ${shq(SERVER_ENTRY)}`;
+  return `bun run ${shq(SELF)} --loop`;
+}
+
+/** Spawn the server. Stdio is inherited so its console lands in the pane. */
+function spawnServer(): Bun.Subprocess {
+  return Bun.spawn(["bun", "run", SERVER_ENTRY], {
+    cwd: repoDir(),
+    env: process.env,
+    stdio: ["inherit", "inherit", "inherit"],
+  });
+}
+
+/** Run the server once, resolving with its exit code when the process exits. */
+export function runServerOnce(): Promise<number> {
+  return spawnServer().exited;
+}
+
+/** Supervise the server forever: restart on every exit, backing off
+ *  exponentially after a crash and resetting once a run has stayed healthy.
+ *  Runs in the foreground — this is what the tmux pane executes. */
+export async function runWithBackoff(): Promise<never> {
+  // Forward termination to the running child so `tmux kill-session` / Ctrl-C
+  // stops the server AND ends the loop, instead of orphaning either.
+  let child: Bun.Subprocess | null = null;
+  const stop = (exitCode: number) => () => {
+    try {
+      child?.kill();
+    } catch {}
+    process.exit(exitCode);
+  };
+  process.on("SIGINT", stop(130));
+  process.on("SIGTERM", stop(143));
+
+  let backoff = BACKOFF_MIN_MS;
+  for (;;) {
+    const startedAt = Date.now();
+    child = spawnServer();
+    const code = await child.exited;
+    child = null;
+    const uptimeMs = Date.now() - startedAt;
+    // A run that stayed up long enough was a real boot, not a crash loop: reset.
+    if (uptimeMs >= HEALTHY_MS) backoff = BACKOFF_MIN_MS;
+    console.error(
+      `[supervise] server exited (code ${code}) after ${Math.round(uptimeMs / 1000)}s; ` +
+        `restarting in ${Math.round(backoff / 1000)}s`,
+    );
+    await Bun.sleep(backoff);
+    backoff = Math.min(backoff * 2, BACKOFF_MAX_MS);
+  }
 }
 
 /** Idempotently bring up the supervisor server in a detached tmux pane on the
@@ -64,6 +125,12 @@ export function stopServer(): boolean {
 }
 
 if (import.meta.main) {
+  // `--loop` is the in-pane mode: supervise the server with backoff (never
+  // returns). Without it, launch the pane and print how to attach.
+  if (process.argv.includes("--loop")) {
+    await runWithBackoff();
+  }
+
   const r = launchServer();
   if (!r.ok) {
     console.error(`failed to launch supervisor: ${r.error}`);
