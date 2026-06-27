@@ -1,10 +1,3 @@
-import type { Phase } from "../server/schema.ts";
-
-export type Rollup = { done: number; total: number; pct: number };
-
-/** Progress is measured at the Phase grain and rolled up over a set of phases. */
-export function rollup(phases: Phase[]): Rollup {
-  const total = phases.length;
-  const done = phases.filter((p) => p.status === "done").length;
-  return { done, total, pct: total === 0 ? 0 : Math.round((done / total) * 100) };
-}
+// Progress rollup lives in shared/ so the server's /tree endpoint and the browser
+// compute identical numbers. Re-exported here to keep existing web imports stable.
+export { type Rollup, rollup } from "../shared/progress.ts";

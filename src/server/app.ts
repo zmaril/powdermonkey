@@ -17,6 +17,7 @@ import {
   writeSessionPty,
 } from "./session-pty.ts";
 import { readSessionStatus } from "./session-status.ts";
+import { getTree } from "./tree.ts";
 import { landSession, startLocalSession, stopSession } from "./worktree.ts";
 
 // Full CRUD for every vocab entity, plus the nested plan loader and the runtime
@@ -126,6 +127,13 @@ const sessionsGroup = resource("sessions", sessionRepo, models.sessions)
 
 export const app = new Elysia()
   .get("/health", () => ({ ok: true }))
+  // Rolled-up plan tree: goals → milestones → tasks → phases assembled server-side,
+  // with a phase-grain progress rollup at every level. One request instead of the
+  // five flat list fetches the client otherwise stitches together. `?archived=true`
+  // includes archived rows, matching the CRUD lists.
+  .get("/tree", ({ query }) => getTree({ includeArchived: query.archived === "true" }), {
+    query: t.Object({ archived: t.Optional(t.String()) }),
+  })
   // Nested, id-less plan loader — Elysia validates the body against the TypeBox
   // plan schema before the handler runs.
   .post("/plan", ({ body }) => loadPlan(body), { body: planSchema })
