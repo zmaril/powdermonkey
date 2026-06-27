@@ -64,6 +64,10 @@ type State = {
   toggleStar: (taskId: number, starred: boolean) => Promise<void>;
   startLocal: (taskId: number) => Promise<void>;
   dispatch: (taskId: number) => Promise<void>;
+  // Launch several backlog tasks together: ONE session works the whole batch. The
+  // first id is the primary (it names the worktree/branch); the rest ride along.
+  startLocalMany: (taskIds: number[]) => Promise<void>;
+  dispatchMany: (taskIds: number[]) => Promise<void>;
   teleport: (taskId: number) => Promise<void>;
   land: (sessionId: number) => Promise<void>;
   stop: (sessionId: number) => Promise<void>;
@@ -255,6 +259,33 @@ export const useStore = create<State>()(
       },
       dispatch: async (taskId) => {
         const { error } = await api.tasks({ id: taskId }).dispatch.post();
+        if (error) set({ error: String(error.value ?? error.status) });
+        await get().refresh();
+      },
+      startLocalMany: async (taskIds) => {
+        if (taskIds.length === 0) return;
+        const [primary, ...rest] = taskIds;
+        const { data, error } = await api
+          .tasks({ id: primary })
+          ["start-local"].post({ taskIds: rest });
+        if (error) return void set({ error: String(error.value ?? error.status) });
+        if (data && "ok" in data && data.ok) {
+          set({
+            lastStart: {
+              taskId: primary,
+              branch: data.branch,
+              worktreePath: data.worktreePath,
+              prompt: data.prompt,
+              trailers: data.trailers,
+            },
+          });
+        }
+        await get().refresh();
+      },
+      dispatchMany: async (taskIds) => {
+        if (taskIds.length === 0) return;
+        const [primary, ...rest] = taskIds;
+        const { error } = await api.tasks({ id: primary }).dispatch.post({ taskIds: rest });
         if (error) set({ error: String(error.value ?? error.status) });
         await get().refresh();
       },
