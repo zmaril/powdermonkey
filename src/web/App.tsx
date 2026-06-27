@@ -5,6 +5,7 @@ import {
   DockviewReact,
   type DockviewReadyEvent,
   type IDockviewPanelProps,
+  type SerializedDockview,
   themeAbyss,
 } from "dockview-react";
 import { useEffect, useRef, useState } from "react";
@@ -145,6 +146,63 @@ const dockComponents = {
   scratch: ScratchPanel,
 };
 
+// We persist the dockview layout so the disconnect→reload recovery (and any plain
+// browser refresh) keeps your panes — rearrangements, opened shells, the lot —
+// instead of snapping back to the default arrangement every time.
+const LAYOUT_KEY = "pm.dockview.layout";
+
+function saveLayout(api: DockviewApi) {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(api.toJSON()));
+  } catch {
+    // localStorage can be unavailable (private mode, quota); persistence is a
+    // nicety, so a failed write just means we fall back to the default next load.
+  }
+}
+
+function loadLayout(): SerializedDockview | null {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY);
+    return raw ? (JSON.parse(raw) as SerializedDockview) : null;
+  } catch {
+    return null;
+  }
+}
+
+// The default arrangement, built from scratch when there's no saved layout (or a
+// saved one we couldn't restore): Active/Backlog/Archive tabs in the main group,
+// the scratchpad over the supervisor shell on the left.
+function buildDefaultLayout(api: DockviewApi) {
+  const active = api.addPanel({ id: "active", component: "active", title: "Active" });
+  api.addPanel({
+    id: "backlog",
+    component: "backlog",
+    title: "Backlog",
+    position: { direction: "within", referencePanel: "active" },
+  });
+  api.addPanel({
+    id: "archive",
+    component: "archive",
+    title: "Archive",
+    position: { direction: "within", referencePanel: "active" },
+  });
+  api.addPanel({
+    id: "scratch",
+    component: "scratch",
+    title: "Scratch",
+    position: { direction: "left", referencePanel: "active" },
+  });
+  api.addPanel({
+    id: "shell-0",
+    component: "shell",
+    params: { cwd: "", session: null },
+    title: "supervisor",
+    position: { direction: "below", referencePanel: "scratch" },
+  });
+  // Show Active first (adding Backlog "within" would otherwise leave it focused).
+  active.api.setActive();
+}
+
 // Slim global toolbar: the app title, the cross-cutting actions (Shell / Scratch /
 // Reconcile), and the error banner. Lives above the dockview so it's always visible
 // regardless of which panel is focused.
@@ -242,6 +300,7 @@ function DisconnectBanner() {
 
 export function App() {
   const apiRef = useRef<DockviewApi | null>(null);
+  const layoutSubRef = useRef<{ dispose: () => void } | null>(null);
   const shellReq = useStore((s) => s.shellReq);
   const notesReq = useStore((s) => s.notesReq);
   const refresh = useStore((s) => s.refresh);
@@ -256,37 +315,27 @@ export function App() {
 
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;
-    // Layout: Active + Backlog + Archive as tabs in the main (right) group; the
-    // left column is the scratchpad over the supervisor shell.
-    const active = event.api.addPanel({ id: "active", component: "active", title: "Active" });
-    event.api.addPanel({
-      id: "backlog",
-      component: "backlog",
-      title: "Backlog",
-      position: { direction: "within", referencePanel: "active" },
-    });
-    event.api.addPanel({
-      id: "archive",
-      component: "archive",
-      title: "Archive",
-      position: { direction: "within", referencePanel: "active" },
-    });
-    event.api.addPanel({
-      id: "scratch",
-      component: "scratch",
-      title: "Scratch",
-      position: { direction: "left", referencePanel: "active" },
-    });
-    event.api.addPanel({
-      id: "shell-0",
-      component: "shell",
-      params: { cwd: "", session: null },
-      title: "supervisor",
-      position: { direction: "below", referencePanel: "scratch" },
-    });
-    // Show Active first (adding Backlog "within" would otherwise leave it focused).
-    active.api.setActive();
+    // Restore the persisted layout if we have one; otherwise lay out the default.
+    // A corrupt/incompatible saved layout (or one that restores to nothing) falls
+    // back to the default so a reload can never leave you staring at a blank dock.
+    const saved = loadLayout();
+    let restored = false;
+    if (saved) {
+      try {
+        event.api.fromJSON(saved);
+        restored = event.api.panels.length > 0;
+      } catch {
+        restored = false;
+      }
+    }
+    if (!restored) buildDefaultLayout(event.api);
+    // Persist on every layout change — add/move/close a panel, resize, focus a
+    // tab — so the next load (notably the disconnect→reload) comes back as-is.
+    layoutSubRef.current = event.api.onDidLayoutChange(() => saveLayout(event.api));
   };
+
+  // Tear the layout subscription down with the component.
+  useEffect(() => () => layoutSubRef.current?.dispose(), []);
 
   // Each open*Terminal() adds (or focuses) a shell panel keyed by shellReq.key.
   useEffect(() => {
