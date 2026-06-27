@@ -41,6 +41,7 @@ type State = {
   openEditor: (sessionId: number) => Promise<void>;
   reconcile: () => Promise<void>;
   dismissStart: () => void;
+  setError: (error: string | null) => void;
 };
 
 // Single-flight: the scratchpad is exactly one note. The first caller that finds
@@ -193,4 +194,5 @@ export const useStore = create<State>((set, get) => ({
     await get().refresh();
   },
   dismissStart: () => set({ lastStart: null }),
+  setError: (error) => set({ error }),
 }));
