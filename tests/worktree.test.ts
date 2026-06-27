@@ -1,5 +1,5 @@
 import { beforeAll, expect, test } from "bun:test";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -18,7 +18,9 @@ process.env.PM_SESSION_CMD = "";
 const { ready } = await import("../src/server/db.ts");
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
 const { taskRepo, sessionRepo } = await import("../src/server/crud.ts");
-const { startLocalSession, landSession } = await import("../src/server/worktree.ts");
+const { startLocalSession, landSession, stopSession } = await import(
+  "../src/server/worktree.ts"
+);
 
 async function git(...args: string[]): Promise<void> {
   const proc = Bun.spawn(["git", ...args], {
@@ -80,4 +82,24 @@ test("land tears down the worktree and archives the session", async () => {
   // archived → excluded from default list
   expect((await sessionRepo.list()).some((s) => s.id === session.id)).toBe(false);
   expect((await sessionRepo.get(session.id))?.archivedAt).toBeTruthy();
+});
+
+test("stop aborts a session without a clean worktree and re-pends the task", async () => {
+  const [task] = await taskRepo.list();
+  const started = await startLocalSession(task.id);
+  if (!started.ok) throw new Error(started.error);
+  // Dirty the worktree — land() refuses this; stop() must force through it.
+  writeFileSync(join(started.worktreePath, "scratch.txt"), "uncommitted work");
+
+  const result = await stopSession(started.session.id);
+  if (!result.ok) throw new Error(`${result.error}: ${result.output ?? ""}`);
+
+  expect(result.session.state).toBe("stopped");
+  // worktree force-removed despite being dirty
+  expect(existsSync(started.worktreePath)).toBe(false);
+  // archived → excluded from default list
+  expect((await sessionRepo.list()).some((s) => s.id === started.session.id)).toBe(false);
+  expect((await sessionRepo.get(started.session.id))?.archivedAt).toBeTruthy();
+  // task rolled back to pending so it can be re-run
+  expect((await taskRepo.get(task.id))?.status).toBe("pending");
 });

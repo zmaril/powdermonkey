@@ -52,7 +52,12 @@ export async function worktreeAdd(
   return run(["worktree", "add", "-b", branch, path, baseRef]);
 }
 
-/** Remove a worktree. Not forced — fails if it has uncommitted changes, by design. */
-export function worktreeRemove(path: string): Promise<GitResult> {
-  return run(["worktree", "remove", path]);
+/** Remove a worktree. Not forced by default — fails if it has uncommitted changes,
+ *  which is what `land` wants. Pass `{ force: true }` to remove regardless (an
+ *  aborted session via `stop` discards its in-progress work rather than waiting
+ *  for a clean tree). */
+export function worktreeRemove(path: string, opts?: { force?: boolean }): Promise<GitResult> {
+  const args = ["worktree", "remove", path];
+  if (opts?.force) args.push("--force");
+  return run(args);
 }

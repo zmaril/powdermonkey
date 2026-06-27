@@ -37,6 +37,7 @@ type State = {
   startLocal: (taskId: number) => Promise<void>;
   dispatch: (taskId: number) => Promise<void>;
   land: (sessionId: number) => Promise<void>;
+  stop: (sessionId: number) => Promise<void>;
   openEditor: (sessionId: number) => Promise<void>;
   reconcile: () => Promise<void>;
   dismissStart: () => void;
@@ -173,6 +174,11 @@ export const useStore = create<State>((set, get) => ({
   },
   land: async (sessionId) => {
     const { error } = await api.sessions({ id: sessionId }).land.post();
+    if (error) set({ error: String(error.value ?? error.status) });
+    await get().refresh();
+  },
+  stop: async (sessionId) => {
+    const { error } = await api.sessions({ id: sessionId }).stop.post();
     if (error) set({ error: String(error.value ?? error.status) });
     await get().refresh();
   },
