@@ -19,10 +19,12 @@ type State = {
   loading: boolean;
   error: string | null;
   lastStart: StartInfo | null;
-  // Latest request to open a shell panel ("" = repo dir, a path = a worktree).
-  // The dockview layout watches this and adds a panel. `n` makes repeats distinct.
-  shellReq: { cwd: string; n: number } | null;
+  // Latest request to open a shell panel. `session` attaches to a local session's
+  // agent PTY; otherwise `cwd` opens a fresh shell ("" = repo dir). `key` dedupes
+  // panels, `title` labels them, `n` makes repeats distinct so the effect re-fires.
+  shellReq: { key: string; cwd: string; session: number | null; title: string; n: number } | null;
   openTerminal: (cwd?: string) => void;
+  openSessionTerminal: (sessionId: number, title: string) => void;
   refresh: () => Promise<void>;
   startLocal: (taskId: number) => Promise<void>;
   dispatch: (taskId: number) => Promise<void>;
@@ -41,7 +43,26 @@ export const useStore = create<State>((set, get) => ({
   error: null,
   lastStart: null,
   shellReq: null,
-  openTerminal: (cwd = "") => set((s) => ({ shellReq: { cwd, n: (s.shellReq?.n ?? 0) + 1 } })),
+  openTerminal: (cwd = "") =>
+    set((s) => ({
+      shellReq: {
+        key: cwd ? `cwd:${cwd}` : "repo",
+        cwd,
+        session: null,
+        title: cwd ? cwd.split("/").filter(Boolean).pop() || "shell" : "repo",
+        n: (s.shellReq?.n ?? 0) + 1,
+      },
+    })),
+  openSessionTerminal: (sessionId, title) =>
+    set((s) => ({
+      shellReq: {
+        key: `session:${sessionId}`,
+        cwd: "",
+        session: sessionId,
+        title,
+        n: (s.shellReq?.n ?? 0) + 1,
+      },
+    })),
   refresh: async () => {
     set({ loading: true, error: null });
     try {

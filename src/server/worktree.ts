@@ -1,10 +1,11 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "./db.ts";
 import { taskPrompt } from "./dispatch.ts";
 import { worktreeAdd, worktreeRemove } from "./git.ts";
 import { type Session, phases, sessions, tasks } from "./schema.ts";
+import { killSessionPty, startSessionPty } from "./session-pty.ts";
 
 // A local session is the on-laptop mirror of `claude --remote`: an isolated git
 // worktree on `pm/task-<id>`, branched off main, where work happens without
@@ -16,6 +17,22 @@ const MAIN_BRANCH = process.env.PM_MAIN_BRANCH ?? "main";
 function worktreeBase(): string {
   const repo = process.env.PM_REPO_DIR ?? process.cwd();
   return process.env.PM_WORKTREE_DIR ?? join(repo, "..", "pm-worktrees");
+}
+
+// Where per-session prompt files live (outside any worktree so the agent never
+// commits them). The startup command can `cat` this to seed the session.
+function promptDir(): string {
+  const repo = process.env.PM_REPO_DIR ?? process.cwd();
+  return join(repo, "data", "prompts");
+}
+
+// The command the session's PTY runs in the worktree. Defaults to a bare
+// interactive `claude`; the prompt stays visible in the UI for the operator to
+// paste. Set PM_SESSION_CMD to override — a `{prompt_file}` placeholder is
+// replaced with the absolute prompt path, e.g.  PM_SESSION_CMD='claude "$(cat {prompt_file})"'
+function sessionStartup(promptPath: string): string {
+  const tmpl = process.env.PM_SESSION_CMD ?? "claude";
+  return tmpl.replaceAll("{prompt_file}", promptPath);
 }
 
 export type StartLocalResult =
@@ -66,6 +83,14 @@ export async function startLocalSession(taskId: number): Promise<StartLocalResul
     ...trailers,
   ].join("\n");
 
+  // Stash the prompt where the startup command can reach it, then bring up the
+  // session's persistent interactive PTY in the worktree. Clients attach to this
+  // via /pty?session=<id>; it outlives any single browser connection.
+  mkdirSync(promptDir(), { recursive: true });
+  const promptPath = join(promptDir(), `session-${session.id}.md`);
+  writeFileSync(promptPath, `${prompt}\n`);
+  startSessionPty(session.id, worktreePath, sessionStartup(promptPath));
+
   return { ok: true, session, worktreePath, branch, prompt, trailers };
 }
 
@@ -79,6 +104,9 @@ export type LandResult =
 export async function landSession(sessionId: number): Promise<LandResult> {
   const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId));
   if (!session) return { ok: false, error: `unknown session "${sessionId}"` };
+
+  // Tear down the live PTY (if any) before removing its worktree out from under it.
+  killSessionPty(sessionId);
 
   if (session.worktreePath) {
     const rm = await worktreeRemove(session.worktreePath);

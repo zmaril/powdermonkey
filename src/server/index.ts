@@ -4,11 +4,17 @@
 import { app } from "./app.ts";
 import { ready } from "./db.ts";
 import { reconcile } from "./reconcile.ts";
+import { startSupervisorPty } from "./session-pty.ts";
 
 const PORT = Number(process.env.PORT ?? 4500);
 
 await ready();
 app.listen(PORT);
+
+// Bring up the supervisor's own durable `claude` (in tmux, reserved id 0) so it's
+// already running before the browser shell attaches — and so it persists across
+// `--watch` restarts of this very process.
+startSupervisorPty();
 
 // Spawned shells (and the Claude sessions in them) inherit this, so the
 // powdermonkey skill knows where the API is.

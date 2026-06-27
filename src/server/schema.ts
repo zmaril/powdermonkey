@@ -1,4 +1,4 @@
-import { integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import type { PhaseStatus, SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 
 // The plan vocabulary, fully normalized: every entity is its own relation with an
@@ -70,6 +70,10 @@ export const sessions = pgTable("sessions", {
   branch: text("branch"),
   worktreePath: text("worktree_path"),
   url: text("url"),
+  // A local session runs an interactive `claude` PTY in its worktree. When that
+  // process falls idle after producing output, it's read as "parked at a prompt,
+  // waiting for the operator" and surfaced here so the UI can pull them in.
+  needsInput: boolean("needs_input").notNull().default(false),
   ...timestamps,
 });
 

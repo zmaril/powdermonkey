@@ -29,8 +29,6 @@ import { ShellTerminal } from "./ShellTerminal.tsx";
 import { rollup } from "./progress.ts";
 import { useStore } from "./store.ts";
 
-const basename = (p: string) => p.split("/").filter(Boolean).pop() ?? "repo";
-
 const STATUS_COLOR: Record<TaskStatus, string> = {
   pending: "gray",
   dispatched: "blue",
@@ -87,12 +85,17 @@ function PhaseList({ phases }: { phases: Phase[] }) {
 }
 
 function TaskCard({ task, phases, session }: { task: Task; phases: Phase[]; session?: Session }) {
-  const { startLocal, dispatch, land, openTerminal } = useStore();
+  const { startLocal, dispatch, land, openSessionTerminal } = useStore();
   return (
     <Card withBorder radius="md" padding="sm">
       <Group justify="space-between" wrap="nowrap" mb={6}>
         <Text fw={500}>{task.title}</Text>
         <Group gap={6} wrap="nowrap">
+          {session?.needsInput && (
+            <Badge color="yellow" variant="filled">
+              needs you
+            </Badge>
+          )}
           {task.sessionState && (
             <Badge color={SESSION_BADGE[task.sessionState].color} variant="filled">
               {SESSION_BADGE[task.sessionState].label}
@@ -115,9 +118,9 @@ function TaskCard({ task, phases, session }: { task: Task; phases: Phase[]; sess
               </Badge>
               <Button
                 size="compact-xs"
-                variant="light"
+                variant={session.needsInput ? "filled" : "light"}
                 color="grape"
-                onClick={() => openTerminal(session.worktreePath ?? "")}
+                onClick={() => openSessionTerminal(session.id, task.title)}
               >
                 Shell
               </Button>
@@ -329,10 +332,13 @@ function PlanView() {
   );
 }
 
-function ShellPanel(props: IDockviewPanelProps<{ cwd: string }>) {
+function ShellPanel(props: IDockviewPanelProps<{ cwd: string; session: number | null }>) {
   return (
     <div style={{ height: "100%", width: "100%", background: "#1a1b1e" }}>
-      <ShellTerminal cwd={props.params.cwd || undefined} />
+      <ShellTerminal
+        cwd={props.params.cwd || undefined}
+        session={props.params.session ?? undefined}
+      />
     </div>
   );
 }
@@ -354,17 +360,17 @@ export function App() {
     event.api.addPanel({
       id: "shell-0",
       component: "shell",
-      params: { cwd: "" },
+      params: { cwd: "", session: null },
       title: "shell · repo",
       position: { direction: "left", referencePanel: "plan" },
     });
   };
 
-  // Each openTerminal() adds (or focuses) a shell panel for that cwd.
+  // Each open*Terminal() adds (or focuses) a shell panel keyed by shellReq.key.
   useEffect(() => {
     const api = apiRef.current;
     if (!shellReq || !api) return;
-    const id = shellReq.cwd ? `shell-${basename(shellReq.cwd)}` : "shell-0";
+    const id = shellReq.key === "repo" ? "shell-0" : `shell-${shellReq.key}`;
     const existing = api.getPanel(id);
     if (existing) {
       existing.api.setActive();
@@ -373,8 +379,8 @@ export function App() {
     api.addPanel({
       id,
       component: "shell",
-      params: { cwd: shellReq.cwd },
-      title: `shell · ${basename(shellReq.cwd)}`,
+      params: { cwd: shellReq.cwd, session: shellReq.session },
+      title: `shell · ${shellReq.title}`,
       position: { referencePanel: "shell-0", direction: "within" },
     });
   }, [shellReq]);

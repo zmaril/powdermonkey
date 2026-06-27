@@ -15,6 +15,13 @@
       "when": 1782511248536,
       "tag": "0001_striped_deathbird",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782548967205,
+      "tag": "0002_typical_logan",
+      "breakpoints": true
     }
   ]
 }

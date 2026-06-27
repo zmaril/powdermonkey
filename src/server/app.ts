@@ -6,6 +6,13 @@ import { models } from "./models.ts";
 import { loadPlan, planSchema } from "./plan.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { reconcile } from "./reconcile.ts";
+import {
+  SUPERVISOR_ID,
+  attachSessionPty,
+  resizeSessionPty,
+  startSupervisorPty,
+  writeSessionPty,
+} from "./session-pty.ts";
 import { readSessionStatus } from "./session-status.ts";
 import { landSession, startLocalSession } from "./worktree.ts";
 
@@ -20,9 +27,13 @@ import { landSession, startLocalSession } from "./worktree.ts";
 // biome-ignore lint/suspicious/noExplicitAny: HTTP body is validated by the route model; the repo carries the precise insert type.
 type Repo = { [k: string]: (...args: any[]) => Promise<any> };
 
-// Live PTYs keyed by the underlying socket, one per open /pty WebSocket.
-// biome-ignore lint/suspicious/noExplicitAny: PTY handle is not typed (see pty.ts).
-const ptys = new Map<object, any>();
+// Per-socket /pty handle. A socket either owns a *fresh* shell it spawned (the
+// supervisor/repo shell, or a worktree fallback), or it's *attached* to a
+// session's long-lived PTY (shared, multiplexed) — see session-pty.ts.
+type PtyHandle =
+  // biome-ignore lint/suspicious/noExplicitAny: native PTY handle (see pty.ts).
+  { kind: "fresh"; proc: any } | { kind: "attach"; sessionId: number; detach: () => void };
+const ptys = new Map<object, PtyHandle>();
 
 /** A CRUD route group: list / get / create / update / archive(DELETE) / restore. */
 function resource(name: string, repo: Repo, body: { create: TSchema; update: TSchema }) {
@@ -100,33 +111,78 @@ export const app = new Elysia()
   .post("/plan", ({ body }) => loadPlan(body), { body: planSchema })
   // Reconcile progress from PM trailers on main. Also runs on a poll loop.
   .post("/reconcile", () => reconcile())
-  // Forwarded shell: a PTY login shell streamed to xterm.js in the browser. Open
-  // with ?cwd=<path> (e.g. a session's worktree); defaults to the repo dir.
+  // Forwarded shell streamed to xterm.js. Two modes:
+  //   ?session=<id> → attach to that local session's long-lived `claude` PTY
+  //                   (shared + replayed); falls back to a fresh shell in the
+  //                   session's worktree if the PTY isn't live (e.g. post-restart).
+  //   ?cwd=<path>   → a fresh plain shell at that path (a worktree).
+  //   (neither)     → attach to the supervisor's OWN durable session (reserved
+  //                   id 0), which lives in tmux and survives `--watch` restarts.
   // Server → client: binary PTY output. Client → server: JSON input/resize frames.
   .ws("/pty", {
-    query: t.Object({ cwd: t.Optional(t.String()) }),
+    query: t.Object({ cwd: t.Optional(t.String()), session: t.Optional(t.String()) }),
     body: t.Object({
       type: t.String(),
       data: t.Optional(t.String()),
       cols: t.Optional(t.Number()),
       rows: t.Optional(t.Number()),
     }),
-    open(ws) {
+    async open(ws) {
+      const send = (bytes: Uint8Array) => {
+        try {
+          ws.raw.send(bytes);
+        } catch {}
+      };
+
+      // Which durable session to attach to: an explicit ?session=<id>, or — when
+      // neither session nor cwd is given — the supervisor's own reserved session.
       const q = ws.data.query.cwd;
-      const cwd = q || process.env.PM_REPO_DIR || process.cwd();
-      // Supervisor shell (no cwd → repo dir) drops into Claude; worker worktree
-      // shells (cwd set) are plain.
-      const startup = q ? "" : undefined;
-      const proc = spawnShell(
-        cwd,
-        (bytes) => {
+      let sessionId: number | null = null;
+      if (ws.data.query.session) {
+        const n = Number(ws.data.query.session);
+        if (!Number.isNaN(n)) sessionId = n;
+      } else if (!q) {
+        startSupervisorPty(); // ensure the supervisor's tmux session is live first
+        sessionId = SUPERVISOR_ID;
+      }
+
+      if (sessionId != null) {
+        const detach = attachSessionPty(sessionId, send);
+        if (detach) {
+          ptys.set(ws.raw, { kind: "attach", sessionId, detach });
+          return;
+        }
+        // No live PTY (tmux unavailable, or a worker session whose PTY didn't
+        // survive): fall back to a fresh shell. The supervisor drops into Claude
+        // at the repo dir; a worker gets a plain shell in its worktree.
+        const isSupervisor = sessionId === SUPERVISOR_ID;
+        const cwd = isSupervisor
+          ? process.env.PM_REPO_DIR || process.cwd()
+          : (await sessionRepo.get(sessionId))?.worktreePath ||
+            process.env.PM_REPO_DIR ||
+            process.cwd();
+        if (!isSupervisor) {
+          send(
+            new TextEncoder().encode(
+              "\x1b[2m[no live agent PTY — opening a shell here]\x1b[0m\r\n",
+            ),
+          );
+        }
+        const proc = spawnShell(cwd, send, isSupervisor ? undefined : "");
+        ptys.set(ws.raw, { kind: "fresh", proc });
+        ptyExited(proc).then(() => {
           try {
-            ws.raw.send(bytes);
+            ws.close();
           } catch {}
-        },
-        startup,
-      );
-      ptys.set(ws.raw, proc);
+          ptys.delete(ws.raw);
+        });
+        return;
+      }
+
+      // ?cwd=<path> → a plain fresh worktree shell.
+      const cwd = q || process.env.PM_REPO_DIR || process.cwd();
+      const proc = spawnShell(cwd, send, "");
+      ptys.set(ws.raw, { kind: "fresh", proc });
       ptyExited(proc).then(() => {
         try {
           ws.close();
@@ -135,17 +191,26 @@ export const app = new Elysia()
       });
     },
     message(ws, msg) {
-      const proc = ptys.get(ws.raw);
-      if (!proc) return;
-      if (msg.type === "resize" && msg.cols && msg.rows) resizePty(proc, msg.cols, msg.rows);
-      else if (msg.type === "input" && msg.data != null) writePty(proc, msg.data);
+      const handle = ptys.get(ws.raw);
+      if (!handle) return;
+      if (handle.kind === "attach") {
+        if (msg.type === "resize" && msg.cols && msg.rows)
+          resizeSessionPty(handle.sessionId, msg.cols, msg.rows);
+        else if (msg.type === "input" && msg.data != null)
+          writeSessionPty(handle.sessionId, msg.data);
+      } else {
+        if (msg.type === "resize" && msg.cols && msg.rows)
+          resizePty(handle.proc, msg.cols, msg.rows);
+        else if (msg.type === "input" && msg.data != null) writePty(handle.proc, msg.data);
+      }
     },
     close(ws) {
-      const proc = ptys.get(ws.raw);
-      if (proc) {
-        closePty(proc);
-        ptys.delete(ws.raw);
-      }
+      const handle = ptys.get(ws.raw);
+      if (!handle) return;
+      ptys.delete(ws.raw);
+      // Attached sockets just detach — the session PTY lives on. Fresh shells die.
+      if (handle.kind === "attach") handle.detach();
+      else closePty(handle.proc);
     },
   })
   // CRUD groups.

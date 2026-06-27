@@ -3,9 +3,10 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef } from "react";
 
-// xterm.js wired to the supervisor's /pty WebSocket. Server sends binary PTY
-// output; we send JSON input/resize frames back.
-export function ShellTerminal({ cwd }: { cwd?: string }) {
+// xterm.js wired to the /pty WebSocket. Server sends binary PTY output; we send
+// JSON input/resize frames back. Pass `session` to attach to a local session's
+// long-lived agent PTY; otherwise `cwd` opens a fresh shell at that path.
+export function ShellTerminal({ cwd, session }: { cwd?: string; session?: number }) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -24,7 +25,8 @@ export function ShellTerminal({ cwd }: { cwd?: string }) {
     fit.fit();
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const qs = cwd ? `?cwd=${encodeURIComponent(cwd)}` : "";
+    const qs =
+      session != null ? `?session=${session}` : cwd ? `?cwd=${encodeURIComponent(cwd)}` : "";
     const ws = new WebSocket(`${proto}://${location.host}/pty${qs}`);
     ws.binaryType = "arraybuffer";
 
@@ -60,7 +62,7 @@ export function ShellTerminal({ cwd }: { cwd?: string }) {
       ws.close();
       term.dispose();
     };
-  }, [cwd]);
+  }, [cwd, session]);
 
   return <div ref={ref} style={{ height: "100%", width: "100%" }} />;
 }
