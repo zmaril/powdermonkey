@@ -10,7 +10,16 @@ PowderMonkey is an alternative web interface for Claude Code. It's really nothin
 ```bash
 bun install
 bun run build:web   # bundle the Mantine app → public/assets/
-bun run dev         # supervisor + UI on http://localhost:4500
+bun run dev         # supervisor + UI on http://localhost:4500 (foreground)
+```
+
+For a long-running operator session, run the supervisor in its own tmux pane on
+the private `powdermonkey` socket instead — it then outlives the launching
+terminal and auto-restarts (with backoff) if it crashes:
+
+```bash
+bun run serve                              # launch (idempotent); prints attach cmd
+tmux -L powdermonkey attach -t pm-server   # watch the server console
 ```
 
 Load the seed plan (PowderMonkey's own roadmap) so the tree has something to show:
