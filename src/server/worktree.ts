@@ -112,3 +112,55 @@ export async function landSession(sessionId: number): Promise<LandResult> {
     .returning();
   return { ok: true, session: updated };
 }
+
+export type StopResult =
+  | { ok: true; session: Session }
+  | { ok: false; error: string; output?: string };
+
+/** Abort a session that's still running. Unlike `land` (graceful teardown of
+ *  *finished* work, which refuses a dirty worktree), `stop` is the kill switch: it
+ *  tears the agent down without requiring a clean tree, records the session as
+ *  `stopped` + archived, and rolls the task back to `pending` so it can be re-run.
+ *
+ *  - local: kill the agent's tmux/PTY, then force-remove its worktree (discarding
+ *    any in-progress work) so a re-run can recreate it at the same path.
+ *  - remote: we can't reach the cloud run from here, so all we can do is record it
+ *    as stopped; the operator stops the actual run in the Claude web UI. */
+export async function stopSession(sessionId: number): Promise<StopResult> {
+  const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+  if (!session) return { ok: false, error: `unknown session "${sessionId}"` };
+
+  if (session.kind === "local") {
+    // Kill the live agent first, then drop its worktree out from under it. The
+    // force-remove can still fail (e.g. the path is already gone); that's logged
+    // but never blocks the abort — the point is to stop the agent, not to garbage
+    // collect perfectly.
+    killSessionPty(sessionId);
+    if (session.worktreePath) {
+      const rm = await worktreeRemove(session.worktreePath, { force: true });
+      if (!rm.ok) console.warn(`stop: worktree remove (non-fatal): ${rm.output}`);
+    }
+  }
+
+  const [updated] = await db
+    .update(sessions)
+    .set({ state: "stopped", archivedAt: new Date(), updatedAt: new Date() })
+    .where(eq(sessions.id, sessionId))
+    .returning();
+
+  // Roll the task back to pending so it's dispatchable again, and clear the runtime
+  // session fields that pointed at this aborted run (a remote session set these).
+  if (session.taskId != null) {
+    await db
+      .update(tasks)
+      .set({
+        status: "pending",
+        sessionState: null,
+        sessionUrl: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(tasks.id, session.taskId));
+  }
+
+  return { ok: true, session: updated };
+}

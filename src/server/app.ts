@@ -17,7 +17,7 @@ import {
   writeSessionPty,
 } from "./session-pty.ts";
 import { readSessionStatus } from "./session-status.ts";
-import { landSession, startLocalSession } from "./worktree.ts";
+import { landSession, startLocalSession, stopSession } from "./worktree.ts";
 
 // Full CRUD for every vocab entity, plus the nested plan loader and the runtime
 // dispatch/status routes. Eden Treaty consumes `App` (exported below) so the
@@ -104,11 +104,17 @@ const tasksGroup = resource("tasks", taskRepo, models.tasks)
     return result ?? { error: "not found" };
   });
 
-// Sessions carry `land` (tear down the worktree) and `open-editor` (VS Code on
-// the operator's machine) on top of CRUD.
+// Sessions carry `land` (graceful teardown of finished work), `stop` (abort a
+// running session) and `open-editor` (VS Code on the operator's machine) on top
+// of CRUD.
 const sessionsGroup = resource("sessions", sessionRepo, models.sessions)
   .post("/:id/land", async ({ params, set }) => {
     const result = await landSession(Number(params.id));
+    if (!result.ok) set.status = 400;
+    return result;
+  })
+  .post("/:id/stop", async ({ params, set }) => {
+    const result = await stopSession(Number(params.id));
     if (!result.ok) set.status = 400;
     return result;
   })
