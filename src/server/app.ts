@@ -1,7 +1,10 @@
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type { TSchema } from "@sinclair/typebox";
 import { Elysia, t } from "elysia";
 import { goalRepo, milestoneRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
+import { openSessionEditor } from "./editor.ts";
 import { models } from "./models.ts";
 import { loadPlan, planSchema } from "./plan.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
@@ -101,15 +104,19 @@ const tasksGroup = resource("tasks", taskRepo, models.tasks)
     return result ?? { error: "not found" };
   });
 
-// Sessions carry a `land` route (tear down the worktree) on top of CRUD.
-const sessionsGroup = resource("sessions", sessionRepo, models.sessions).post(
-  "/:id/land",
-  async ({ params, set }) => {
+// Sessions carry `land` (tear down the worktree) and `open-editor` (VS Code on
+// the operator's machine) on top of CRUD.
+const sessionsGroup = resource("sessions", sessionRepo, models.sessions)
+  .post("/:id/land", async ({ params, set }) => {
     const result = await landSession(Number(params.id));
     if (!result.ok) set.status = 400;
     return result;
-  },
-);
+  })
+  .post("/:id/open-editor", async ({ params, set }) => {
+    const result = await openSessionEditor(Number(params.id));
+    if (!result.ok) set.status = 400;
+    return result;
+  });
 
 export const app = new Elysia()
   .get("/health", () => ({ ok: true }))
@@ -118,6 +125,22 @@ export const app = new Elysia()
   .post("/plan", ({ body }) => loadPlan(body), { body: planSchema })
   // Reconcile progress from PM trailers on main. Also runs on a poll loop.
   .post("/reconcile", () => reconcile())
+  // Image upload from the web shell. The browser is remote, so a dropped image
+  // has to land on the server filesystem first; we save it under data/uploads/
+  // and return the absolute path, which the client then types into the PTY for
+  // Claude Code to detect and attach.
+  .post(
+    "/upload",
+    async ({ body }) => {
+      const dir = join(process.env.PM_REPO_DIR ?? process.cwd(), "data", "uploads");
+      mkdirSync(dir, { recursive: true });
+      const safe = body.file.name.replace(/[^a-zA-Z0-9._-]/g, "_") || "image";
+      const path = join(dir, `${Date.now()}-${safe}`);
+      await Bun.write(path, body.file);
+      return { path };
+    },
+    { body: t.Object({ file: t.File() }) },
+  )
   // Forwarded shell streamed to xterm.js. Two modes:
   //   ?session=<id> → attach to that local session's long-lived `claude` PTY
   //                   (shared + replayed); falls back to a fresh shell in the

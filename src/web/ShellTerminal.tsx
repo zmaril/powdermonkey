@@ -50,6 +50,52 @@ export function ShellTerminal({ cwd, session }: { cwd?: string; session?: number
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "input", data: d }));
     });
 
+    // Shift+Enter inserts a newline instead of submitting. Claude Code binds
+    // newline to Ctrl+J (0x0A), which passes cleanly through tmux — unlike the
+    // kitty-protocol CSI-u sequence, which needs extended-keys setup. So on
+    // Shift+Enter send a bare LF and tell xterm not to also send a CR (submit).
+    term.attachCustomKeyEventHandler((ev) => {
+      if (ev.type === "keydown" && ev.key === "Enter" && ev.shiftKey) {
+        // preventDefault is essential: it stops xterm's follow-up keypress from
+        // also emitting a carriage return (which submits) and stops the hidden
+        // textarea's own newline. Without it, Shift+Enter sends "\n" AND "\r" —
+        // which looks fine on an empty line but submits once you've typed text.
+        ev.preventDefault();
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "input", data: "\n" }));
+        }
+        return false;
+      }
+      return true;
+    });
+
+    // Drag an image in → upload it to the supervisor, then type its server-side
+    // absolute path into the PTY. Claude Code detects image extensions and
+    // attaches them; the browser is remote, so the file must land on the server
+    // filesystem first.
+    const onDragOver = (e: DragEvent) => e.preventDefault();
+    const onDrop = async (e: DragEvent) => {
+      e.preventDefault();
+      const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
+        f.type.startsWith("image/"),
+      );
+      for (const file of files) {
+        try {
+          const body = new FormData();
+          body.append("file", file);
+          const res = await fetch("/upload", { method: "POST", body });
+          const { path } = (await res.json()) as { path?: string };
+          if (path && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "input", data: `${path} ` }));
+          }
+        } catch {
+          term.write("\r\n\x1b[31m[image upload failed]\x1b[0m\r\n");
+        }
+      }
+    };
+    el.addEventListener("dragover", onDragOver);
+    el.addEventListener("drop", onDrop);
+
     const ro = new ResizeObserver(() => {
       fit.fit();
       sendResize();
@@ -59,6 +105,8 @@ export function ShellTerminal({ cwd, session }: { cwd?: string; session?: number
     return () => {
       onData.dispose();
       ro.disconnect();
+      el.removeEventListener("dragover", onDragOver);
+      el.removeEventListener("drop", onDrop);
       ws.close();
       term.dispose();
     };

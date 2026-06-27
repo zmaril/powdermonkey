@@ -85,7 +85,7 @@ function PhaseList({ phases }: { phases: Phase[] }) {
 }
 
 function TaskCard({ task, phases, session }: { task: Task; phases: Phase[]; session?: Session }) {
-  const { startLocal, dispatch, land, openSessionTerminal } = useStore();
+  const { startLocal, dispatch, land, openSessionTerminal, openEditor } = useStore();
   return (
     <Card withBorder radius="md" padding="sm">
       <Group justify="space-between" wrap="nowrap" mb={6}>
@@ -129,6 +129,17 @@ function TaskCard({ task, phases, session }: { task: Task; phases: Phase[]; sess
                 }
               >
                 Shell
+              </Button>
+              <Button
+                size="compact-xs"
+                variant="light"
+                color="blue"
+                onClick={() => openEditor(session.id)}
+                title={
+                  session.kind === "local" ? "Open worktree in VS Code" : "Open PR in github.dev"
+                }
+              >
+                VS Code
               </Button>
               <Button
                 size="compact-xs"

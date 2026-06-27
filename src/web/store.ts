@@ -29,6 +29,7 @@ type State = {
   startLocal: (taskId: number) => Promise<void>;
   dispatch: (taskId: number) => Promise<void>;
   land: (sessionId: number) => Promise<void>;
+  openEditor: (sessionId: number) => Promise<void>;
   reconcile: () => Promise<void>;
   dismissStart: () => void;
 };
@@ -112,6 +113,11 @@ export const useStore = create<State>((set, get) => ({
     const { error } = await api.sessions({ id: sessionId }).land.post();
     if (error) set({ error: String(error.value ?? error.status) });
     await get().refresh();
+  },
+  openEditor: async (sessionId) => {
+    const { data, error } = await api.sessions({ id: sessionId })["open-editor"].post();
+    if (error) return set({ error: String(error.value ?? error.status) });
+    if (data && "ok" in data && !data.ok) set({ error: data.error });
   },
   reconcile: async () => {
     const { error } = await api.reconcile.post();
