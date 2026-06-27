@@ -1,0 +1,6 @@
+node_modules/
+data/
+public/assets/
+.playwright-mcp/
+*.log
+.DS_Store

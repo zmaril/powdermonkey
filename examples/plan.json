@@ -1,0 +1,86 @@
+{
+  "goals": [
+    {
+      "title": "PowderMonkey",
+      "objective": "A single pane of glass over `claude --remote` for long-term solo development: author plans, dispatch them, and watch progress driven by merged PRs.",
+      "milestones": [
+        {
+          "title": "Milestone 1 — smallest end-to-end slice",
+          "tasks": [
+            {
+              "title": "Dispatch a Task as a `claude --remote` session",
+              "phases": [
+                { "name": "shell exec against main" },
+                { "name": "record session url on the task" }
+              ]
+            },
+            {
+              "title": "Read session status back via Playwright",
+              "phases": [
+                { "name": "open session headless" },
+                { "name": "scrape status + Try-Again state" }
+              ]
+            },
+            {
+              "title": "Render the plan progress tree",
+              "phases": [
+                { "name": "fetch state" },
+                { "name": "Goal→Milestone→Task→Phase, rolled up" },
+                { "name": "links out to session + PR" }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Authoring layer (forwarded Claude Code + skill)",
+          "tasks": [
+            {
+              "title": "Forward a backend Claude Code shell into the browser",
+              "phases": [
+                { "name": "PTY via Bun.spawn terminal" },
+                { "name": "WebSocket <-> xterm.js" }
+              ]
+            },
+            {
+              "title": "Authoring skill that drafts plans for approval",
+              "phases": [
+                { "name": "teach the session the /plan contract" },
+                { "name": "draft / approve flow" }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Reconciliation from merged PRs",
+          "tasks": [
+            {
+              "title": "Supervisor git-pulls main to know repo state",
+              "phases": [{ "name": "pull on main" }, { "name": "expose current state to planning" }]
+            },
+            {
+              "title": "Mark Phases/Tasks/Milestones done when a PR merges",
+              "phases": [
+                { "name": "detect merged PR" },
+                { "name": "map PR -> phases" },
+                { "name": "write progress" }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Auto Try-Again + book of work",
+          "tasks": [
+            {
+              "title": "Auto-click Try-Again with smart backoff across sessions",
+              "phases": [{ "name": "detect waiting sessions" }, { "name": "backoff scheduler" }]
+            },
+            {
+              "title": "Book of work — browsable archive of history",
+              "phases": [{ "name": "archive completed nodes" }, { "name": "browse view" }]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

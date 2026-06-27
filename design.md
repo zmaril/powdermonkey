@@ -34,79 +34,84 @@ PowderMonkey is a web application that makes `claude --remote` easier to use for
 
 ```
 ┌─────────────────────────── browser (single pane of glass) ───────────────────────────┐
-│   Mantine UI · Zustand                                                                │
+│   Mantine · Zustand · dockview split                                                  │
 │   ┌────────────────────────┐   ┌─────────────────────────────────────────────────┐    │
-│   │ Shell view             │   │ Plan progress tree                              │    │
-│   │ forwarded Claude Code  │   │ Goal→Milestone→Task→Phase, rolled up            │    │
-│   │ + skill → draft/approve│   │ links out to Sessions & GitHub PRs              │    │
+│   │ Shell (xterm.js)       │   │ Plan progress tree                              │    │
+│   │ live PTY in a worktree │   │ Goal→Milestone→Task→Phase, rolled up            │    │
+│   │ (tabs per session)     │   │ Start local · Dispatch · Land · Reconcile       │    │
 │   └────────────────────────┘   └─────────────────────────────────────────────────┘    │
-└───────────────────────────────────────│──────────────────────────────────────────────┘
-                                         │ HTTP (POST plan, read state)
+└──────────────│──────────────────────────────│────────────────────────────────────────┘
+        WS /pty (PTY bytes)        HTTP — Elysia + Eden (typed CRUD, /plan, /reconcile)
 ┌────────────────────────────── local supervisor (Bun, on main) ───────────────────────┐
-│   PGlite + Drizzle (source of truth)  ·  git pull (to know state)  ·  shell exec        │
+│   PGlite + Drizzle (desired plan)  ·  Elysia API  ·  reconcile loop (reads main)        │
 │              │                                   │                                     │
-│        claude --remote                     Playwright (headless)                       │
-│        exec in cloud (against main)        drives Claude Code Web:                      │
-│                                            read status · auto-click "Try Again"         │
-│                                            (smart backoff across all sessions)          │
+│   local session: git worktree           remote session: claude --remote                │
+│   on pm/task-<id>, PTY-driven           exec in cloud (against main)                    │
+│              └───────────────┬───────────────────┘                                     │
+│                        branch lands on main with PM-Phase: trailers                     │
+│                        → reconcile marks phases done, tasks merged                      │
 └───────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The **supervisor** runs locally on `main`, owns the state, and is the only thing that talks to the cloud. Authoring is just a Claude Code session it execs on the backend with its shell forwarded into the browser — nothing fancier than that; a skill tells that session how to talk to the PowderMonkey server. The **browser** is a thin single-pane-of-glass over it. **Playwright** is the bridge to Claude Code Web — it runs headless and acts on your behalf, polling session status and automatically clicking "Try Again" across all sessions with smart backoff.
+The **supervisor** runs locally on `main`, owns the desired plan, and never executes work itself. The **browser** is a thin single-pane-of-glass over it — a dockview split with a live shell on the left and the plan tree on the right — talking to the supervisor over a typed Elysia/Eden API plus a `/pty` WebSocket.
 
-The `git pull` on `main` is *not* for correctness of execution — the cloud execs against `main` every time regardless. It's so the supervisor knows the current state of the repo before it plans new work or reports on status.
+Work runs in one of two types of interchangeable **sessions**, both isolated from the supervisor's `main` checkout: a **local** session in a git worktree on `pm/task-<id>` (driven through the forwarded PTY shell), or a **remote** `claude --remote` run in the cloud. Either way the result lands on `main`; the supervisor only ever reads `main` to learn what happened. A worktree is just the on-laptop mirror of a cloud run.
 
 # Data model
 
-The plan is a nested hierarchy, but stored flat in two Drizzle/PGlite tables. Sessions live entirely outside the hierarchy. Types are derived directly from the Drizzle table definitions — no separate schema layer.
+The vocabulary is fully normalized — every entity is its own Drizzle/PGlite relation with an auto-assigned integer id and an `archived_at` soft-delete column (null = live, excluded from default lists). Types are derived directly from the table definitions; request bodies are derived from the same tables via drizzle-typebox. No separate schema layer, one validation library (TypeBox, the same one Elysia speaks).
 
 ```
-goals     table   ── each row embeds milestones[]   (a milestone references task ids)
-tasks     table   ── each row embeds phases[]        (phases: "write tests", "implement", "wire up")
-sessions  table   ── independent; not owned by any goal
+goals       ── id, title, objective
+milestones  ── id, goal_id →,      title, position
+tasks       ── id, milestone_id →, title, status, session_url, session_state, pr_url
+phases      ── id, task_id →,      name, status, position
+sessions    ── id, kind(local|remote), state, task_id, branch, worktree_path, url
 ```
 
-- **Goal** — the long-term objective. A row in `goals`, with its **Milestones** as an embedded array.
-- **Milestone** — a checkpoint toward the Goal. Lives inside its Goal row; points at the Tasks it needs.
-- **Task** — a unit of dispatchable work. A row in `tasks`, with its **Phases** as an embedded array.
-- **Phase** — author-defined sub-steps within a Task. The grain at which progress is measured.
-- **Session** — one `claude --remote` run. **Independent of the hierarchy**: a single session may pull work from multiple Goals at once and complete many Phases, Tasks, and Milestones across them in the same run. Sessions are the runtime layer; the two plan tables are the authored layer.
+- **Goal** — the long-term objective.
+- **Milestone** — a checkpoint toward a Goal.
+- **Task** — a unit of dispatchable work.
+- **Phase** — author-defined sub-step within a Task. **The grain at which progress is measured.**
+- **Session** — one run of work, **independent of the hierarchy** (a session may complete phases across many goals). `local` runs in a git worktree; `remote` is a `claude --remote` run.
 
-The plan (`goals` + `tasks`) is drafted by the authoring session as JSON, validated against the Drizzle-derived types, and only persisted after you approve it. Sessions are created at runtime and are never authored.
+Plans are authored as a **nested, id-less tree** (goal → milestones → tasks → phases) and loaded in one transaction via `POST /plan` — the loader assigns the integer ids and wires the foreign keys, so the author never references an id by hand. Everything else is edited through the typed CRUD API. Sessions are created at runtime and are never authored.
 
-Progress (which Phases/Tasks/Milestones are done) is never written by a session directly — it's set during **reconciliation** when a PR merges (see Flows). The plan tables hold the desired work; merged PRs on `main` are the source of truth for what's actually complete.
+Progress is never written by a session directly. It is set during **reconciliation**, which reads `PM-Phase: <id>` / `PM-Task: <id>` trailers off commits that have landed on `main` (see Flows). The tables hold the desired work; `main` is the source of truth for what's actually done.
 
 # Flows
 
-**Authoring.** You talk to a backend Claude Code session (shell forwarded into the browser) about what you want. A skill tells it how to talk to the PowderMonkey server; it drafts the plan as JSON and puts it up for approval — you approve it or request edits. Nothing is persisted automatically.
+**Authoring.** A plan is loaded as a nested id-less tree via `POST /plan`. (The forwarded shell makes drafting interactive — you run Claude in the browser-side terminal — but a hand-written plan curl'd up works the same.)
 
-**Running.** The supervisor dispatches work as `claude --remote` sessions. The cloud execs against `main` every time. The supervisor `git pull`s `main` so it knows the repo's current state before planning or checking status.
+**Running.** Each task is started as a session. **Start local** cuts a `pm/task-<id>` worktree off `main`, records a session, and hands back the prompt plus the per-phase `PM-Phase: <id>` trailer block; you drive it through the forwarded shell in that worktree. **Dispatch remote** is the cloud equivalent (`claude --remote`). Either way work is isolated from the supervisor's `main` checkout and lands on `main` when ready.
 
-**Reconciliation.** Progress is driven by merged PRs, not by sessions self-reporting. When a PR merges, the supervisor pulls `main`, looks at what that PR was working on, and updates the plan — marking the relevant Phases/Tasks/Milestones done. This is why sessions can live outside the hierarchy and roam across Goals: the system never has to trust a session to report what it did, it reads the result off `main`.
+**Reconciliation.** Progress is driven by trailers on commits that have landed on `main`, not by sessions self-reporting. A poll loop (and `POST /reconcile`) scans `git log main` for `PM-Phase: <id>` (one or more phases finished; repeatable across PRs) and the `PM-Task: <id>` shortcut (whole task), marks those phases done, and rolls a task to `merged` once its last phase lands. Idempotent. This is why a task can span several PRs and a session can roam across goals — the system reads the result off `main` rather than trusting anyone.
 
-**Monitoring.** The single pane of glass centers on the **plan progress tree** — Goal → Milestone → Task → Phase with progress rolled up from reconciliation. There is no in-app session viewer: each node links *out* to its Claude Code Web session and its GitHub PR, and you click through. Status is shown on the tree, including a "Try Again" label (a session whose inference run has finished and is waiting to resume); Playwright handles the actual re-clicking automatically with backoff. History is preserved as an archive — a browsable "book of work."
+**Monitoring.** The single pane of glass is a dockview split: a live **shell** (xterm.js over a PTY) on the left, the **plan progress tree** on the right — Goal → Milestone → Task → Phase with progress rolled up at the phase grain. Each task carries its actions (Start local / Dispatch / Land) and a session badge, including a "Try Again" label for a remote session parked waiting to resume. History is preserved as an archive — a browsable "book of work."
 
 # Stack
 
-| Concern        | Choice                                              |
-|----------------|-----------------------------------------------------|
-| Runtime        | Bun                                                 |
-| UI             | Mantine                                             |
-| State (client) | Zustand                                             |
-| Storage        | PGlite + Drizzle (local, owned by supervisor)       |
-| Types          | Derived from Drizzle table definitions              |
-| Authoring      | Backend Claude Code, shell forwarded to browser, + skill |
-| Cloud bridge   | Playwright (drives Claude Code Web)                 |
-| Execution      | `claude --remote`                                   |
+| Concern        | Choice                                                       |
+|----------------|--------------------------------------------------------------|
+| Runtime        | Bun                                                          |
+| API            | Elysia + Eden (end-to-end typed); TypeBox validation         |
+| UI             | Mantine · Zustand · dockview (split) · xterm.js (shell)      |
+| Storage        | PGlite + Drizzle (local, owned by supervisor)                |
+| Types          | Derived from Drizzle tables; bodies via drizzle-typebox      |
+| Forwarded shell| Bun native PTY (`Bun.Terminal`) over a `/pty` WebSocket      |
+| Local exec     | git worktree on `pm/task-<id>`, driven via the shell         |
+| Remote exec    | `claude --remote` (cloud, against `main`)                    |
+| Reconciliation | `PM-Phase:` / `PM-Task:` git trailers on `main`              |
 
-# Milestone 1 — smallest end-to-end slice
+# Status
 
-The thinnest path that proves the loop is worth building:
+The end-to-end loop is built and dogfoodable:
 
-1. Define the Drizzle tables (`goals` with milestones[], `tasks` with phases[]) on PGlite; derive types from them.
-2. Supervisor (Bun) with the PGlite store and a `POST /plan` endpoint that validates and loads plan JSON.
-3. Draft one real plan by hand, `curl` it up (skip the forwarded authoring session for now).
-4. Dispatch one Task as a `claude --remote` session; supervisor `git pull`s `main` to know current state.
-5. Playwright reads that session's status back; render the plan progress tree in a minimal Mantine page with links out to the session and PR.
+- **Normalized data model** — goals/milestones/tasks/phases/sessions, int ids, `archived_at` soft deletes.
+- **Typed API** — Elysia + Eden, full CRUD per entity, drizzle-typebox bodies, nested `POST /plan` loader.
+- **Reconciliation** — trailer scan on `main` (`PM-Phase:` / `PM-Task:`), phase-grained, idempotent, on a poll loop.
+- **Local worktree sessions** — Start local / Land; the on-laptop mirror of `claude --remote`.
+- **Forwarded shell** — Bun native PTY ↔ WebSocket ↔ xterm.js, in a dockview split (shell left, plan right).
+- **Progress tree** — Goal→Milestone→Task→Phase rolled up at the phase grain.
 
-Everything else — the forwarded authoring session, PR-merge reconciliation, auto-"Try Again" with backoff, the book-of-work archive — layers on after this loop closes.
+Still ahead: remote dispatch hardening (the `claude --remote` argv + Playwright status seams are env-overridable but spike-dependent), auto-"Try Again" with backoff, an authoring skill, and the book-of-work archive.
