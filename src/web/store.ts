@@ -1,4 +1,6 @@
+import type { SerializedDockview } from "dockview-react";
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type { Goal, Milestone, Note, Phase, Session, Task } from "../server/schema.ts";
 import { api } from "./client.ts";
 
@@ -35,6 +37,12 @@ type State = {
   shellReq: { key: string; cwd: string; session: number | null; title: string; n: number } | null;
   // Bumped each time the operator asks to open the notepad; App watches it.
   notesReq: number;
+  // The serialized dockview layout (api.toJSON()). Persisted so a reload — notably
+  // the disconnect→refresh recovery — restores your panes; null means "lay out the
+  // default". This is the single source of truth for the dock; layout-changing
+  // buttons set it here and App reflects it onto the dockview api.
+  layout: SerializedDockview | null;
+  setLayout: (layout: SerializedDockview | null) => void;
   openTerminal: (cwd?: string) => void;
   openSessionTerminal: (sessionId: number, title: string) => void;
   openNotes: () => void;
@@ -86,155 +94,168 @@ function ensureScratch(set: (partial: Partial<State>) => void): Promise<Note | n
   return scratchInit;
 }
 
-export const useStore = create<State>((set, get) => ({
-  goals: [],
-  milestones: [],
-  tasks: [],
-  phases: [],
-  sessions: [],
-  notes: [],
-  archive: { goals: [], milestones: [], tasks: [], phases: [], sessions: [] },
-  loading: false,
-  error: null,
-  lastStart: null,
-  shellReq: null,
-  notesReq: 0,
-  openTerminal: (cwd = "") =>
-    set((s) => ({
-      shellReq: {
-        key: cwd ? `cwd:${cwd}` : "repo",
-        cwd,
-        session: null,
-        title: cwd ? cwd.split("/").filter(Boolean).pop() || "shell" : "repo",
-        n: (s.shellReq?.n ?? 0) + 1,
+export const useStore = create<State>()(
+  persist(
+    (set, get) => ({
+      goals: [],
+      milestones: [],
+      tasks: [],
+      phases: [],
+      sessions: [],
+      notes: [],
+      archive: { goals: [], milestones: [], tasks: [], phases: [], sessions: [] },
+      loading: false,
+      error: null,
+      lastStart: null,
+      shellReq: null,
+      notesReq: 0,
+      layout: null,
+      setLayout: (layout) => set({ layout }),
+      openTerminal: (cwd = "") =>
+        set((s) => ({
+          shellReq: {
+            key: cwd ? `cwd:${cwd}` : "repo",
+            cwd,
+            session: null,
+            title: cwd ? cwd.split("/").filter(Boolean).pop() || "shell" : "repo",
+            n: (s.shellReq?.n ?? 0) + 1,
+          },
+        })),
+      openSessionTerminal: (sessionId, title) =>
+        set((s) => ({
+          shellReq: {
+            key: `session:${sessionId}`,
+            cwd: "",
+            session: sessionId,
+            title,
+            n: (s.shellReq?.n ?? 0) + 1,
+          },
+        })),
+      openNotes: () => set((s) => ({ notesReq: s.notesReq + 1 })),
+      refreshNotes: async () => {
+        const { data, error } = await api.notes.get();
+        if (error) return void set({ error: String(error.value ?? error.status) });
+        set({ notes: (data ?? []) as Note[] });
       },
-    })),
-  openSessionTerminal: (sessionId, title) =>
-    set((s) => ({
-      shellReq: {
-        key: `session:${sessionId}`,
-        cwd: "",
-        session: sessionId,
-        title,
-        n: (s.shellReq?.n ?? 0) + 1,
+      ensureScratch: () => ensureScratch(set),
+      saveNote: async (id, values) => {
+        // Optimistic: reflect the edit locally so typing stays responsive, then PATCH.
+        set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, ...values } : n)) }));
+        const { error } = await api.notes({ id }).patch(values);
+        if (error) set({ error: String(error.value ?? error.status) });
       },
-    })),
-  openNotes: () => set((s) => ({ notesReq: s.notesReq + 1 })),
-  refreshNotes: async () => {
-    const { data, error } = await api.notes.get();
-    if (error) return set({ error: String(error.value ?? error.status) });
-    set({ notes: (data ?? []) as Note[] });
-  },
-  ensureScratch: () => ensureScratch(set),
-  saveNote: async (id, values) => {
-    // Optimistic: reflect the edit locally so typing stays responsive, then PATCH.
-    set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, ...values } : n)) }));
-    const { error } = await api.notes({ id }).patch(values);
-    if (error) set({ error: String(error.value ?? error.status) });
-  },
-  refresh: async () => {
-    set({ loading: true, error: null });
-    try {
-      const [goals, milestones, tasks, phases, sessions, notes] = await Promise.all([
-        api.goals.get(),
-        api.milestones.get(),
-        api.tasks.get(),
-        api.phases.get(),
-        api.sessions.get(),
-        api.notes.get(),
-      ]);
-      const err =
-        goals.error ??
-        milestones.error ??
-        tasks.error ??
-        phases.error ??
-        sessions.error ??
-        notes.error;
-      if (err) throw new Error(String(err.value ?? err.status));
-      set({
-        goals: (goals.data ?? []) as Goal[],
-        milestones: (milestones.data ?? []) as Milestone[],
-        tasks: (tasks.data ?? []) as Task[],
-        phases: (phases.data ?? []) as Phase[],
-        sessions: (sessions.data ?? []) as Session[],
-        notes: (notes.data ?? []) as Note[],
-        loading: false,
-      });
-    } catch (e) {
-      set({ error: e instanceof Error ? e.message : String(e), loading: false });
-    }
-  },
-  refreshArchive: async () => {
-    // ?archived=true returns live AND archived rows; the pane filters to the
-    // finished/archived set. We pull the full hierarchy so a task whose goal or
-    // milestone was archived still resolves its context.
-    const q = { query: { archived: "true" } };
-    const [goals, milestones, tasks, phases, sessions] = await Promise.all([
-      api.goals.get(q),
-      api.milestones.get(q),
-      api.tasks.get(q),
-      api.phases.get(q),
-      api.sessions.get(q),
-    ]);
-    const err = goals.error ?? milestones.error ?? tasks.error ?? phases.error ?? sessions.error;
-    if (err) return set({ error: String(err.value ?? err.status) });
-    set({
-      archive: {
-        goals: (goals.data ?? []) as Goal[],
-        milestones: (milestones.data ?? []) as Milestone[],
-        tasks: (tasks.data ?? []) as Task[],
-        phases: (phases.data ?? []) as Phase[],
-        sessions: (sessions.data ?? []) as Session[],
+      refresh: async () => {
+        set({ loading: true, error: null });
+        try {
+          const [goals, milestones, tasks, phases, sessions, notes] = await Promise.all([
+            api.goals.get(),
+            api.milestones.get(),
+            api.tasks.get(),
+            api.phases.get(),
+            api.sessions.get(),
+            api.notes.get(),
+          ]);
+          const err =
+            goals.error ??
+            milestones.error ??
+            tasks.error ??
+            phases.error ??
+            sessions.error ??
+            notes.error;
+          if (err) throw new Error(String(err.value ?? err.status));
+          set({
+            goals: (goals.data ?? []) as Goal[],
+            milestones: (milestones.data ?? []) as Milestone[],
+            tasks: (tasks.data ?? []) as Task[],
+            phases: (phases.data ?? []) as Phase[],
+            sessions: (sessions.data ?? []) as Session[],
+            notes: (notes.data ?? []) as Note[],
+            loading: false,
+          });
+        } catch (e) {
+          set({ error: e instanceof Error ? e.message : String(e), loading: false });
+        }
       },
-    });
-  },
-  startLocal: async (taskId) => {
-    const { data, error } = await api.tasks({ id: taskId })["start-local"].post();
-    if (error) return set({ error: String(error.value ?? error.status) });
-    if (data && "ok" in data && data.ok) {
-      set({
-        lastStart: {
-          taskId,
-          branch: data.branch,
-          worktreePath: data.worktreePath,
-          prompt: data.prompt,
-          trailers: data.trailers,
-        },
-      });
-    }
-    await get().refresh();
-  },
-  dispatch: async (taskId) => {
-    const { error } = await api.tasks({ id: taskId }).dispatch.post();
-    if (error) set({ error: String(error.value ?? error.status) });
-    await get().refresh();
-  },
-  teleport: async (taskId) => {
-    const { data, error } = await api.tasks({ id: taskId }).teleport.post();
-    if (error) set({ error: String(error.value ?? error.status) });
-    else if (data && "ok" in data && !data.ok) set({ error: data.error });
-    await get().refresh();
-  },
-  land: async (sessionId) => {
-    const { error } = await api.sessions({ id: sessionId }).land.post();
-    if (error) set({ error: String(error.value ?? error.status) });
-    await get().refresh();
-  },
-  stop: async (sessionId) => {
-    const { error } = await api.sessions({ id: sessionId }).stop.post();
-    if (error) set({ error: String(error.value ?? error.status) });
-    await get().refresh();
-  },
-  openEditor: async (sessionId) => {
-    const { data, error } = await api.sessions({ id: sessionId })["open-editor"].post();
-    if (error) return set({ error: String(error.value ?? error.status) });
-    if (data && "ok" in data && !data.ok) set({ error: data.error });
-  },
-  reconcile: async () => {
-    const { error } = await api.reconcile.post();
-    if (error) set({ error: String(error.value ?? error.status) });
-    await get().refresh();
-  },
-  dismissStart: () => set({ lastStart: null }),
-  setError: (error) => set({ error }),
-}));
+      refreshArchive: async () => {
+        // ?archived=true returns live AND archived rows; the pane filters to the
+        // finished/archived set. We pull the full hierarchy so a task whose goal or
+        // milestone was archived still resolves its context.
+        const q = { query: { archived: "true" } };
+        const [goals, milestones, tasks, phases, sessions] = await Promise.all([
+          api.goals.get(q),
+          api.milestones.get(q),
+          api.tasks.get(q),
+          api.phases.get(q),
+          api.sessions.get(q),
+        ]);
+        const err =
+          goals.error ?? milestones.error ?? tasks.error ?? phases.error ?? sessions.error;
+        if (err) return void set({ error: String(err.value ?? err.status) });
+        set({
+          archive: {
+            goals: (goals.data ?? []) as Goal[],
+            milestones: (milestones.data ?? []) as Milestone[],
+            tasks: (tasks.data ?? []) as Task[],
+            phases: (phases.data ?? []) as Phase[],
+            sessions: (sessions.data ?? []) as Session[],
+          },
+        });
+      },
+      startLocal: async (taskId) => {
+        const { data, error } = await api.tasks({ id: taskId })["start-local"].post();
+        if (error) return void set({ error: String(error.value ?? error.status) });
+        if (data && "ok" in data && data.ok) {
+          set({
+            lastStart: {
+              taskId,
+              branch: data.branch,
+              worktreePath: data.worktreePath,
+              prompt: data.prompt,
+              trailers: data.trailers,
+            },
+          });
+        }
+        await get().refresh();
+      },
+      dispatch: async (taskId) => {
+        const { error } = await api.tasks({ id: taskId }).dispatch.post();
+        if (error) set({ error: String(error.value ?? error.status) });
+        await get().refresh();
+      },
+      teleport: async (taskId) => {
+        const { data, error } = await api.tasks({ id: taskId }).teleport.post();
+        if (error) set({ error: String(error.value ?? error.status) });
+        else if (data && "ok" in data && !data.ok) set({ error: data.error });
+        await get().refresh();
+      },
+      land: async (sessionId) => {
+        const { error } = await api.sessions({ id: sessionId }).land.post();
+        if (error) set({ error: String(error.value ?? error.status) });
+        await get().refresh();
+      },
+      stop: async (sessionId) => {
+        const { error } = await api.sessions({ id: sessionId }).stop.post();
+        if (error) set({ error: String(error.value ?? error.status) });
+        await get().refresh();
+      },
+      openEditor: async (sessionId) => {
+        const { data, error } = await api.sessions({ id: sessionId })["open-editor"].post();
+        if (error) return void set({ error: String(error.value ?? error.status) });
+        if (data && "ok" in data && !data.ok) set({ error: data.error });
+      },
+      reconcile: async () => {
+        const { error } = await api.reconcile.post();
+        if (error) set({ error: String(error.value ?? error.status) });
+        await get().refresh();
+      },
+      dismissStart: () => set({ lastStart: null }),
+      setError: (error) => set({ error }),
+    }),
+    {
+      // Persist only the dock layout — server data is refetched, and actions /
+      // transient request signals must never be rehydrated from storage.
+      name: "pm-ui",
+      partialize: (s) => ({ layout: s.layout }),
+    },
+  ),
+);

@@ -5,7 +5,6 @@ import {
   DockviewReact,
   type DockviewReadyEvent,
   type IDockviewPanelProps,
-  type SerializedDockview,
   themeAbyss,
 } from "dockview-react";
 import { useEffect, useRef, useState } from "react";
@@ -146,28 +145,11 @@ const dockComponents = {
   scratch: ScratchPanel,
 };
 
-// We persist the dockview layout so the disconnect→reload recovery (and any plain
-// browser refresh) keeps your panes — rearrangements, opened shells, the lot —
-// instead of snapping back to the default arrangement every time.
-const LAYOUT_KEY = "pm.dockview.layout";
-
-function saveLayout(api: DockviewApi) {
-  try {
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify(api.toJSON()));
-  } catch {
-    // localStorage can be unavailable (private mode, quota); persistence is a
-    // nicety, so a failed write just means we fall back to the default next load.
-  }
-}
-
-function loadLayout(): SerializedDockview | null {
-  try {
-    const raw = localStorage.getItem(LAYOUT_KEY);
-    return raw ? (JSON.parse(raw) as SerializedDockview) : null;
-  } catch {
-    return null;
-  }
-}
+// The dock layout is store state (useStore.layout), persisted by the store's
+// `persist` middleware so the disconnect→reload recovery (and any plain browser
+// refresh) keeps your panes — rearrangements, opened shells, the lot — instead of
+// snapping back to the default. App mirrors that state onto the dockview api:
+// onReady restores it, and onDidLayoutChange writes every change back via setLayout.
 
 // The default arrangement, built from scratch when there's no saved layout (or a
 // saved one we couldn't restore): Active/Backlog/Archive tabs in the main group,
@@ -304,6 +286,7 @@ export function App() {
   const shellReq = useStore((s) => s.shellReq);
   const notesReq = useStore((s) => s.notesReq);
   const refresh = useStore((s) => s.refresh);
+  const setLayout = useStore((s) => s.setLayout);
 
   // The one poll for the whole app. Every panel renders off the store, so this
   // keeps Active/Backlog/Scratch current as branches land and sessions change.
@@ -315,10 +298,11 @@ export function App() {
 
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;
-    // Restore the persisted layout if we have one; otherwise lay out the default.
-    // A corrupt/incompatible saved layout (or one that restores to nothing) falls
-    // back to the default so a reload can never leave you staring at a blank dock.
-    const saved = loadLayout();
+    // Restore the layout from the store (rehydrated from localStorage by persist);
+    // otherwise lay out the default. A corrupt/incompatible saved layout (or one
+    // that restores to nothing) falls back to the default so a reload can never
+    // leave you staring at a blank dock.
+    const saved = useStore.getState().layout;
     let restored = false;
     if (saved) {
       try {
@@ -329,9 +313,11 @@ export function App() {
       }
     }
     if (!restored) buildDefaultLayout(event.api);
-    // Persist on every layout change — add/move/close a panel, resize, focus a
-    // tab — so the next load (notably the disconnect→reload) comes back as-is.
-    layoutSubRef.current = event.api.onDidLayoutChange(() => saveLayout(event.api));
+    // Mirror every layout change back into the store — add/move/close a panel,
+    // resize, focus a tab — so it persists and the next load (notably the
+    // disconnect→reload) comes back as-is. Subscribed after the initial build so
+    // restoring doesn't write over what we just restored.
+    layoutSubRef.current = event.api.onDidLayoutChange(() => setLayout(event.api.toJSON()));
   };
 
   // Tear the layout subscription down with the component.
