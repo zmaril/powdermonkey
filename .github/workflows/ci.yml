@@ -1,0 +1,45 @@
+name: CI
+
+# Lint, format, and tests on every push to main and every PR targeting main.
+# Both jobs must pass; mark them as required status checks in the branch
+# protection rules for `main` so a red run blocks the merge button.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref so a fresh push doesn't queue behind a stale one.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint & format (biome)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+
+  test:
+    name: Tests (bun test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      # The worktree/teleport/reconcile suites shell out to git and tmux.
+      # git and tmux ship on ubuntu-latest; the suites isolate their own
+      # tmux socket and temp repos, but git needs a committer identity.
+      - name: Configure git identity
+        run: |
+          git config --global user.name "PowderMonkey CI"
+          git config --global user.email "ci@powdermonkey.local"
+      - run: bun run test
