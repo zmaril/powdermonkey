@@ -19,6 +19,7 @@ export const SESSION_BADGE: Record<SessionState, { label: string; color: string 
   running: { label: "running", color: "blue" },
   waiting: { label: "Try Again", color: "yellow" },
   idle: { label: "idle", color: "gray" },
+  stopped: { label: "stopped", color: "red" },
 };
 
 export function ProgressBar({ phases }: { phases: Phase[] }) {
@@ -95,9 +96,9 @@ export function TaskBadges({ task, session }: { task: Task; session?: Session })
   );
 }
 
-/** Actions for a task that currently HAS a live session: shell, editor, land. */
+/** Actions for a task that currently HAS a live session: shell, editor, land, stop. */
 export function SessionActions({ session }: { session: Session }) {
-  const { land, openSessionTerminal, openEditor } = useStore();
+  const { land, stop, openSessionTerminal, openEditor } = useStore();
   return (
     <Group gap="xs" wrap="nowrap">
       <Badge variant="dot" color="teal" title={session.kind}>
@@ -125,6 +126,22 @@ export function SessionActions({ session }: { session: Session }) {
       </Button>
       <Button size="compact-xs" variant="light" color="teal" onClick={() => land(session.id)}>
         Land
+      </Button>
+      <Button
+        size="compact-xs"
+        variant="light"
+        color="red"
+        title="Abort this session — kills the agent and re-pends the task"
+        onClick={() => {
+          if (
+            window.confirm(
+              "Stop this session? The agent is killed, its worktree discarded, and the task returns to pending.",
+            )
+          )
+            stop(session.id);
+        }}
+      >
+        Stop
       </Button>
     </Group>
   );
