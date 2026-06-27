@@ -53,8 +53,11 @@ if (RECONCILE_MS > 0) {
     running = true;
     try {
       const r = await reconcile();
-      if (r.phasesMarked > 0 || r.tasksCompleted > 0) {
-        console.log(`reconciled: ${r.phasesMarked} phase(s), ${r.tasksCompleted} task(s)`);
+      if (r.phasesMarked > 0 || r.tasksCompleted > 0 || r.sessionsArchived > 0) {
+        console.log(
+          `reconciled: ${r.phasesMarked} phase(s), ${r.tasksCompleted} task(s), ` +
+            `${r.sessionsArchived} session(s) archived`,
+        );
       }
     } catch (e) {
       console.warn("reconcile tick failed:", e instanceof Error ? e.message : e);

@@ -1,7 +1,8 @@
 import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import { db } from "./db.ts";
 import { commitBodies } from "./git.ts";
-import { phases, tasks } from "./schema.ts";
+import { phases, sessions, tasks } from "./schema.ts";
+import { landSession } from "./worktree.ts";
 
 // Progress is driven by what lands on `main`, never by a session self-reporting.
 // A commit carries trailers naming the work it completed:
@@ -18,6 +19,7 @@ const MAIN_BRANCH = process.env.PM_MAIN_BRANCH ?? "main";
 export type ReconcileResult = {
   phasesMarked: number;
   tasksCompleted: number;
+  sessionsArchived: number;
   phaseTrailers: number[];
   taskTrailers: number[];
 };
@@ -36,6 +38,43 @@ function scanTrailers(text: string, key: string): Set<number> {
     for (const id of parseIds(m[1])) ids.add(id);
   }
   return ids;
+}
+
+// Once a task merges, the PR landed, so any session still attached to it is done
+// by definition — leaving it live just makes the Active pane lie. Archive every
+// such session here so it happens automatically, no manual Land required.
+//
+// Driven off the task's current `merged` status (not just this tick's transition),
+// so it's idempotent and self-healing: already-archived sessions are excluded, a
+// teardown that failed last tick is retried, and a session belonging to a still-
+// running (non-merged) task is never touched. A `local` session reuses landSession
+// to tear down its worktree/PTY; a `remote` session has no worktree, so we just
+// archive its row.
+async function archiveMergedTaskSessions(): Promise<number> {
+  const live = await db
+    .select({ id: sessions.id, kind: sessions.kind })
+    .from(sessions)
+    .innerJoin(tasks, eq(sessions.taskId, tasks.id))
+    .where(and(isNull(sessions.archivedAt), eq(tasks.status, "merged")));
+
+  let archived = 0;
+  for (const s of live) {
+    if (s.kind === "local") {
+      const res = await landSession(s.id);
+      if (res.ok) archived++;
+      else console.warn(`reconcile: could not land session ${s.id}: ${res.error}`);
+      continue;
+    }
+    // Remote session: no worktree/PTY to tear down — just archive the row. Guarded
+    // on archivedAt so a concurrent land/stop can't double-archive.
+    const [updated] = await db
+      .update(sessions)
+      .set({ state: "idle", archivedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(sessions.id, s.id), isNull(sessions.archivedAt)))
+      .returning({ id: sessions.id });
+    if (updated) archived++;
+  }
+  return archived;
 }
 
 export async function reconcile(): Promise<ReconcileResult> {
@@ -99,9 +138,12 @@ export async function reconcile(): Promise<ReconcileResult> {
     }
   }
 
+  const sessionsArchived = await archiveMergedTaskSessions();
+
   return {
     phasesMarked,
     tasksCompleted,
+    sessionsArchived,
     phaseTrailers: [...phaseTrailers],
     taskTrailers: [...taskTrailers],
   };

@@ -7,11 +7,18 @@ process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
 const repoDir = mkdtempSync(join(tmpdir(), "pm-repo-"));
 process.env.PM_REPO_DIR = repoDir;
 process.env.PM_MAIN_BRANCH = "main";
+process.env.PM_WORKTREE_DIR = join(mkdtempSync(join(tmpdir(), "pm-wt-")), "wt");
+// Isolate the tmux socket + skip launching a real `claude` so the local-session
+// teardown path (landSession) doesn't touch the operator's real sessions. See the
+// matching note in worktree.test.ts.
+process.env.PM_TMUX_SOCKET = `pm-test-${process.pid}`;
+process.env.PM_SESSION_CMD = "";
 
 const { ready } = await import("../src/server/db.ts");
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
-const { taskRepo, phaseRepo } = await import("../src/server/crud.ts");
+const { taskRepo, phaseRepo, sessionRepo } = await import("../src/server/crud.ts");
 const { reconcile } = await import("../src/server/reconcile.ts");
+const { startLocalSession } = await import("../src/server/worktree.ts");
 
 async function git(...args: string[]): Promise<void> {
   const proc = Bun.spawn(["git", ...args], {
@@ -94,4 +101,79 @@ test("reconcile is idempotent", async () => {
   expect(second.phasesMarked).toBe(0);
   expect(second.tasksCompleted).toBe(0);
   expect(first.phaseTrailers).toEqual(second.phaseTrailers);
+});
+
+test("merging a task archives its live sessions; non-merged tasks are untouched", async () => {
+  await loadPlan(
+    parsePlan({
+      goals: [
+        {
+          title: "Archive",
+          milestones: [
+            {
+              title: "m",
+              tasks: [
+                { title: "local-merged", phases: [{ name: "x" }] },
+                { title: "remote-merged", phases: [{ name: "y" }] },
+                { title: "still-running", phases: [{ name: "z" }] },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+
+  const all = await taskRepo.list();
+  const localTask = all.find((t) => t.title === "local-merged");
+  const remoteTask = all.find((t) => t.title === "remote-merged");
+  const runningTask = all.find((t) => t.title === "still-running");
+  if (!localTask || !remoteTask || !runningTask) throw new Error("seed failed");
+
+  // A real local session (worktree + PTY) for the task we're about to merge.
+  const started = await startLocalSession(localTask.id);
+  if (!started.ok) throw new Error(`start failed: ${started.error}`);
+  const localSession = started.session;
+
+  // A remote session (row only, no worktree) for another task that'll merge, plus a
+  // remote session for a task that stays running and must NOT be touched.
+  const remoteSession = await sessionRepo.create({
+    kind: "remote",
+    state: "running",
+    taskId: remoteTask.id,
+    url: "https://claude.ai/code/remote-merged",
+  });
+  const runningSession = await sessionRepo.create({
+    kind: "remote",
+    state: "running",
+    taskId: runningTask.id,
+    url: "https://claude.ai/code/still-running",
+  });
+
+  // Land the two PRs on main (PM-Task shortcut merges those tasks); the running task
+  // gets no trailer, so it stays pending.
+  await git("commit", "--allow-empty", "-m", `merge local\n\nPM-Task: ${localTask.id}`);
+  await git("commit", "--allow-empty", "-m", `merge remote\n\nPM-Task: ${remoteTask.id}`);
+
+  const result = await reconcile();
+  expect(result.sessionsArchived).toBe(2);
+
+  // Both merged tasks' sessions are archived (and marked idle).
+  const local = await sessionRepo.get(localSession.id);
+  const remote = await sessionRepo.get(remoteSession.id);
+  expect(local?.archivedAt).not.toBeNull();
+  expect(local?.state).toBe("idle");
+  expect(remote?.archivedAt).not.toBeNull();
+  expect(remote?.state).toBe("idle");
+  // The local session's worktree was torn down.
+  expect((await taskRepo.get(localTask.id))?.status).toBe("merged");
+
+  // The still-running task's session is left alone.
+  const running = await sessionRepo.get(runningSession.id);
+  expect(running?.archivedAt).toBeNull();
+  expect(running?.state).toBe("running");
+
+  // Idempotent: a second tick finds nothing left to archive.
+  const again = await reconcile();
+  expect(again.sessionsArchived).toBe(0);
 });
