@@ -98,7 +98,7 @@ export function TaskBadges({ task, session }: { task: Task; session?: Session })
 
 /** Actions for a task that currently HAS a live session: shell, editor, land, stop. */
 export function SessionActions({ session }: { session: Session }) {
-  const { land, stop, openSessionTerminal, openEditor } = useStore();
+  const { land, stop, teleport, openSessionTerminal, openEditor } = useStore();
   return (
     <Group gap="xs" wrap="nowrap">
       <Badge variant="dot" color="teal" title={session.kind}>
@@ -124,6 +124,17 @@ export function SessionActions({ session }: { session: Session }) {
       >
         VS Code
       </Button>
+      {session.kind === "remote" && session.taskId != null && (
+        <Button
+          size="compact-xs"
+          variant="light"
+          color="grape"
+          title="Pull this cloud session down to a local worktree (claude --teleport)"
+          onClick={() => teleport(session.taskId as number)}
+        >
+          Teleport
+        </Button>
+      )}
       <Button size="compact-xs" variant="light" color="teal" onClick={() => land(session.id)}>
         Land
       </Button>

@@ -46,6 +46,7 @@ type State = {
   saveNote: (id: number, values: { title?: string; body?: string }) => Promise<void>;
   startLocal: (taskId: number) => Promise<void>;
   dispatch: (taskId: number) => Promise<void>;
+  teleport: (taskId: number) => Promise<void>;
   land: (sessionId: number) => Promise<void>;
   stop: (sessionId: number) => Promise<void>;
   openEditor: (sessionId: number) => Promise<void>;
@@ -206,6 +207,12 @@ export const useStore = create<State>((set, get) => ({
   dispatch: async (taskId) => {
     const { error } = await api.tasks({ id: taskId }).dispatch.post();
     if (error) set({ error: String(error.value ?? error.status) });
+    await get().refresh();
+  },
+  teleport: async (taskId) => {
+    const { data, error } = await api.tasks({ id: taskId }).teleport.post();
+    if (error) set({ error: String(error.value ?? error.status) });
+    else if (data && "ok" in data && !data.ok) set({ error: data.error });
     await get().refresh();
   },
   land: async (sessionId) => {
