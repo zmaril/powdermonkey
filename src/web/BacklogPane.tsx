@@ -216,15 +216,21 @@ function FlatView({
  *  Order follows the rendered backlog so the first card is the primary task. */
 function SelectionBar({ ids, clear }: { ids: number[]; clear: () => void }) {
   const { startLocalMany, dispatchMany } = useStore();
-  const [busy, setBusy] = useState(false);
+  // Track WHICH batch action is in flight, so the clicked button shows its own
+  // spinner (matching the per-task Dispatch remote / Start local loading state).
+  const [running, setRunning] = useState<"local" | "remote" | null>(null);
+  const busy = running !== null;
 
   const run = async (kind: "local" | "remote") => {
     if (busy || ids.length === 0) return;
-    setBusy(true);
-    if (kind === "local") await startLocalMany(ids);
-    else await dispatchMany(ids);
-    setBusy(false);
-    clear();
+    setRunning(kind);
+    try {
+      if (kind === "local") await startLocalMany(ids);
+      else await dispatchMany(ids);
+      clear();
+    } finally {
+      setRunning(null);
+    }
   };
 
   return (
@@ -238,13 +244,20 @@ function SelectionBar({ ids, clear }: { ids: number[]; clear: () => void }) {
         {ids.length} selected
       </Text>
       <Group gap="xs">
-        <Button size="compact-xs" variant="light" disabled={busy} onClick={() => run("local")}>
+        <Button
+          size="compact-xs"
+          variant="light"
+          loading={running === "local"}
+          disabled={busy}
+          onClick={() => run("local")}
+        >
           Start local
         </Button>
         <Button
           size="compact-xs"
           variant="subtle"
           color="gray"
+          loading={running === "remote"}
           disabled={busy}
           onClick={() => run("remote")}
         >
