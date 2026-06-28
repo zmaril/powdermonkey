@@ -38,35 +38,43 @@ PrReview { number, title, state, headSha, url, files[], comments[] }
 
 ## Layout
 
-Reviewing a PR is a focused, take-over activity, so the pane is a **full-window
-overlay** (`ReviewOverlay` in `App.tsx`: `position: fixed; inset: 0` above
-everything, top bar included) rather than another dockview tab competing for the
-split. It's **one surface** with an internal three-region layout — the regions share
-one PR's selection / scroll / viewed state, which would be painful to sync across
-separate panels:
+Reviewing a PR is a focused, take-over activity, so it's a **full-window overlay**
+(`ReviewOverlay` in `App.tsx`: `position: fixed; inset: 0` above everything, top bar
+included) rather than another tab competing for the main split. Inside the overlay
+is the review's **own dockview** with two panels, so the operator can drag / resize /
+re-tab the review surface itself:
 
 ```
-┌ header: REVIEW #n title · [Unified|Split] · Refresh ─────────────────────┐
-├ sidebar (280px) ┬ diff (scrolls) ───────────────────────────────────────┤
-│ PR title + desc │  file ▸ +adds/-dels [Viewed]                           │
-│ (own scroll)    │  @@ hunk … lines … threads … pending … composer        │
-│ FILES  n/m view │  …                                                     │
-│ @pierre/trees   │                                                        │
+┌ header: REVIEW #n title · [Unified|Split] · Refresh · ✕ Close ───────────┐
+├ Description (~1/3) ┬ Files (~2/3) ───────────────────────────────────────┤
+│ PR title           │ FILES  n/m viewed │  src/web/plan-ui.tsx [Viewed]    │
+│ #n · state         │ ▾ src/web         │  @@ hunk … lines … threads …     │
+│ description (md)   │   plan-ui.tsx  M  │  pending … composer              │
+│                    │   store.ts     M  │  …                               │
 ├ footer: Finish review (summary + Approve / Request changes / Comment) ────┤
 ```
 
-Esc (when not typing) or the header's **✕ Close** drops back to the workspace.
+The default layout (`buildReviewLayout`) puts **Description** on the left (~1/3) and
+**Files** — the tree + diff as one panel — on the right (~2/3). It's rebuilt fresh
+each open (the modal layout isn't persisted). Esc (when not typing) or **✕ Close**
+drops back to the workspace.
 
-- **Sidebar — PR description + file tree.** The PR title and description sit top-left
-  in their own scroll region, so they stay put while the diff scrolls. Below them is
-  a file tree rendered with **[`@pierre/trees`](https://www.npmjs.com/package/@pierre/trees)**
-  (`useFileTree` + `<FileTree>`) — virtualized, with file-type icons and git-status
-  colours (we map GitHub's per-file `status` → its `gitStatus`). It renders in a
-  shadow root, so it's themed by setting `--trees-*` CSS variables on the host
-  (they pierce the shadow boundary). Selecting a file scrolls the diff to it (each
-  file registers a ref; `onSelectionChange` → `scrollIntoView`). This is the one
-  place we took a Pierre package — the diff renderer is still hand-rolled (see the
-  spike); the tree is enough of its own thing, and virtualization helps a big PR.
+The two dockview panels share one PR's state (diff data, view mode, draft, viewed,
+compose). Rather than thread that through panel params, it's held in `ReviewPane` and
+passed via a React **context** (`ReviewCtx`) wrapping `<DockviewReact>` —
+dockview-react renders panels through React portals, which preserve context from
+above, so each panel reads its slice live.
+
+- **Description panel.** PR title, number/state, and the markdown description body.
+- **Files panel — file tree + diff.** A file tree rendered with
+  **[`@pierre/trees`](https://www.npmjs.com/package/@pierre/trees)**
+  (`useFileTree` + `<FileTree>`) — virtualized, file-type icons, git-status colours
+  (we map GitHub's per-file `status` → its `gitStatus`). It renders in a shadow root,
+  themed by the full `--trees-*-override` set on the host (they pierce the shadow
+  boundary — a *partial* set leaves it rendering light). Selecting a file scrolls the
+  diff to it (`onSelectionChange` → a registered ref's `scrollIntoView`). This is the
+  one place we took a Pierre package — the diff renderer is still hand-rolled (see
+  the spike); a tree is enough of its own thing, and virtualization helps a big PR.
 - **Viewed / unviewed.** Each file header has a **Viewed** checkbox (GitHub's
   mechanic): ticking it collapses the file and bumps the sidebar's `n/m viewed`
   count. State is per-file, persisted to `localStorage` keyed by PR number + head

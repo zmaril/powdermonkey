@@ -12,7 +12,22 @@ import {
 } from "@mantine/core";
 import type { GitStatus } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  DockviewReact,
+  type DockviewReadyEvent,
+  type IDockviewPanelProps,
+  themeAbyss,
+} from "dockview-react";
+import {
+  type CSSProperties,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { DiffLine, Hunk } from "../server/diff.ts";
 import type { PrReview, ReviewComment, ReviewEvent, ReviewFile } from "../server/pr-review.ts";
 import { api } from "./client.ts";
@@ -564,21 +579,65 @@ const TREE_VARS: CSSProperties = {
   "--trees-focus-ring-color-override": "#4dabf7",
 } as CSSProperties;
 
-/** The review sidebar: the PR title + description (stays put while the diff scrolls)
- *  over a @pierre/trees file tree. Selecting a file scrolls the diff to it. */
-function ReviewSidebar({
-  review,
-  viewedCount,
-  onSelect,
-}: {
+// The review's shared state, handed to the dockview panels (Description, Files) so
+// each can render its slice. dockview-react renders panels through React portals,
+// which preserve context from above <DockviewReact>, so this reaches them without
+// threading data through panel params.
+type ReviewCtxValue = {
   review: PrReview;
-  viewedCount: number;
-  onSelect: (path: string) => void;
-}) {
+  view: "unified" | "split";
+  draftByKey: Map<string, DraftComment[]>;
+  removeDraft: (id: number) => void;
+  composeKey: string | null;
+  onAdd: (path: string, a: LineAnchor) => void;
+  onCancelCompose: () => void;
+  onSubmitCompose: (body: string) => void;
+  onReply: (inReplyTo: number, body: string) => Promise<void>;
+  posting: boolean;
+  viewed: Set<string>;
+  toggleViewed: (path: string) => void;
+  registerFileEl: (path: string, el: HTMLDivElement | null) => void;
+  scrollToFile: (path: string) => void;
+};
+const ReviewCtx = createContext<ReviewCtxValue | null>(null);
+function useReviewCtx(): ReviewCtxValue {
+  const c = useContext(ReviewCtx);
+  if (!c) throw new Error("ReviewCtx used outside the review overlay");
+  return c;
+}
+
+/** Dockview panel: the PR title + description (the first column). */
+function DescriptionPanel(_props: IDockviewPanelProps) {
+  const { review } = useReviewCtx();
+  return (
+    <Box style={{ height: "100%", overflowY: "auto", background: "#1a1b1e" }} px="md" py={10}>
+      <Text size="sm" fw={600}>
+        {review.title}
+      </Text>
+      <Text size="xs" c="dimmed" mt={2}>
+        #{review.number} · {review.state}
+      </Text>
+      {review.body ? (
+        <Text size="xs" mt={10} style={{ whiteSpace: "pre-wrap", color: "#a6a7ab" }}>
+          {review.body}
+        </Text>
+      ) : (
+        <Text size="xs" c="dimmed" mt={10} fs="italic">
+          No description.
+        </Text>
+      )}
+    </Box>
+  );
+}
+
+/** The @pierre/trees file tree column (inside the Files panel). Selecting a file
+ *  scrolls the diff to it. */
+function FileTreeColumn() {
+  const { review, viewed, scrollToFile } = useReviewCtx();
   const files = review.files;
   // Keep the select handler current without re-creating the tree model each render.
-  const selectRef = useRef(onSelect);
-  selectRef.current = onSelect;
+  const selectRef = useRef(scrollToFile);
+  selectRef.current = scrollToFile;
   const pathsKey = files.map((f) => f.filename).join("\n");
   // biome-ignore lint/correctness/useExhaustiveDependencies: rebuild the model only when the file set changes, not on every parent render.
   const options = useMemo(
@@ -595,11 +654,10 @@ function ReviewSidebar({
     [pathsKey],
   );
   const { model } = useFileTree(options);
-
   return (
     <Box
       style={{
-        width: 280,
+        width: 240,
         flexShrink: 0,
         borderRight: "1px solid #2c2e33",
         display: "flex",
@@ -607,33 +665,12 @@ function ReviewSidebar({
         minHeight: 0,
       }}
     >
-      <Box
-        px="md"
-        py={10}
-        style={{ borderBottom: "1px solid #2c2e33", maxHeight: "45%", overflowY: "auto" }}
-      >
-        <Text size="sm" fw={600}>
-          {review.title}
-        </Text>
-        <Text size="xs" c="dimmed" mt={2}>
-          #{review.number} · {review.state}
-        </Text>
-        {review.body ? (
-          <Text size="xs" mt={8} style={{ whiteSpace: "pre-wrap", color: "#a6a7ab" }}>
-            {review.body}
-          </Text>
-        ) : (
-          <Text size="xs" c="dimmed" mt={8} fs="italic">
-            No description.
-          </Text>
-        )}
-      </Box>
       <Group justify="space-between" px="md" py={6} style={{ flexShrink: 0 }}>
         <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
           FILES
         </Text>
         <Text size="xs" c="dimmed">
-          {viewedCount}/{files.length} viewed
+          {viewed.size}/{files.length} viewed
         </Text>
       </Group>
       <Box style={{ flex: 1, minHeight: 0, ...TREE_VARS }}>
@@ -641,6 +678,88 @@ function ReviewSidebar({
       </Box>
     </Box>
   );
+}
+
+/** The scrollable diff column (inside the Files panel). */
+function DiffColumn() {
+  const {
+    review,
+    view,
+    draftByKey,
+    removeDraft,
+    composeKey,
+    onAdd,
+    onCancelCompose,
+    onSubmitCompose,
+    onReply,
+    posting,
+    viewed,
+    toggleViewed,
+    registerFileEl,
+  } = useReviewCtx();
+  return (
+    <Box style={{ flex: 1, overflowY: "auto", minWidth: 0 }} px="sm" py={4}>
+      {review.files.length === 0 ? (
+        <Text c="dimmed" size="sm" px="sm" py="lg">
+          No files in this PR.
+        </Text>
+      ) : (
+        <Stack gap="sm">
+          {review.files.map((file) => (
+            <Box
+              key={file.filename}
+              ref={(el: HTMLDivElement | null) => registerFileEl(file.filename, el)}
+            >
+              <FileView
+                file={file}
+                comments={review.comments}
+                draftByKey={draftByKey}
+                onRemoveDraft={removeDraft}
+                view={view}
+                viewed={viewed.has(file.filename)}
+                onToggleViewed={() => toggleViewed(file.filename)}
+                composerKey={composeKey}
+                onAdd={onAdd}
+                onCancelCompose={onCancelCompose}
+                onSubmitCompose={onSubmitCompose}
+                onReply={onReply}
+                posting={posting}
+              />
+            </Box>
+          ))}
+        </Stack>
+      )}
+    </Box>
+  );
+}
+
+/** Dockview panel: the file tree + diff together (the second, wider column). */
+function FilesPanel(_props: IDockviewPanelProps) {
+  return (
+    <Box style={{ height: "100%", display: "flex", background: "#1a1b1e" }}>
+      <FileTreeColumn />
+      <DiffColumn />
+    </Box>
+  );
+}
+
+// The two panels inside the review overlay's own dockview. The operator can drag /
+// resize / re-tab them; the layout is rebuilt fresh each time the overlay opens.
+const REVIEW_DOCK = { desc: DescriptionPanel, filesdiff: FilesPanel };
+
+// Default: Description on the left (~1/3), the Files (tree + diff) panel filling the
+// rest (~2/3). Sized after creation off the dockview width.
+function buildReviewLayout(event: DockviewReadyEvent) {
+  const api = event.api;
+  api.addPanel({ id: "desc", component: "desc", title: "Description" });
+  api.addPanel({
+    id: "filesdiff",
+    component: "filesdiff",
+    title: "Files",
+    position: { direction: "right", referencePanel: "desc" },
+  });
+  const w = api.width || window.innerWidth;
+  api.getPanel("desc")?.api.setSize({ width: Math.round(w / 3) });
 }
 
 export function ReviewPane({ number, onClose }: { number: number; onClose?: () => void }) {
@@ -776,6 +895,38 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
     }
   };
 
+  // Everything the dockview panels (Description, Files) need, rebuilt each render so
+  // the portaled panels re-render as state changes. null until the PR has loaded.
+  const ctx: ReviewCtxValue | null = review
+    ? {
+        review,
+        view,
+        draftByKey,
+        removeDraft,
+        composeKey: compose?.key ?? null,
+        onAdd: (path, anchor) => setCompose({ key: keyOf(path, anchor), path, anchor }),
+        onCancelCompose: () => setCompose(null),
+        onSubmitCompose: (body) => {
+          if (compose) addDraft(body, compose.anchor, compose.path);
+        },
+        onReply: (inReplyTo, body) => {
+          // A reply re-uses the parent's anchor only for the (unused) line/side; the
+          // server ignores them when in_reply_to is set.
+          const parent = review.comments.find((c) => c.id === inReplyTo);
+          const anchor: LineAnchor = { side: parent?.side ?? "RIGHT", line: parent?.line ?? 1 };
+          return reply(body, anchor, parent?.path ?? "", inReplyTo);
+        },
+        posting,
+        viewed,
+        toggleViewed,
+        registerFileEl: (path, el) => {
+          if (el) fileEls.current.set(path, el);
+          else fileEls.current.delete(path);
+        },
+        scrollToFile,
+      }
+    : null;
+
   return (
     <Box
       style={{ height: "100%", display: "flex", flexDirection: "column", background: "#1a1b1e" }}
@@ -827,79 +978,37 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
         </Group>
       </Group>
 
-      <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
-        {/* Left: PR title + description (visible while the diff scrolls) and the
-            @pierre/trees file tree (click a file → scroll the diff to it). */}
-        {review && review.files.length > 0 && (
-          <ReviewSidebar review={review} viewedCount={viewed.size} onSelect={scrollToFile} />
-        )}
+      {error && (
+        <Text c="red" size="sm" px="md" py="xs" style={{ flex: "0 0 auto" }}>
+          {error}
+        </Text>
+      )}
 
-        {/* Right: the scrollable diff. */}
-        <Box style={{ flex: 1, overflowY: "auto", minWidth: 0 }} px="sm" py={4}>
-          {error && (
-            <Text c="red" size="sm" px="sm" py="sm">
-              {error}
-            </Text>
-          )}
-          {loading && !review ? (
-            <Text c="dimmed" size="sm" px="sm" py="lg">
-              Loading diff…
-            </Text>
-          ) : review && review.files.length === 0 ? (
-            <Text c="dimmed" size="sm" px="sm" py="lg">
-              No files in this PR.
-            </Text>
-          ) : (
-            <Stack gap="sm">
-              {review?.files.map((file) => (
-                <Box
-                  key={file.filename}
-                  ref={(el: HTMLDivElement | null) => {
-                    if (el) fileEls.current.set(file.filename, el);
-                    else fileEls.current.delete(file.filename);
-                  }}
-                >
-                  <FileView
-                    file={file}
-                    comments={review.comments}
-                    draftByKey={draftByKey}
-                    onRemoveDraft={removeDraft}
-                    view={view}
-                    viewed={viewed.has(file.filename)}
-                    onToggleViewed={() => toggleViewed(file.filename)}
-                    composerKey={compose?.key ?? null}
-                    onAdd={(path, anchor) => setCompose({ key: keyOf(path, anchor), path, anchor })}
-                    onCancelCompose={() => setCompose(null)}
-                    onSubmitCompose={(body) => {
-                      if (compose) addDraft(body, compose.anchor, compose.path);
-                    }}
-                    onReply={(inReplyTo, body) => {
-                      // A reply re-uses the parent's anchor only for the (unused on the
-                      // reply path) line/side; the server ignores them when in_reply_to is set.
-                      const parent = review.comments.find((c) => c.id === inReplyTo);
-                      const anchor: LineAnchor = {
-                        side: parent?.side ?? "RIGHT",
-                        line: parent?.line ?? 1,
-                      };
-                      return reply(body, anchor, parent?.path ?? file.filename, inReplyTo);
-                    }}
-                    posting={posting}
-                  />
-                </Box>
-              ))}
-            </Stack>
-          )}
+      {/* The overlay hosts its OWN dockview — Description (1/3) + Files=tree+diff
+          (2/3) — so the operator can drag/resize/re-tab the review surface. */}
+      {!ctx ? (
+        <Box style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Text c="dimmed" size="sm">
+            {loading ? "Loading diff…" : "No PR loaded."}
+          </Text>
         </Box>
-      </Box>
-
-      {review && (
-        <ReviewBar
-          draft={draft}
-          summary={summary}
-          setSummary={setSummary}
-          submit={submit}
-          submitting={submitting}
-        />
+      ) : (
+        <ReviewCtx.Provider value={ctx}>
+          <Box style={{ flex: 1, minHeight: 0 }}>
+            <DockviewReact
+              components={REVIEW_DOCK}
+              onReady={buildReviewLayout}
+              theme={themeAbyss}
+            />
+          </Box>
+          <ReviewBar
+            draft={draft}
+            summary={summary}
+            setSummary={setSummary}
+            submit={submit}
+            submitting={submitting}
+          />
+        </ReviewCtx.Provider>
       )}
     </Box>
   );
