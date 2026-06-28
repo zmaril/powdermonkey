@@ -288,8 +288,9 @@ export const app = new Elysia()
   })
   // Realtime change feed. The browser opens this once and refetches its snapshot
   // on every ping, replacing the old 4s poll. Server → client only: a content-free
-  // "changed" ping fired by notifyChange() on any plan/session mutation. We don't
-  // expect client messages, so there's no body schema.
+  // "changed" ping, fired by the DB change feed whenever a watched table moves (see
+  // realtime.ts / startChangeFeed). We don't expect client messages, so there's no
+  // body schema.
   .ws("/events", {
     open(ws) {
       addRealtimeClient(ws.raw, (msg) => {

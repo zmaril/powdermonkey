@@ -4,7 +4,6 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { pullMain } from "./git.ts";
-import { notifyChange } from "./realtime.ts";
 import { type Phase, type Session, type Task, phases, sessions, tasks } from "./schema.ts";
 import { linkSessionTasks } from "./session-tasks.ts";
 
@@ -227,6 +226,5 @@ export async function dispatchTask(taskIds: number | number[]): Promise<Dispatch
     })
     .where(inArray(tasks.id, ids));
 
-  notifyChange();
   return { ok: true, sessionUrl, session };
 }

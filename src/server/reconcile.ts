@@ -3,7 +3,6 @@ import { match } from "ts-pattern";
 import { PhaseStatus, SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { commitBodies } from "./git.ts";
-import { notifyChange } from "./realtime.ts";
 import { phases, sessionTasks, sessions, tasks } from "./schema.ts";
 import { landSession } from "./worktree.ts";
 
@@ -160,9 +159,9 @@ export async function reconcile(): Promise<ReconcileResult> {
 
   const sessionsArchived = await archiveMergedTaskSessions();
 
-  // Only ping clients when this pass actually changed something, so the idle
-  // reconcile loop doesn't wake every browser on every tick.
-  if (phasesMarked > 0 || tasksCompleted > 0 || sessionsArchived > 0) notifyChange();
+  // No explicit client ping here: the phase/task/session writes above go through
+  // the DB, so the change feed (realtime.ts) pushes on its own. An idle pass writes
+  // nothing and so wakes nobody.
 
   return {
     phasesMarked,

@@ -2,7 +2,6 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { SessionKind, SessionState } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { lsRemoteHeads } from "./git.ts";
-import { notifyChange } from "./realtime.ts";
 import { type Session, sessionTasks, sessions, tasks } from "./schema.ts";
 import { taskIdsForSession } from "./session-tasks.ts";
 import { startLocalSession } from "./worktree.ts";
@@ -105,6 +104,5 @@ export async function teleportTask(taskId: number): Promise<TeleportResult> {
     .set({ sessionState: null, updatedAt: new Date() })
     .where(inArray(tasks.id, startIds));
 
-  notifyChange();
   return { ok: true, session: started.session, branch, teleportId };
 }

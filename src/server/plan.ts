@@ -2,7 +2,6 @@ import { type Static, Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { PhaseStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
-import { notifyChange } from "./realtime.ts";
 import { goals, milestones, phases, tasks } from "./schema.ts";
 
 // A plan is authored as a nested, id-less tree: goal → milestones → tasks → phases.
@@ -49,7 +48,7 @@ export type LoadResult = { goals: number; milestones: number; tasks: number; pha
 
 /** Insert the whole authored tree in one transaction; returns counts per level. */
 export async function loadPlan(plan: Plan): Promise<LoadResult> {
-  const counts = await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     const counts: LoadResult = { goals: 0, milestones: 0, tasks: 0, phases: 0 };
     for (const goal of plan.goals) {
       const [g] = await tx
@@ -88,6 +87,4 @@ export async function loadPlan(plan: Plan): Promise<LoadResult> {
     }
     return counts;
   });
-  notifyChange();
-  return counts;
 }

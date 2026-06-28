@@ -208,9 +208,10 @@ async function tick(initial: boolean): Promise<number> {
   for (const ev of events) await bus.emit(ev.type, ev.pr, { initial });
   lastByNumber = new Map(prs.map((p) => [p.number, p]));
   // Live PR status (CI / mergeable / draft) is served from memory via /cloud-prs,
-  // not the DB, so a status move writes no row a CRUD ping would catch. Push one
-  // here when anything we track actually changed, so the Active panel's PR badges
-  // stay live without the poll.
+  // not the DB — so a status move writes no row the DB change feed would catch.
+  // This is the one place that still pings clients by hand. (The enricher's
+  // task.prUrl writes DO go through the DB and reach clients via the feed; once
+  // cloud-PR status itself lives in PGlite, this call goes away too.)
   if (events.length > 0) notifyChange();
   return events.length;
 }
