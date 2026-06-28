@@ -393,9 +393,9 @@ function FilePatch({
     lineAnnotations: annotations,
     renderAnnotation,
     options: {
-      diffStyle: view === "split" ? "split" : "unified",
+      diffStyle: (view === "split" ? "split" : "unified") as "split" | "unified",
       theme: DIFF_THEME,
-      themeType: "dark",
+      themeType: "dark" as const,
       disableFileHeader: true,
       enableGutterUtility: true,
       enableLineSelection: true,
