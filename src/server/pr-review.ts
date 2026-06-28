@@ -1,4 +1,10 @@
 import { join } from "node:path";
+import {
+  type GeneratedReason,
+  type LinguistRule,
+  classifyFile,
+  parseGitattributes,
+} from "./generated.ts";
 import { gh, resolveRepo } from "./gh.ts";
 
 // Review a PR from inside PowderMonkey instead of bouncing to github.com: pull a
@@ -23,6 +29,11 @@ export type ReviewFile = {
    *  `diff --git`/`---`/`+++` header) — fed straight to @pierre/diffs' PatchDiff for
    *  rendering. Empty for binary/too-large files. */
   patch: string;
+  /** Generated/vendored (lockfile, bundle, node_modules, …) — collapsed by default
+   *  in the review pane the way GitHub folds them. See generated.ts. */
+  generated: boolean;
+  /** Why it's collapsed, for the file header (null when not generated). */
+  generatedReason: GeneratedReason | null;
 };
 
 export type ReviewComment = {
@@ -105,15 +116,19 @@ function fullPatch(f: Json): string {
   return `diff --git a/${old} b/${name}\n--- ${oldPath}\n+++ ${newPath}\n${hunks}`;
 }
 
-function mapFiles(raw: Json[]): ReviewFile[] {
-  return raw.map((f) => ({
-    filename: f.filename,
-    status: f.status ?? "modified",
-    additions: f.additions ?? 0,
-    deletions: f.deletions ?? 0,
-    previousFilename: f.previous_filename ?? null,
-    patch: fullPatch(f),
-  }));
+function mapFiles(raw: Json[], attrs: LinguistRule[] = []): ReviewFile[] {
+  return raw.map((f) => {
+    const file = {
+      filename: f.filename,
+      status: f.status ?? "modified",
+      additions: f.additions ?? 0,
+      deletions: f.deletions ?? 0,
+      previousFilename: f.previous_filename ?? null,
+      patch: fullPatch(f),
+    };
+    const { generated, reason } = classifyFile(file, attrs);
+    return { ...file, generated, generatedReason: reason };
+  });
 }
 
 function mapComments(raw: Json[]): ReviewComment[] {
@@ -165,6 +180,12 @@ export async function getPrReview(number: number): Promise<ReviewResult> {
     ghApiJson(`${base}/comments`, true),
   ]);
   if (!pr) return { ok: false, status: 502, error: `could not load PR #${number} via gh` };
+  // Honour the repo's own .gitattributes (linguist-generated/vendored) when deciding
+  // what to collapse — fetched at the PR head so it reflects this branch's rules.
+  const headSha = pr.head?.sha ?? "";
+  const attrs = parseGitattributes(
+    await contentAtRef(`${repo.owner}/${repo.name}`, ".gitattributes", headSha),
+  );
   return {
     ok: true,
     review: {
@@ -172,10 +193,10 @@ export async function getPrReview(number: number): Promise<ReviewResult> {
       title: pr.title ?? `PR #${number}`,
       body: pr.body ?? "",
       state: pr.state ?? "open",
-      headSha: pr.head?.sha ?? "",
+      headSha,
       baseSha: pr.base?.sha ?? "",
       url: pr.html_url ?? "",
-      files: mapFiles(Array.isArray(files) ? files : []),
+      files: mapFiles(Array.isArray(files) ? files : [], attrs),
       comments: mapComments(Array.isArray(comments) ? comments : []),
     },
   };

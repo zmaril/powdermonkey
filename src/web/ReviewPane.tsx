@@ -35,6 +35,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { reasonLabel } from "../server/generated.ts";
 import type { PrReview, ReviewComment, ReviewEvent, ReviewFile } from "../server/pr-review.ts";
 import { api } from "./client.ts";
 
@@ -474,19 +475,22 @@ function estimateHeight(patch: string): number {
  *  — marking viewed also folds). They share one `collapsed` state: toggling Viewed
  *  syncs it (check → fold, uncheck → unfold), but the caret only ever flips the fold,
  *  never the viewed flag — so you can collapse a file without claiming you reviewed it,
- *  or peek at a viewed file without un-viewing it. */
+ *  or peek at a viewed file without un-viewing it. A generated/vendored file (lockfile,
+ *  bundle, …) starts folded by default, with its reason shown in the header. */
 function FileBlock({ file }: { file: ReviewFile }) {
   const { review, viewed, toggleViewed } = useReviewCtx();
   const isViewed = viewed.has(file.filename);
   // The diff body's fold. Driven by the caret directly and by Viewed via the effect
   // below; the caret never writes back to `viewed`, keeping the two states separate.
-  const [collapsed, setCollapsed] = useState(false);
-  // Marking a file viewed folds it; un-viewing unfolds it (and the initial viewed
-  // state, loaded async after mount, folds it on arrival). A manual caret toggle in
-  // between wins until the next viewed change, since this only fires when isViewed does.
+  // A generated file starts folded.
+  const [collapsed, setCollapsed] = useState(file.generated);
+  // Marking a file viewed folds it; un-viewing unfolds it — except a generated file,
+  // which falls back to its folded-by-default. (Fires on mount too, once the async
+  // viewed state arrives.) A manual caret toggle in between wins until the next viewed
+  // change, since this only fires when isViewed (or the generated flag) does.
   useEffect(() => {
-    setCollapsed(isViewed);
-  }, [isViewed]);
+    setCollapsed(isViewed || file.generated);
+  }, [isViewed, file.generated]);
   // Full-file contents for context expansion, fetched on demand (see #2). null =
   // patch-only (light). Switching on pulls the blob and re-renders via MultiFileDiff.
   const [contents, setContents] = useState<{ oldText: string; newText: string } | null>(null);
@@ -538,6 +542,16 @@ function FileBlock({ file }: { file: ReviewFile }) {
           <Badge size="xs" variant="light" color="gray">
             {file.status}
           </Badge>
+          {file.generated && file.generatedReason && (
+            <Badge
+              size="xs"
+              variant="light"
+              color="yellow"
+              title="Generated/vendored — collapsed by default"
+            >
+              {reasonLabel(file.generatedReason)}
+            </Badge>
+          )}
         </Group>
         <Group gap={10} wrap="nowrap">
           <Text size="xs" c="green">
