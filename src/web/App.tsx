@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { ActivePane } from "./ActivePane.tsx";
 import { ArchivePane } from "./ArchivePane.tsx";
 import { BacklogPane } from "./BacklogPane.tsx";
+import { LivePrsPane } from "./LivePrsPane.tsx";
 import { ShellTerminal } from "./ShellTerminal.tsx";
 import { ActivityTab, useTabActivity } from "./TabActivity.tsx";
 import { useNeedsInputNotifications, useNotificationPermission } from "./notifications.ts";
@@ -217,12 +218,17 @@ function ScratchPanel() {
   return <ScratchPad />;
 }
 
+function LivePrsPanel() {
+  return <LivePrsPane />;
+}
+
 const dockComponents = {
   shell: ShellPanel,
   active: ActivePanel,
   backlog: BacklogPanel,
   archive: ArchivePanel,
   scratch: ScratchPanel,
+  livePrs: LivePrsPanel,
 };
 
 // The dock layout is store state (useStore.layout), persisted by the store's
@@ -246,6 +252,13 @@ function buildDefaultLayout(api: DockviewApi) {
     id: "archive",
     component: "archive",
     title: "Archive",
+    position: { direction: "within", referencePanel: "active" },
+  });
+  // SPIKE: a tab proving the PGlite live.changes → TanStack DB pipeline (read-only).
+  api.addPanel({
+    id: "live-prs",
+    component: "livePrs",
+    title: "Live PRs",
     position: { direction: "within", referencePanel: "active" },
   });
   api.addPanel({
