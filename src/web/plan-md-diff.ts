@@ -117,3 +117,23 @@ export function revertHunk(oldText: string, newText: string, h: Hunk): string {
   const replacement = a.slice(h.oldStart - 1, h.oldStart - 1 + h.oldCount);
   return `${[...before, ...replacement, ...after].join("\n")}\n`;
 }
+
+/** The text to apply when reviewing `proposed` against `baseline` with a per-hunk
+ *  selection: each accepted hunk keeps the proposed change; each non-accepted hunk
+ *  falls back to the baseline. Accept-some / revert-some, in one shot. We revert the
+ *  dropped hunks bottom-up so each one's `newStart` stays valid (editing a lower hunk
+ *  never shifts an earlier one's line numbers). */
+export function applySelection(
+  baseline: string,
+  proposed: string,
+  hunks: Hunk[],
+  accepted: Set<number>,
+): string {
+  let result = proposed;
+  const drop = hunks
+    .map((h, i) => ({ h, i }))
+    .filter(({ i }) => !accepted.has(i))
+    .sort((a, b) => b.h.newStart - a.h.newStart);
+  for (const { h } of drop) result = revertHunk(baseline, result, h);
+  return result;
+}

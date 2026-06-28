@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { computeHunks, hunkAt, revertHunk } from "../src/web/plan-md-diff.ts";
+import { applySelection, computeHunks, hunkAt, revertHunk } from "../src/web/plan-md-diff.ts";
 
 const OLD = ["# G `g1`", "", "## M `m1`", "", "### Keep `t1`", "### Drop `t2`"].join("\n");
 
@@ -38,4 +38,28 @@ test("a pure insertion is a hunk with oldCount 0 and reverts to nothing", () => 
 test("identical texts produce no hunks", () => {
   expect(computeHunks(OLD, OLD)).toEqual([]);
   expect(computeHunks(`${OLD}\n`, OLD)).toEqual([]);
+});
+
+test("applySelection composes only the accepted hunks onto the baseline", () => {
+  // Two *independent* changes (separated by an unchanged line so they're distinct
+  // hunks): rename t1 (hunk 0) and rename t2 (hunk 1).
+  const base = ["### Keep1 `t1`", "", "### Keep2 `t2`"].join("\n");
+  const proposed = ["### Renamed1 `t1`", "", "### Renamed2 `t2`"].join("\n");
+  const hunks = computeHunks(base, proposed);
+  expect(hunks.length).toBe(2);
+
+  // Accept all → the full proposal. Accept none → the baseline, untouched.
+  expect(applySelection(base, proposed, hunks, new Set([0, 1])).replace(/\n$/, "")).toBe(proposed);
+  expect(applySelection(base, proposed, hunks, new Set()).replace(/\n$/, "")).toBe(base);
+
+  // Accept only the second change: t1 stays, t2 renamed.
+  const justSecond = applySelection(base, proposed, hunks, new Set([1]));
+  expect(justSecond).toContain("### Keep1 `t1`");
+  expect(justSecond).toContain("### Renamed2 `t2`");
+  expect(justSecond).not.toContain("### Renamed1");
+
+  // Accept only the first: t1 renamed, t2 stays.
+  const justFirst = applySelection(base, proposed, hunks, new Set([0]));
+  expect(justFirst).toContain("### Renamed1 `t1`");
+  expect(justFirst).toContain("### Keep2 `t2`");
 });
