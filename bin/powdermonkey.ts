@@ -33,7 +33,7 @@ usage:
   powdermonkey alias [dir]      symlink a short \`pm\` alongside powdermonkey (opt-in)
   powdermonkey --version        print the version
 
-Needs tmux on PATH (and, unless you run the compiled binary, bun).`;
+Needs tmux and git on PATH (and, unless you run the compiled binary, bun).`;
 
 /** Fail early with a clear message if tmux is missing — every command needs it,
  *  and the alternative is a cryptic ENOENT from deep inside a helper. */

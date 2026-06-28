@@ -35,10 +35,11 @@ Prefer the short name? `powdermonkey alias` symlinks a `pm` next to it (opt-in, 
 it never silently squats `pm` on your PATH); after that `pm serve` / `pm attach`
 work too.
 
-**Runtime dependencies.** macOS/Linux, with **tmux** on PATH. The npm install also
-needs **bun** (it runs the TypeScript directly). If you'd rather not install bun,
-grab the **standalone binary** — a single self-contained executable; tmux is then
-the only thing it needs:
+**Runtime dependencies.** macOS/Linux, with **tmux** and **git** on PATH (git is
+how the supervisor cuts worktrees and reads progress off `main`). The npm install
+also needs **bun** (it runs the TypeScript directly). If you'd rather not install
+bun, grab the **standalone binary** — a single self-contained executable; tmux and
+git are then the only things it needs:
 
 ```bash
 bun run build:compile                 # → dist/ : the binary + its sidecar data files
