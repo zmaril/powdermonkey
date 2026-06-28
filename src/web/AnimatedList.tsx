@@ -43,14 +43,16 @@ function mergeLeaving(
   const result = [...incomingKeys];
   for (const key of leavingKeys) {
     const prevIdx = prevOrder.indexOf(key);
-    let insertAt = result.length;
+    // Default to the top — covers a card that was first (no predecessor to anchor to)
+    // or one whose every predecessor also left, so it eases out where it sat instead
+    // of jumping to the end of the list.
+    let insertAt = 0;
     for (let i = prevIdx - 1; i >= 0; i--) {
       const ri = result.indexOf(prevOrder[i]);
       if (ri !== -1) {
         insertAt = ri + 1;
         break;
       }
-      if (i === 0) insertAt = 0;
     }
     result.splice(insertAt, 0, key);
   }
