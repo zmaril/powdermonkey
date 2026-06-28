@@ -93,3 +93,54 @@ distinction lives in the status enum itself, so no new column.
   modelling smell the codebase works to avoid elsewhere (e.g. the
   `pull_requests` row deliberately keeps "observed cache" and "ledger" columns
   apart). And the reconciler and the operator would contend over one column.
+
+## The decision: a provenance field (option A)
+
+We add a nullable **`done_source`** column to `phases` and `tasks`, typed to a
+`DoneSource` enum of `reconciled | operator`. `status` stays the single
+todo/done axis; `done_source` only labels *how* a completed row got there.
+
+This is the smallest change that respects **both** invariants the system cares
+about at once:
+
+- *`main` is the source of truth for reconciled progress* — the reconciler
+  remains the only thing that writes `done_source = reconciled`. Retro-trailer
+  commits (B) keep this but break the next invariant; operator-done status (C)
+  corrupts the done axis the rollups read.
+- *the supervisor never writes work to `main`* — operator completion is recorded
+  beside the plan, in the DB, not laundered into commit history. Retro-trailers
+  (B) violate exactly this boundary.
+
+Provenance sits beside both: reconciled progress is still earned on `main`, and
+operator assertions are first-class but visibly labelled as assertions, never
+disguised as landed work.
+
+### How it behaves
+
+- **Reconciler.** When it marks a phase/task done it sets
+  `done_source = reconciled`. It may *upgrade* an operator-asserted row if a real
+  trailer later lands (truth supersedes assertion), but it never reopens or
+  overwrites operator work in the other direction. Still idempotent.
+- **Operator completion.** A dedicated action — `POST /phases/:id/complete` and
+  `POST /tasks/:id/complete` — sets `status = done`/`merged` with
+  `done_source = operator`. Going through an explicit endpoint (rather than a raw
+  `status` PATCH) keeps the "don't fake progress" rule intact: the provenance is
+  stamped server-side, so an operator-asserted completion is always honestly
+  labelled and can never masquerade as reconciled.
+- **Reopen.** `POST /phases/:id/reopen` clears an *operator*-asserted completion
+  back to todo. Reconciled completions are not reopened this way — they reflect
+  `main`, so they're undone by changing `main`, not by a button.
+- **Rollups.** Unchanged: `rollup()` still counts `status === done`, so an
+  operator-completed phase contributes to progress exactly like a reconciled one.
+  Only the *rendering* distinguishes them (a "by hand" marker + tooltip), so the
+  operator can always tell the asserted rows from the earned ones at a glance.
+
+### Why not the others, in one line each
+
+- **Retro-trailer commits (B):** makes the supervisor execute work on `main` and
+  launders assertions into fake landed history — wrong boundary, lost audit
+  trail.
+- **Operator-done status (C):** splits "done" into two enum values every consumer
+  must remember to treat as done — silent-undercount bugs waiting to happen, and
+  it conflates *is-it-done* with *who-said-so*.
+
