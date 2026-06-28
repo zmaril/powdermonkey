@@ -14,6 +14,7 @@ import {
 import { useState } from "react";
 import type { Goal, Phase, Task } from "../server/schema.ts";
 import { SessionKind, TaskStatus } from "../shared/types.ts";
+import { AnimatedList } from "./AnimatedList.tsx";
 import { partitionTasks } from "./active.ts";
 import { type Indexes, starFirst, usePlanData } from "./plan-data.ts";
 import {
@@ -123,7 +124,7 @@ function GoalGroup({
             <IdTag prefix="m" id={m.id} />
             <Title order={5}>{m.title}</Title>
           </Group>
-          <Stack gap="xs">
+          <AnimatedList gap={10}>
             {tasks.map((t) => (
               <BacklogCard
                 key={t.id}
@@ -132,7 +133,7 @@ function GoalGroup({
                 selection={selection}
               />
             ))}
-          </Stack>
+          </AnimatedList>
         </Stack>
       ))}
     </Stack>
@@ -201,14 +202,14 @@ function FlatView({
   selection,
 }: { tasks: Task[]; idx: Indexes; selection: Selection }) {
   return (
-    <Stack gap={0}>
+    <AnimatedList gap={0}>
       {starFirst(tasks).map((t) => {
         const m = idx.milestoneById.get(t.milestoneId);
         const g = m ? idx.goalById.get(m.goalId) : undefined;
         const context = [g?.title, m?.title].filter(Boolean).join(" › ");
         return <BacklogRow key={t.id} task={t} idx={idx} context={context} selection={selection} />;
       })}
-    </Stack>
+    </AnimatedList>
   );
 }
 
