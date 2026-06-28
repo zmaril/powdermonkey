@@ -123,6 +123,39 @@ Set `PM_DISPATCH_DRY_RUN=1` to exercise the dispatch flow without touching the
 cloud. `claude` must be installed and logged in.
 
 
+## How progress is tracked (commit trailers)
+
+Progress is read off `main`, never self-reported. When a worker finishes a phase,
+the commit that completes it carries a **trailer** in its message body:
+
+```
+implement the dispatcher
+
+PM-Phase: 41
+```
+
+- `PM-Phase: <id>` — marks one phase done. Repeatable (several lines per commit).
+- `PM-Task: <id>` — shortcut: marks every phase of the task done.
+
+The reconciler scans the commit bodies reachable from `main` for these trailers and
+ticks the matching phases/tasks. It runs on a loop and whenever a PR merges, and
+it's idempotent — re-seeing a done phase is a no-op. The tree fills in as branches
+land on `main`.
+
+> [!NOTE]
+> **Squash merges can drop trailers.** A squash collapses a PR's commits into one,
+> so the `PM-Phase:` / `PM-Task:` lines only reach `main` if they survive into the
+> squash commit's message — which depends on your repo's squash-message setting and
+> whether anyone edits it. If they don't, the work merges but its phases silently
+> stay open. **Merge commits and rebase merges keep the trailers as-is**, so prefer
+> those for `pm/task-*` PRs.
+>
+> If squash-and-merge actually matters to you, **open an issue** — there are fixes
+> ready to wire up (harvest the trailers from the PR at merge time, or record
+> finished phases as marker files in the tree, which survive any merge strategy) and
+> we'll turn one on.
+
+
 ## CI
 
 `.github/workflows/ci.yml` runs on every push to `main` and every PR targeting
