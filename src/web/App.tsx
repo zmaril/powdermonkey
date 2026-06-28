@@ -1,4 +1,4 @@
-import { Button, Code, CopyButton, Group, Popover, Stack, Text, Title } from "@mantine/core";
+import { Button, Divider, Group, Stack, Text, Title } from "@mantine/core";
 import "dockview-core/dist/styles/dockview.css";
 import { useLiveQuery } from "@tanstack/react-db";
 import {
@@ -10,10 +10,14 @@ import {
 } from "dockview-react";
 import { useEffect, useRef, useState } from "react";
 import { SessionState } from "../shared/types.ts";
+import { AboutPane } from "./AboutPane.tsx";
 import { ActivePane } from "./ActivePane.tsx";
 import { ArchivePane } from "./ArchivePane.tsx";
 import { BacklogPane } from "./BacklogPane.tsx";
+import { BrowserPane } from "./BrowserPane.tsx";
+import { HelpPane } from "./HelpPane.tsx";
 import { ReviewPane } from "./ReviewPane.tsx";
+import { SettingsPane } from "./SettingsPane.tsx";
 import { ShellTerminal } from "./ShellTerminal.tsx";
 import { ActivityTab, useTabActivity } from "./TabActivity.tsx";
 import {
@@ -22,7 +26,7 @@ import {
   sessionsCollection,
   tasksCollection,
 } from "./collections.ts";
-import { useNeedsInputNotifications, useNotificationPermission } from "./notifications.ts";
+import { useNeedsInputNotifications } from "./notifications.ts";
 import { useStore } from "./store.ts";
 
 // The single pane of glass. The plan is split into three panels — a live ACTIVE
@@ -219,12 +223,52 @@ function ScratchPanel() {
   return <ScratchPad />;
 }
 
+function BrowserPanel(props: IDockviewPanelProps<{ url: string }>) {
+  const rememberBrowserUrl = useStore((s) => s.rememberBrowserUrl);
+  // Persist a navigation two ways: into this panel's params (so the layout, which is
+  // serialized and saved, brings the URL back on reload) and into the store's
+  // last-used URL (so the next fresh Browser pane opens where you left off).
+  const onNavigate = (url: string) => {
+    props.api.updateParameters({ url });
+    rememberBrowserUrl(url);
+  };
+  return <BrowserPane url={props.params.url ?? ""} onNavigate={onNavigate} />;
+}
+
+function SettingsPanel() {
+  return <SettingsPane />;
+}
+
+function AboutPanel() {
+  return <AboutPane />;
+}
+
+function HelpPanel() {
+  return <HelpPane />;
+}
+
 const dockComponents = {
   shell: ShellPanel,
   active: ActivePanel,
   backlog: BacklogPanel,
   archive: ArchivePanel,
   scratch: ScratchPanel,
+  browser: BrowserPanel,
+  settings: SettingsPanel,
+  about: AboutPanel,
+  help: HelpPanel,
+};
+
+// Tab titles for the singleton panes opened by the top-bar launchers (openPane →
+// paneReq). Component name and panel id are the same string as the pane id.
+const PANE_TITLES: Record<string, string> = {
+  active: "Active",
+  backlog: "Backlog",
+  archive: "Archive",
+  scratch: "Scratch",
+  settings: "Settings",
+  about: "About",
+  help: "Help",
 };
 
 // Reviewing a PR is a focused, take-over activity, not another tab competing for the
@@ -301,89 +345,25 @@ function buildDefaultLayout(api: DockviewApi) {
   active.api.setActive();
 }
 
-// Opt into OS web notifications. Browsers only grant permission on a user gesture,
-// so this is an explicit button; once granted/denied it reflects the standing
-// state (and there's nothing more to do — the choice is the browser's to keep).
-function NotifyButton() {
-  const { permission, request } = useNotificationPermission();
-  if (permission === "unsupported") return null;
-  const label =
-    permission === "granted" ? "🔔 On" : permission === "denied" ? "🔕 Blocked" : "🔔 Notify";
+// A top-bar button that opens (or focuses) a pane. The whole top bar is now just
+// these launchers — one per pane type — so summoning any pane is the same gesture.
+function PaneButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <Button
-      size="compact-xs"
-      variant="default"
-      onClick={request}
-      disabled={permission !== "default"}
-      title={
-        permission === "granted"
-          ? "Desktop notifications are on — you'll be pinged when a session needs you"
-          : permission === "denied"
-            ? "Notifications are blocked in your browser settings"
-            : "Enable desktop notifications when a session needs you"
-      }
-    >
+    <Button size="compact-xs" variant="default" onClick={onClick}>
       {label}
     </Button>
   );
 }
 
-// One command + a copy button. The shell can't reach into the operator's terminal
-// to attach for them — all the UI can do is hand over the exact line to paste.
-function CommandRow({ cmd, hint }: { cmd: string; hint: string }) {
-  return (
-    <div>
-      <Group gap={6} wrap="nowrap" justify="space-between">
-        <Code style={{ fontSize: 12 }}>{cmd}</Code>
-        <CopyButton value={cmd}>
-          {({ copied, copy }) => (
-            <Button
-              size="compact-xs"
-              variant={copied ? "light" : "default"}
-              color={copied ? "teal" : undefined}
-              onClick={copy}
-            >
-              {copied ? "Copied" : "Copy"}
-            </Button>
-          )}
-        </CopyButton>
-      </Group>
-      <Text size="xs" c="dimmed">
-        {hint}
-      </Text>
-    </div>
-  );
-}
-
-// "Attach" → a popover with the terminal command that opens the tmux dashboard
-// (one pane per session + the server). The browser shell shows one agent at a
-// time; this is how you watch the whole machine from your own terminal.
-function AttachButton() {
-  return (
-    <Popover width={300} position="bottom-end" withArrow shadow="md">
-      <Popover.Target>
-        <Button size="compact-xs" variant="default">
-          Attach
-        </Button>
-      </Popover.Target>
-      <Popover.Dropdown>
-        <Stack gap={8}>
-          <Text size="xs" c="dimmed">
-            Open the tmux dashboard in your terminal — one pane per live session, plus the server:
-          </Text>
-          <CommandRow cmd="powdermonkey attach" hint="installed globally (npm i -g powdermonkey)" />
-          <CommandRow cmd="bun run attach" hint="from a checkout" />
-        </Stack>
-      </Popover.Dropdown>
-    </Popover>
-  );
-}
-
-// Slim global toolbar: the app title, the cross-cutting actions (Shell / Scratch /
-// Reconcile), and the error banner. Lives above the dockview so it's always visible
-// regardless of which panel is focused.
+// Slim global toolbar: the app title, the error banner, and a launcher for every
+// pane type. Click one and the pane appears (or comes forward) below — singletons
+// focus their one instance, Shell/Browser open a fresh one each time. Lives above
+// the dockview so it's always reachable regardless of which panel is focused.
 function TopBar() {
-  const { error, reconcile, openTerminal, openNotes } = useStore();
+  const openPane = useStore((s) => s.openPane);
+  const openTerminal = useStore((s) => s.openTerminal);
+  const openBrowser = useStore((s) => s.openBrowser);
+  const error = useStore((s) => s.error);
   // "loading" until the first collection snapshot lands.
   const loading = useLiveQuery(() => tasksCollection).isLoading;
   return (
@@ -403,17 +383,17 @@ function TopBar() {
           )}
         </Group>
         <Group gap={6} wrap="nowrap">
-          <NotifyButton />
-          <Button size="compact-xs" variant="default" onClick={() => openTerminal("")}>
-            Shell
-          </Button>
-          <AttachButton />
-          <Button size="compact-xs" variant="default" onClick={openNotes}>
-            Scratch
-          </Button>
-          <Button size="compact-xs" variant="default" onClick={reconcile}>
-            Reconcile
-          </Button>
+          <PaneButton label="Active" onClick={() => openPane("active")} />
+          <PaneButton label="Backlog" onClick={() => openPane("backlog")} />
+          <PaneButton label="Archive" onClick={() => openPane("archive")} />
+          <Divider orientation="vertical" />
+          <PaneButton label="Shell" onClick={() => openTerminal("")} />
+          <PaneButton label="Browser" onClick={() => openBrowser()} />
+          <PaneButton label="Scratch" onClick={() => openPane("scratch")} />
+          <Divider orientation="vertical" />
+          <PaneButton label="Settings" onClick={() => openPane("settings")} />
+          <PaneButton label="About" onClick={() => openPane("about")} />
+          <PaneButton label="Help" onClick={() => openPane("help")} />
         </Group>
       </Group>
     </div>
@@ -482,7 +462,8 @@ export function App() {
   const apiRef = useRef<DockviewApi | null>(null);
   const layoutSubRef = useRef<{ dispose: () => void } | null>(null);
   const shellReq = useStore((s) => s.shellReq);
-  const notesReq = useStore((s) => s.notesReq);
+  const browserReq = useStore((s) => s.browserReq);
+  const paneReq = useStore((s) => s.paneReq);
   const setLayout = useStore((s) => s.setLayout);
   const loadSettings = useStore((s) => s.loadSettings);
 
@@ -550,22 +531,42 @@ export function App() {
     });
   }, [shellReq]);
 
-  // Scratch button → focus the scratchpad (recreate it top-left if it was closed).
+  // Browser button → add a new browser pane (an iframe on a dev server / preview).
+  // Each request opens a distinct panel (keyed by `n`) so you can watch several
+  // previews at once; the loaded URL rides in the panel params so it persists with
+  // the layout. Added in the main group, alongside Active/Backlog/Archive.
   useEffect(() => {
     const api = apiRef.current;
-    if (!notesReq || !api) return;
-    const existing = api.getPanel("scratch");
+    if (!browserReq) return;
+    api?.addPanel({
+      id: `browser-${browserReq.n}`,
+      component: "browser",
+      params: { url: browserReq.url },
+      title: "Browser",
+      position: { referencePanel: "active", direction: "within" },
+    });
+  }, [browserReq]);
+
+  // A pane-launcher button → focus the singleton pane if it's already open, else add
+  // it. New panes land "within" the main group (next to Active/Backlog/Archive) when
+  // that anchor exists, otherwise wherever dockview puts a group-less panel — so a
+  // launcher always brings the pane up even if the default layout was torn apart.
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!paneReq || !api) return;
+    const existing = api.getPanel(paneReq.id);
     if (existing) {
       existing.api.setActive();
       return;
     }
+    const anchor = api.getPanel("active") ? "active" : api.panels[0]?.id;
     api.addPanel({
-      id: "scratch",
-      component: "scratch",
-      title: "Scratch",
-      position: { referencePanel: "active", direction: "left" },
+      id: paneReq.id,
+      component: paneReq.id,
+      title: PANE_TITLES[paneReq.id] ?? paneReq.id,
+      position: anchor ? { referencePanel: anchor, direction: "within" } : undefined,
     });
-  }, [notesReq]);
+  }, [paneReq]);
 
   const disconnected = useConnectionWatch();
 

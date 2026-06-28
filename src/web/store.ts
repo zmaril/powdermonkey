@@ -34,8 +34,21 @@ type State = {
   // agent PTY; otherwise `cwd` opens a fresh shell ("" = repo dir). `key` dedupes
   // panels, `title` labels them, `n` makes repeats distinct so the effect re-fires.
   shellReq: { key: string; cwd: string; session: number | null; title: string; n: number } | null;
-  // Bumped each time the operator asks to open the notepad; App watches it.
-  notesReq: number;
+  // Latest request to open a browser pane (an iframe pointed at a dev server /
+  // local preview). `url` is the page to load; `n` makes repeats distinct so App's
+  // effect re-fires. App adds a `browser` panel keyed so a fresh one opens each time.
+  browserReq: { url: string; n: number } | null;
+  // The last URL loaded in a Browser pane, remembered across reloads (persisted) so a
+  // fresh pane opens where you left off. Updated whenever a pane navigates.
+  lastBrowserUrl: string;
+  rememberBrowserUrl: (url: string) => void;
+  // Latest request to open (or focus) a singleton pane — the plan views and the
+  // single-instance tool panes (scratch, settings, about, help). App focuses it if
+  // it's already open, else adds it to the active group. `n` makes repeats distinct
+  // so the effect re-fires. (Shell and Browser are multi-instance, so they keep
+  // their own request signals.)
+  paneReq: { id: string; n: number } | null;
+  openPane: (id: string) => void;
   // In-app activity indicators, keyed by dockview panel id (e.g. "active"). True
   // means the pane has changes you haven't seen because its tab wasn't on screen;
   // the tab shows an ambient dot until viewed. Transient — never persisted.
@@ -53,7 +66,7 @@ type State = {
   setLayout: (layout: SerializedDockview | null) => void;
   openTerminal: (cwd?: string) => void;
   openSessionTerminal: (sessionId: number, title: string) => void;
-  openNotes: () => void;
+  openBrowser: (url?: string) => void;
   loadSettings: () => Promise<void>;
   openReview: (number: number, title: string) => void;
   closeReview: () => void;
@@ -148,7 +161,11 @@ export const useStore = create<State>()(
       pending: {},
       lastStart: null,
       shellReq: null,
-      notesReq: 0,
+      browserReq: null,
+      lastBrowserUrl: "http://localhost:3000",
+      rememberBrowserUrl: (url) => set({ lastBrowserUrl: url }),
+      paneReq: null,
+      openPane: (id) => set((s) => ({ paneReq: { id, n: (s.paneReq?.n ?? 0) + 1 } })),
       tabActivity: {},
       flagTab: (paneId) =>
         set((s) =>
@@ -183,7 +200,10 @@ export const useStore = create<State>()(
             n: (s.shellReq?.n ?? 0) + 1,
           },
         })),
-      openNotes: () => set((s) => ({ notesReq: s.notesReq + 1 })),
+      openBrowser: (url) =>
+        set((s) => ({
+          browserReq: { url: url ?? s.lastBrowserUrl, n: (s.browserReq?.n ?? 0) + 1 },
+        })),
       openReview: (number, title) => set({ review: { number, title } }),
       closeReview: () => set({ review: null }),
       loadSettings: async () => {
@@ -311,7 +331,11 @@ export const useStore = create<State>()(
       // Persist the dock layout and the auto-rebase toggle so they rehydrate
       // synchronously on load — the toggle renders in its last position instead of
       // flipping from the default once the server value arrives.
-      partialize: (s) => ({ layout: s.layout, autoRebase: s.autoRebase }),
+      partialize: (s) => ({
+        layout: s.layout,
+        autoRebase: s.autoRebase,
+        lastBrowserUrl: s.lastBrowserUrl,
+      }),
     },
   ),
 );
