@@ -1,6 +1,16 @@
-import { Anchor, Badge, Box, Button, Group, Stack, Text, Textarea } from "@mantine/core";
+import {
+  Anchor,
+  Badge,
+  Box,
+  Button,
+  Group,
+  SegmentedControl,
+  Stack,
+  Text,
+  Textarea,
+} from "@mantine/core";
 import { useCallback, useEffect, useState } from "react";
-import type { DiffLine } from "../server/diff.ts";
+import type { DiffLine, Hunk } from "../server/diff.ts";
 import type { PrReview, ReviewComment, ReviewFile } from "../server/pr-review.ts";
 import { api } from "./client.ts";
 
@@ -10,8 +20,9 @@ import { api } from "./client.ts";
 // server (pr-review.ts) does the GitHub I/O via `gh`; this is pure rendering off
 // the /prs/:n/review payload plus a POST per comment.
 //
-// Comments anchor to RIGHT/new-line for added or context lines, LEFT/old-line for
-// removed — the same anchoring GitHub uses when you comment on a diff line.
+// Two layouts, toggled: Unified (one column, +/- interleaved) and Split (old left,
+// new right). Comments anchor the same way in both — RIGHT/new-line for added or
+// context lines, LEFT/old-line for removed — so the thread + composer code is shared.
 
 type Side = "LEFT" | "RIGHT";
 type LineAnchor = { side: Side; line: number };
@@ -19,6 +30,8 @@ type LineAnchor = { side: Side; line: number };
 const COL = {
   add: "#12331f",
   del: "#3a1518",
+  addNo: "#1a4d2e",
+  delNo: "#5c2126",
   gutter: "#787f87",
   context: "transparent",
 } as const;
@@ -189,21 +202,58 @@ function Composer({
   );
 }
 
+// A rendered cell in either layout: a diff line plus the column it sits in (unified
+// rows have one cell; split rows have an optional left and right).
+type Cell = { line: DiffLine | null };
+
+/** Pair a hunk's lines into split rows: context aligns on both sides, and a run of
+ *  removals is zipped against the following run of additions (leftovers stand
+ *  alone) so a typical edit lines up old-vs-new. */
+function toSplitRows(hunk: Hunk): { left: Cell; right: Cell }[] {
+  const rows: { left: Cell; right: Cell }[] = [];
+  const lines = hunk.lines;
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.type === "context") {
+      rows.push({ left: { line }, right: { line } });
+      i++;
+      continue;
+    }
+    const dels: DiffLine[] = [];
+    const adds: DiffLine[] = [];
+    while (i < lines.length && lines[i].type === "del") dels.push(lines[i++]);
+    while (i < lines.length && lines[i].type === "add") adds.push(lines[i++]);
+    const n = Math.max(dels.length, adds.length);
+    for (let j = 0; j < n; j++) {
+      rows.push({ left: { line: dels[j] ?? null }, right: { line: adds[j] ?? null } });
+    }
+  }
+  return rows;
+}
+
+function bg(line: DiffLine | null): string {
+  if (!line) return "#161718";
+  return line.type === "add" ? COL.add : line.type === "del" ? COL.del : COL.context;
+}
+
 const mono = {
   fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
   fontSize: 12,
   lineHeight: "18px",
 } as const;
 
-function bg(line: DiffLine): string {
-  return line.type === "add" ? COL.add : line.type === "del" ? COL.del : COL.context;
-}
-
-/** One unified diff row: the line-number gutter, a hover "+" that opens the
- *  composer, the +/- marker, and the content. */
-function LineRow({ line, onAdd }: { line: DiffLine; onAdd: (() => void) | null }) {
+/** A line's content cell with a hover "+" that opens the composer for that line. */
+function LineContent({
+  line,
+  num,
+  onAdd,
+}: {
+  line: DiffLine | null;
+  num: number | null;
+  onAdd: (() => void) | null;
+}) {
   const [hover, setHover] = useState(false);
-  const num = line.type === "del" ? line.oldLine : line.newLine;
   return (
     <Box
       style={{ display: "flex", background: bg(line), minHeight: 18, position: "relative" }}
@@ -250,9 +300,9 @@ function LineRow({ line, onAdd }: { line: DiffLine; onAdd: (() => void) | null }
         style={{ flex: 1, whiteSpace: "pre-wrap", wordBreak: "break-all", paddingLeft: 8, ...mono }}
       >
         <Text span style={{ color: COL.gutter, userSelect: "none" }}>
-          {line.type === "add" ? "+" : line.type === "del" ? "-" : " "}
+          {line ? (line.type === "add" ? "+" : line.type === "del" ? "-" : " ") : ""}
         </Text>
-        {line.content}
+        {line?.content}
       </Box>
     </Box>
   );
@@ -261,6 +311,7 @@ function LineRow({ line, onAdd }: { line: DiffLine; onAdd: (() => void) | null }
 function FileView({
   file,
   comments,
+  view,
   onAdd,
   onReply,
   composerKey,
@@ -270,6 +321,7 @@ function FileView({
 }: {
   file: ReviewFile;
   comments: ReviewComment[];
+  view: "unified" | "split";
   onAdd: (path: string, a: LineAnchor) => void;
   onReply: (inReplyTo: number, body: string) => Promise<void>;
   composerKey: string | null;
@@ -279,6 +331,32 @@ function FileView({
 }) {
   const [open, setOpen] = useState(true);
   const { topByAnchor, repliesByParent } = indexComments(comments, file.filename);
+
+  // The comment thread + composer + add-button affordance for a given line, shared
+  // by both layouts. Returns the row plus any attachments stacked beneath it.
+  const attachments = (line: DiffLine | null) => {
+    if (!line) return null;
+    const a = anchorOf(line);
+    if (!a) return null;
+    const k = keyOf(file.filename, a);
+    const roots = topByAnchor.get(k);
+    const composing = composerKey === k;
+    return (
+      <>
+        {roots && roots.length > 0 && (
+          <Thread
+            roots={roots}
+            repliesByParent={repliesByParent}
+            onReply={onReply}
+            posting={posting}
+          />
+        )}
+        {composing && (
+          <Composer onSubmit={onSubmitCompose} onCancel={onCancelCompose} posting={posting} />
+        )}
+      </>
+    );
+  };
 
   return (
     <Box style={{ border: "1px solid #2c2e33", borderRadius: 6, overflow: "hidden" }}>
@@ -322,31 +400,59 @@ function FileView({
               <Box px="md" py={2} style={{ background: "#191b1f", ...mono, color: "#5b8fb0" }}>
                 {hunk.header}
               </Box>
-              {hunk.lines.map((line, idx) => {
-                const a = anchorOf(line);
-                const k = a ? keyOf(file.filename, a) : null;
-                const roots = k ? topByAnchor.get(k) : undefined;
-                return (
-                  <Box key={`${hunk.header}-${idx}`}>
-                    <LineRow line={line} onAdd={a ? () => onAdd(file.filename, a) : null} />
-                    {roots && roots.length > 0 && (
-                      <Thread
-                        roots={roots}
-                        repliesByParent={repliesByParent}
-                        onReply={onReply}
-                        posting={posting}
-                      />
-                    )}
-                    {k && composerKey === k && (
-                      <Composer
-                        onSubmit={onSubmitCompose}
-                        onCancel={onCancelCompose}
-                        posting={posting}
-                      />
-                    )}
-                  </Box>
-                );
-              })}
+              {view === "unified"
+                ? hunk.lines.map((line, idx) => {
+                    const a = anchorOf(line);
+                    const num = line.type === "del" ? line.oldLine : line.newLine;
+                    return (
+                      <Box key={`${hunk.header}-${idx}`}>
+                        <LineContent
+                          line={line}
+                          num={num}
+                          onAdd={a ? () => onAdd(file.filename, a) : null}
+                        />
+                        {attachments(line)}
+                      </Box>
+                    );
+                  })
+                : toSplitRows(hunk).map((row, idx) => (
+                    <Box key={`${hunk.header}-s-${idx}`}>
+                      <Box style={{ display: "flex" }}>
+                        <Box style={{ flex: 1, minWidth: 0, borderRight: "1px solid #2c2e33" }}>
+                          <LineContent
+                            line={row.left.line}
+                            num={row.left.line?.oldLine ?? null}
+                            onAdd={
+                              row.left.line && anchorOf(row.left.line)
+                                ? () =>
+                                    onAdd(
+                                      file.filename,
+                                      anchorOf(row.left.line as DiffLine) as LineAnchor,
+                                    )
+                                : null
+                            }
+                          />
+                        </Box>
+                        <Box style={{ flex: 1, minWidth: 0 }}>
+                          <LineContent
+                            line={row.right.line}
+                            num={row.right.line?.newLine ?? null}
+                            onAdd={
+                              row.right.line && anchorOf(row.right.line)
+                                ? () =>
+                                    onAdd(
+                                      file.filename,
+                                      anchorOf(row.right.line as DiffLine) as LineAnchor,
+                                    )
+                                : null
+                            }
+                          />
+                        </Box>
+                      </Box>
+                      {attachments(row.left.line)}
+                      {attachments(row.right.line)}
+                    </Box>
+                  ))}
             </Box>
           ))
         ))}
@@ -358,6 +464,7 @@ export function ReviewPane({ number }: { number: number }) {
   const [review, setReview] = useState<PrReview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<"unified" | "split">("unified");
   const [posting, setPosting] = useState(false);
   // The line currently being commented on: `${path}::${side}::${line}`, plus the
   // resolved anchor so we know what to POST.
@@ -425,9 +532,20 @@ export function ReviewPane({ number }: { number: number }) {
             </Anchor>
           )}
         </Group>
-        <Button size="compact-xs" variant="default" onClick={load} loading={loading}>
-          Refresh
-        </Button>
+        <Group gap={8} wrap="nowrap">
+          <SegmentedControl
+            size="xs"
+            value={view}
+            onChange={(v) => setView(v as "unified" | "split")}
+            data={[
+              { label: "Unified", value: "unified" },
+              { label: "Split", value: "split" },
+            ]}
+          />
+          <Button size="compact-xs" variant="default" onClick={load} loading={loading}>
+            Refresh
+          </Button>
+        </Group>
       </Group>
 
       <Box style={{ flex: 1, overflowY: "auto" }} px="sm" py={4}>
@@ -451,6 +569,7 @@ export function ReviewPane({ number }: { number: number }) {
                 key={file.filename}
                 file={file}
                 comments={review.comments}
+                view={view}
                 composerKey={compose?.key ?? null}
                 onAdd={(path, anchor) => setCompose({ key: keyOf(path, anchor), path, anchor })}
                 onCancelCompose={() => setCompose(null)}
@@ -458,6 +577,8 @@ export function ReviewPane({ number }: { number: number }) {
                   compose ? post(body, compose.anchor, compose.path) : Promise.resolve()
                 }
                 onReply={(inReplyTo, body) => {
+                  // A reply re-uses the parent's anchor only for the (unused on the
+                  // reply path) line/side; the server ignores them when in_reply_to is set.
                   const parent = review.comments.find((c) => c.id === inReplyTo);
                   const anchor: LineAnchor = {
                     side: parent?.side ?? "RIGHT",
