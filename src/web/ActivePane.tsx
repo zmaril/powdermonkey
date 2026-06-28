@@ -13,8 +13,8 @@ import { IdTag, PrStatus, SessionActions, StarToggle, TaskBadges } from "./plan-
 // group. Two views, toggled:
 //   • Flat   — session groups in one dense list, htop-style.
 //   • Grouped — the same groups nested under goal → milestone.
-// It re-renders off the same 4s poll as the rest of the app, so session state
-// (running / Try Again / needs you) stays current without a refresh.
+// It re-renders off the same WebSocket change feed as the rest of the app, so
+// session state (running / Try Again / needs you) stays current without a refresh.
 
 type View = "flat" | "grouped";
 

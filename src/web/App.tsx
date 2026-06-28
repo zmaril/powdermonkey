@@ -18,12 +18,13 @@ import { useStore } from "./store.ts";
 
 // The single pane of glass. The plan is split into three panels — a live ACTIVE
 // monitor, a launchpad BACKLOG editor, and the ARCHIVE book of work — alongside
-// the scratchpad and the supervisor shell. One poll (here) keeps the live panels'
-// store-derived views fresh (Archive runs its own slower poll for archived rows);
-// the panes themselves are pure derivations off the store (see plan-data.ts).
+// the scratchpad and the supervisor shell. A WebSocket change feed (useRealtime)
+// refetches the store on every server push, keeping the live panels' store-derived
+// views fresh (Archive runs its own slower poll for archived rows); the panes
+// themselves are pure derivations off the store (see plan-data.ts).
 
 // The scratchpad: one note, one big textarea. Holds its own draft state seeded
-// once from the server so the 4s background poll can't clobber what you're typing;
+// once from the server so a background refetch can't clobber what you're typing;
 // edits update the draft immediately and debounce a PATCH. The supervisor reads it
 // on "check @notes" (GET /notes).
 function ScratchPad() {
@@ -35,8 +36,8 @@ function ScratchPad() {
   // The server value we're synced with. We only adopt an incoming change when the
   // local draft still equals this — i.e. there are no unsaved keystrokes to lose.
   const serverBody = useRef("");
-  // The scratch note as the 4s poll keeps it in the store. Watching it lets
-  // out-of-band edits (another tab, or the supervisor editing @notes) show up here.
+  // The scratch note as the background refetch keeps it in the store. Watching it
+  // lets out-of-band edits (another tab, or the supervisor editing @notes) show up.
   const storeBody = useStore((s) =>
     id == null ? undefined : s.notes.find((n) => n.id === id)?.body,
   );
@@ -315,19 +316,12 @@ export function App() {
   const layoutSubRef = useRef<{ dispose: () => void } | null>(null);
   const shellReq = useStore((s) => s.shellReq);
   const notesReq = useStore((s) => s.notesReq);
-  const refresh = useStore((s) => s.refresh);
   const setLayout = useStore((s) => s.setLayout);
 
-  // The one poll for the whole app. Every panel renders off the store, so this
-  // keeps Active/Backlog/Scratch current as branches land and sessions change.
-  useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, 4000);
-    return () => clearInterval(id);
-  }, [refresh]);
-
-  // Subscribe to server-pushed changes: the store refetches on every ping, so the
-  // panes update the moment state moves rather than on the next poll tick.
+  // The whole app stays fresh off server pushes: useRealtime opens one WebSocket
+  // to /events, refetches the store on connect and on every "changed" ping, and
+  // reconnects if the socket drops. That replaced the old 4s poll — every panel
+  // renders off the store, so a single refetch on push keeps them all current.
   useRealtime();
 
   // Ping the operator (OS notification) whenever a session falls idle at a prompt.
