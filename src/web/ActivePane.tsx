@@ -50,7 +50,7 @@ function ActiveRow({
             </Text>
           )}
         </Box>
-        <TaskBadges task={task} session={session} />
+        <TaskBadges task={task} session={session} showStatus={false} />
       </Group>
       {(session || task.prUrl) && (
         <Group gap="xs" wrap="wrap" justify="flex-end" mt={6}>

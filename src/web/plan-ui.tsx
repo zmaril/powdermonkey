@@ -118,8 +118,18 @@ export function PhaseList({ phases }: { phases: Phase[] }) {
   );
 }
 
-/** The session/status badge cluster shown next to a task title. */
-export function TaskBadges({ task, session }: { task: Task; session?: Session }) {
+/** The session/status badge cluster shown next to a task title. `showStatus` is off
+ *  in the Active pane — every active task is "dispatched" by definition, so the
+ *  status badge there is just noise next to the live session state. */
+export function TaskBadges({
+  task,
+  session,
+  showStatus = true,
+}: { task: Task; session?: Session; showStatus?: boolean }) {
+  // The live session row is the real signal ("is it running"); local/teleported
+  // sessions never set the denormalized task.sessionState, so prefer session.state
+  // and only fall back to the task field when there's no live session attached.
+  const state = session?.state ?? task.sessionState;
   return (
     <Group gap={6} wrap="nowrap">
       {session?.needsInput && (
@@ -127,14 +137,16 @@ export function TaskBadges({ task, session }: { task: Task; session?: Session })
           needs you
         </Badge>
       )}
-      {task.sessionState && (
-        <Badge color={SESSION_BADGE[task.sessionState].color} variant="filled">
-          {SESSION_BADGE[task.sessionState].label}
+      {state && (
+        <Badge color={SESSION_BADGE[state].color} variant="filled">
+          {SESSION_BADGE[state].label}
         </Badge>
       )}
-      <Badge color={STATUS_COLOR[task.status]} variant="light">
-        {task.status}
-      </Badge>
+      {showStatus && (
+        <Badge color={STATUS_COLOR[task.status]} variant="light">
+          {task.status}
+        </Badge>
+      )}
     </Group>
   );
 }
