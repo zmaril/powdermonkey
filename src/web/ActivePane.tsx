@@ -10,11 +10,13 @@ import {
   Title,
   Tooltip,
 } from "@mantine/core";
+import type { DockviewPanelApi } from "dockview-react";
 import { useState } from "react";
 import type { CloudPr } from "../server/events.ts";
 import type { Goal, Milestone, Session, Task } from "../server/schema.ts";
 import { SessionKind } from "../shared/types.ts";
 import { partitionTasks } from "./active.ts";
+import { usePaneScroll } from "./pane-scroll.ts";
 import { type Indexes, starFirst, usePlanData } from "./plan-data.ts";
 import {
   IdTag,
@@ -237,11 +239,12 @@ function GroupedView({ activeIds, idx }: { activeIds: Set<number>; idx: Indexes 
   );
 }
 
-export function ActivePane() {
+export function ActivePane({ api }: { api?: DockviewPanelApi }) {
   const { idx, activeIds } = usePlanData();
   const autoRebase = useStore((s) => s.autoRebase);
   const setAutoRebase = useStore((s) => s.setAutoRebase);
   const [view, setView] = useState<View>("flat");
+  const scroll = usePaneScroll("active", api);
 
   const allTasks = [...idx.tasksByMilestone.values()].flat();
   const { active } = partitionTasks(allTasks, activeIds);
@@ -314,7 +317,13 @@ export function ActivePane() {
         </Group>
       </Group>
 
-      <Box style={{ flex: 1, overflowY: "auto" }} px="md" py="xs">
+      <Box
+        ref={scroll.ref}
+        onScroll={scroll.onScroll}
+        style={{ flex: 1, overflowY: "auto" }}
+        px="md"
+        py="xs"
+      >
         {active.length === 0 ? (
           <Text c="dimmed" size="sm" py="lg">
             Nothing active. Launch a task from the Backlog (Start local / Dispatch remote, or "/" →

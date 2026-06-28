@@ -11,11 +11,13 @@ import {
   Title,
   UnstyledButton,
 } from "@mantine/core";
+import type { DockviewPanelApi } from "dockview-react";
 import { useState } from "react";
 import type { Goal, Milestone, Phase, Task } from "../server/schema.ts";
 import { SessionKind, TaskStatus } from "../shared/types.ts";
 import { AnimatedList } from "./AnimatedList.tsx";
 import { partitionTasks } from "./active.ts";
+import { usePaneScroll } from "./pane-scroll.ts";
 import { type Indexes, starFirst, usePlanData } from "./plan-data.ts";
 import { IdTag, PhaseList, ProgressPill, StarToggle } from "./plan-ui.tsx";
 import { useStore } from "./store.ts";
@@ -401,10 +403,11 @@ function StartPanel() {
 
 type View = "flat" | "grouped";
 
-export function BacklogPane() {
+export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
   const { idx, activeIds, loading } = usePlanData();
   const [view, setView] = useState<View>("grouped");
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const scroll = usePaneScroll("backlog", api);
 
   // Backlog = everything to-be-worked: not active (no live session) and not merged.
   const allTasks = [...idx.tasksByMilestone.values()].flat();
@@ -453,7 +456,13 @@ export function BacklogPane() {
         />
       </Group>
 
-      <Box style={{ flex: 1, overflowY: "auto" }} px={view === "grouped" ? "md" : 0} py={4}>
+      <Box
+        ref={scroll.ref}
+        onScroll={scroll.onScroll}
+        style={{ flex: 1, overflowY: "auto" }}
+        px={view === "grouped" ? "md" : 0}
+        py={4}
+      >
         <Box px={view === "grouped" ? 0 : "md"}>
           <StartPanel />
         </Box>
