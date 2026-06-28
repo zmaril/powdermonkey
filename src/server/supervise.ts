@@ -16,6 +16,7 @@
 // Reserved tmux names on the socket: `pm-server` (this), `pm-session-0` (the
 // supervisor's own `claude`), `pm-session-<id>` (per-task workers).
 
+import { selfArgv } from "./paths.ts";
 import { SOCKET, hasSession, shq, tmux } from "./tmux.ts";
 
 const SHELL = process.env.SHELL || "bash";
@@ -23,11 +24,6 @@ const SHELL = process.env.SHELL || "bash";
 // tmux session name for the server pane. Distinct from the `pm-session-*` agent
 // sessions so it never collides with a worker id.
 export const SERVER_SESSION = process.env.PM_SERVER_SESSION ?? "pm-server";
-
-// The server entrypoint the restart loop boots. Overridable mainly for tests.
-const SERVER_ENTRY = process.env.PM_SERVER_ENTRY ?? new URL("./index.ts", import.meta.url).pathname;
-// This module's own path, so the pane can re-invoke it in `--loop` mode.
-const SELF = new URL(import.meta.url).pathname;
 
 // Backoff bounds for the auto-restart loop. After a crash we wait `backoff` and
 // double it (capped at MAX); a run that stays up at least HEALTHY_MS is treated
@@ -49,14 +45,17 @@ export type LaunchResult =
   | { ok: true; created: boolean; session: string; socket: string }
   | { ok: false; error: string };
 
-/** The command tmux runs inside the server pane: the auto-restart loop. */
+/** The command tmux runs inside the server pane: re-invoke ourselves in restart-loop
+ *  mode. `selfArgv` points at the compiled binary (no bun needed) or `bun <cli>` in
+ *  dev, so the pane survives as its own runtime either way. */
 function paneCommand(): string {
-  return `bun run ${shq(SELF)} --loop`;
+  return selfArgv("__serve-loop").map(shq).join(" ");
 }
 
-/** Spawn the server. Stdio is inherited so its console lands in the pane. */
+/** Spawn one server run by re-invoking ourselves in `__server` mode. Stdio is
+ *  inherited so its console lands in the pane. */
 function spawnServer(): Bun.Subprocess {
-  return Bun.spawn(["bun", "run", SERVER_ENTRY], {
+  return Bun.spawn(selfArgv("__server"), {
     cwd: repoDir(),
     env: process.env,
     stdio: ["inherit", "inherit", "inherit"],
@@ -124,23 +123,6 @@ export function stopServer(): boolean {
   return tmux("kill-session", "-t", SERVER_SESSION).ok;
 }
 
-if (import.meta.main) {
-  // `--loop` is the in-pane mode: supervise the server with backoff (never
-  // returns). Without it, launch the pane and print how to attach.
-  if (process.argv.includes("--loop")) {
-    await runWithBackoff();
-  }
-
-  const r = launchServer();
-  if (!r.ok) {
-    console.error(`failed to launch supervisor: ${r.error}`);
-    process.exit(1);
-  }
-  const where = `tmux -L ${r.socket} attach -t ${r.session}`;
-  console.log(
-    r.created
-      ? `supervisor launched in tmux session '${r.session}' (socket '${r.socket}').`
-      : `supervisor already running in tmux session '${r.session}' (socket '${r.socket}').`,
-  );
-  console.log(`attach: ${where}`);
-}
+// No CLI of its own: the `powdermonkey` entrypoint (bin/powdermonkey.ts) drives the
+// lifecycle — `serve` calls launchServer(), the `__serve-loop` it spawns calls
+// runWithBackoff(), and each `__server` it spawns boots the actual server (index.ts).
