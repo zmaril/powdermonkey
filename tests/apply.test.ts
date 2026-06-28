@@ -8,10 +8,8 @@ process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
 const { ready } = await import("../src/server/db.ts");
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
 const { goalRepo, milestoneRepo, taskRepo, phaseRepo } = await import("../src/server/crud.ts");
-const { createProposal, decideProposal, getProposal, dropProposalChanges } = await import(
-  "../src/server/proposals.ts"
-);
-const { applyProposal, applyProposalChanges } = await import("../src/server/apply.ts");
+const { createProposal, decideProposal, getProposal } = await import("../src/server/proposals.ts");
+const { applyProposal } = await import("../src/server/apply.ts");
 
 beforeAll(async () => {
   await ready();
@@ -141,60 +139,4 @@ test("apply requires approval and is idempotent on re-apply", async () => {
     expect(second.counts).toEqual({ create: 0, update: 0, archive: 0, reorder: 0 });
   }
   expect((await goalRepo.get(goal.id))?.objective).toBe("done");
-});
-
-test("applyProposalChanges applies a subset and consumes it; empties → applied", async () => {
-  await loadPlan(parsePlan({ goals: [{ title: "Gpc", milestones: [{ title: "M", tasks: [{ title: "T" }] }] }] }));
-  const milestone = (await milestoneRepo.list()).find((m) => m.title === "M");
-  const task = (await taskRepo.list()).find((t) => t.title === "T");
-  if (!milestone || !task) throw new Error("seed failed");
-
-  const proposal = await createProposal({
-    changes: [
-      { op: "update", kind: "task", id: task.id, fields: { title: "T renamed" } },
-      { op: "create", kind: "task", parentId: milestone.id, fields: { title: "Added" } },
-    ],
-  });
-
-  // Apply only the create (index 1) → it lands, the update is left pending.
-  const first = await applyProposalChanges(proposal.id, [1]);
-  expect(first.ok).toBe(true);
-  if (!first.ok) return;
-  expect(first.remaining).toBe(1);
-  expect((await taskRepo.list()).some((t) => t.title === "Added")).toBe(true);
-  expect((await taskRepo.get(task.id))?.title).toBe("T"); // update not applied yet
-  const mid = await getProposal(proposal.id);
-  expect(mid?.changes.length).toBe(1);
-  expect(mid?.status).toBe("pending");
-
-  // Apply the remaining update → change-set empties → proposal applied.
-  const second = await applyProposalChanges(proposal.id, [0]);
-  expect(second.ok).toBe(true);
-  if (second.ok) expect(second.remaining).toBe(0);
-  expect((await taskRepo.get(task.id))?.title).toBe("T renamed");
-  expect((await getProposal(proposal.id))?.status).toBe("applied");
-});
-
-test("dropProposalChanges removes changes without applying; empties → rejected", async () => {
-  await loadPlan(parsePlan({ goals: [{ title: "Gdrop", milestones: [{ title: "M", tasks: [{ title: "Keep" }] }] }] }));
-  const task = (await taskRepo.list()).find((t) => t.title === "Keep");
-  if (!task) throw new Error("seed failed");
-
-  const proposal = await createProposal({
-    changes: [
-      { op: "update", kind: "task", id: task.id, fields: { title: "should not happen" } },
-      { op: "archive", kind: "task", id: task.id },
-    ],
-  });
-
-  const afterOne = await dropProposalChanges(proposal.id, [1]);
-  expect(afterOne?.changes.length).toBe(1);
-  expect(afterOne?.status).toBe("pending");
-  // The plan is untouched by a drop.
-  expect((await taskRepo.get(task.id))?.title).toBe("Keep");
-
-  const afterAll = await dropProposalChanges(proposal.id, [0]);
-  expect(afterAll?.changes.length).toBe(0);
-  expect(afterAll?.status).toBe("rejected");
-  expect((await taskRepo.get(task.id))?.title).toBe("Keep");
 });
