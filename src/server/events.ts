@@ -12,6 +12,7 @@ import type { CheckRollupState, MergeableState, PrState } from "../shared/types.
 export type CloudPr = {
   taskId: number;
   number: number;
+  title: string;
   url: string;
   state: PrState;
   isDraft: boolean;

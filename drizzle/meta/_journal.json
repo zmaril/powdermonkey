@@ -50,6 +50,13 @@
       "when": 1782661404020,
       "tag": "0006_parched_sasquatch",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1782662620395,
+      "tag": "0007_slow_blonde_phantom",
+      "breakpoints": true
     }
   ]
 }

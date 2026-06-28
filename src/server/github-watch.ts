@@ -41,7 +41,7 @@ const GQL = `query($owner:String!,$name:String!){
   repository(owner:$owner,name:$name){
     pullRequests(first:100, orderBy:{field:UPDATED_AT, direction:DESC}){
       nodes{
-        number url state isDraft merged mergeable updatedAt headRefName
+        number title url state isDraft merged mergeable updatedAt headRefName
         checks: commits(last:1){nodes{commit{statusCheckRollup{state}}}}
         history: commits(first:100){nodes{commit{messageBody}}}
       }
@@ -104,6 +104,7 @@ export async function fetchCloudPrs(): Promise<CloudPr[] | null> {
     prs.push({
       taskId,
       number: n.number,
+      title: n.title ?? "",
       url: n.url,
       state: n.state,
       isDraft: !!n.isDraft,
