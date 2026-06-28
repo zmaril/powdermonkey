@@ -209,6 +209,17 @@ export const proposals = pgTable("proposals", {
   changes: jsonb("changes").$type<ProposalChange[]>().notNull(),
   base: jsonb("base").$type<Record<string, string>>().notNull(),
   appliedAt: timestamp("applied_at"),
+  // Follow-up provenance: set when a proposal was authored by a worker handing back
+  // an out-of-scope find (rather than the operator/supervisor proposing a plan edit).
+  // All nullable — a normal plan-edit proposal leaves them null. `sourceCommentId`
+  // (the GitHub comment databaseId a cloud worker's `<!-- pm:followup -->` comment
+  // carries) doubles as the watcher's ingest idempotency key: a comment already
+  // turned into a proposal is never re-ingested. `sourceTaskId` is the task the
+  // worker was on (plain int, not an FK — a cloud PR resolves an id that may not be a
+  // live row); `sourcePr` ties it back to the PR it was slurped from.
+  sourceTaskId: integer("source_task_id"),
+  sourcePr: integer("source_pr"),
+  sourceCommentId: integer("source_comment_id"),
   ...timestamps,
 });
 

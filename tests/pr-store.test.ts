@@ -27,6 +27,7 @@ function pr(over: Partial<CloudPr> & { number: number }): CloudPr {
     headRefName: "pm/task-10-slug",
     updatedAt: "2026-06-28T00:00:00Z",
     agent: null,
+    followups: [],
     ...over,
   };
 }

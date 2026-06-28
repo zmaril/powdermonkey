@@ -34,6 +34,21 @@ export type AgentStatus = {
   updatedAt: string | null;
 };
 
+/** A follow-up a cloud worker handed back via a marked `<!-- pm:followup -->` PR
+ *  comment (the cloud counterpart to a local worker POSTing /followups). Parsed out
+ *  of the PR's comments by github-watch and turned into a pending proposal —
+ *  `commentId` (GitHub's comment databaseId) is the idempotency key, so a comment
+ *  becomes a proposal exactly once even though the watcher re-reads it each tick.
+ *  Append-only: a PR can carry several (unlike the single newest-wins status comment). */
+export type FollowupComment = {
+  /** GitHub's IssueComment databaseId — the dedup key. Null only if GitHub omitted it
+   *  (then it's skipped, since we can't safely dedup an id-less comment). */
+  commentId: number | null;
+  title: string;
+  body: string;
+  updatedAt: string | null;
+};
+
 /** A pull request a cloud worker opened for a task (branch `pm/task-<id>-<slug>`),
  *  reduced to the fields the supervisor reacts to. */
 export type CloudPr = {
@@ -55,6 +70,9 @@ export type CloudPr = {
   /** The worker's self-reported status, parsed from its newest `<!-- pm:status -->`-marked
    *  comment, or null when it hasn't posted one (or the marker can't be found). */
   agent: AgentStatus | null;
+  /** Follow-ups the worker handed back via `<!-- pm:followup -->` comments — one per
+   *  marked comment, empty when there are none. Turned into proposals by the watcher. */
+  followups: FollowupComment[];
 };
 
 // `initial` marks events from the startup catch-up sync — PRs that already
