@@ -11,6 +11,20 @@ type ValueOf<T> = T[keyof T];
 export const PhaseStatus = { Todo: "todo", Done: "done" } as const;
 export type PhaseStatus = ValueOf<typeof PhaseStatus>;
 
+/**
+ * How a phase/task reached "done" — the provenance behind a completion, kept
+ * apart from the done/todo `status` axis so the rollups stay a single count.
+ * `Reconciled` is written only by the reconciler when a `PM-Phase:`/`PM-Task:`
+ * trailer lands on `main` (work earned the truth). `Operator` is an assertion the
+ * operator made by hand in the UI, for work that genuinely finished but never
+ * produced a trailer (a squash that dropped it, out-of-band work, a won't-do
+ * item, a phase-less task). `null` on a row that isn't done. The split keeps an
+ * asserted completion first-class but visibly distinct from one that landed on
+ * `main` — see docs/completion-model.md.
+ */
+export const DoneSource = { Reconciled: "reconciled", Operator: "operator" } as const;
+export type DoneSource = ValueOf<typeof DoneSource>;
+
 export const TaskStatus = {
   Pending: "pending",
   Dispatched: "dispatched",

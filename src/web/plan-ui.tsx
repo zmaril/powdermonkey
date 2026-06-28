@@ -8,6 +8,7 @@ import {
   Progress,
   Text,
   ThemeIcon,
+  Tooltip,
   UnstyledButton,
 } from "@mantine/core";
 import { useState } from "react";
@@ -16,6 +17,7 @@ import type { Phase, Session, Task } from "../server/schema.ts";
 import {
   AgentState,
   CheckRollupState,
+  DoneSource,
   MergeableState,
   PhaseStatus,
   SessionKind,
@@ -108,35 +110,120 @@ export function ProgressPill({ phases }: { phases: Phase[] }) {
   );
 }
 
-export function PhaseList({ phases }: { phases: Phase[] }) {
+// A phase's completion has two flavours, kept visually distinct so an operator can
+// always tell work that landed on `main` from one they asserted by hand: a
+// reconciled phase is a solid green ✓; an operator-asserted one is an orange ✋
+// ("by hand"). Todo is a gray dot. See docs/completion-model.md.
+function phaseGlyph(p: Phase): { color: string; mark: string; title: string } {
+  if (p.status !== PhaseStatus.Done) return { color: "gray", mark: "·", title: "todo" };
+  if (p.doneSource === DoneSource.Operator)
+    return { color: "orange", mark: "✋", title: "marked done by hand — not reconciled from main" };
+  return { color: "green", mark: "✓", title: "reconciled from a trailer on main" };
+}
+
+/** The plan's phase checklist. When `interactive`, each row carries the
+ *  operator-completion controls (the non-reconciled path): mark a todo phase done by
+ *  hand, or reopen one you asserted. Reconciled phases are locked — they reflect
+ *  `main`, so they're undone by changing `main`, not a button. */
+export function PhaseList({
+  phases,
+  interactive = false,
+}: { phases: Phase[]; interactive?: boolean }) {
+  const { completePhase, reopenPhase } = useStore();
   return (
     <List spacing={2} size="sm" center>
-      {phases.map((p) => (
-        <List.Item
-          key={p.id}
-          icon={
-            <ThemeIcon
-              color={p.status === PhaseStatus.Done ? "green" : "gray"}
-              size={16}
-              radius="xl"
-            >
-              <Text size="9px">{p.status === PhaseStatus.Done ? "✓" : "·"}</Text>
-            </ThemeIcon>
-          }
-        >
-          <Text
-            size="sm"
-            c={p.status === PhaseStatus.Done ? "dimmed" : undefined}
-            td={p.status === PhaseStatus.Done ? "line-through" : undefined}
+      {phases.map((p) => {
+        const g = phaseGlyph(p);
+        const done = p.status === PhaseStatus.Done;
+        const operatorDone = done && p.doneSource === DoneSource.Operator;
+        return (
+          <List.Item
+            key={p.id}
+            icon={
+              <Tooltip label={g.title} withArrow openDelay={300}>
+                <ThemeIcon color={g.color} size={16} radius="xl">
+                  <Text size="9px">{g.mark}</Text>
+                </ThemeIcon>
+              </Tooltip>
+            }
           >
-            {p.name}{" "}
-            <Text span c="dimmed" size="xs">
-              #{p.id}
-            </Text>
-          </Text>
-        </List.Item>
-      ))}
+            <Group gap={6} wrap="nowrap" align="baseline">
+              <Text
+                size="sm"
+                c={done ? "dimmed" : undefined}
+                td={done ? "line-through" : undefined}
+              >
+                {p.name}{" "}
+                <Text span c="dimmed" size="xs">
+                  #{p.id}
+                </Text>
+              </Text>
+              {interactive && !done && (
+                <UnstyledButton
+                  onClick={() => completePhase(p.id)}
+                  title="Mark this phase done by hand"
+                >
+                  <Text size="xs" c="blue.4">
+                    done
+                  </Text>
+                </UnstyledButton>
+              )}
+              {interactive && operatorDone && (
+                <UnstyledButton
+                  onClick={() => reopenPhase(p.id)}
+                  title="Reopen — this was marked done by hand"
+                >
+                  <Text size="xs" c="dimmed">
+                    reopen
+                  </Text>
+                </UnstyledButton>
+              )}
+            </Group>
+          </List.Item>
+        );
+      })}
     </List>
+  );
+}
+
+/** Task-level operator completion — the won't-do / out-of-band / phase-less case. A
+ *  merged task shows whether it was reconciled or asserted; an operator-merged one
+ *  can be reopened. Pending tasks get a "Mark done" that closes the task (and its
+ *  phases) by hand. Reconciled completions are read-only here. */
+export function CompleteTaskControl({ task }: { task: Task }) {
+  const { completeTask, reopenTask } = useStore();
+  if (task.status === TaskStatus.Merged) {
+    if (task.doneSource === DoneSource.Operator) {
+      return (
+        <Group gap={6} wrap="nowrap">
+          <Badge
+            size="xs"
+            color="orange"
+            variant="light"
+            title="Closed by hand — not reconciled from main"
+          >
+            done by hand
+          </Badge>
+          <UnstyledButton onClick={() => reopenTask(task.id)} title="Reopen this task">
+            <Text size="xs" c="dimmed">
+              reopen
+            </Text>
+          </UnstyledButton>
+        </Group>
+      );
+    }
+    return null; // reconciled-merged: owned by main, nothing to do here
+  }
+  return (
+    <Button
+      size="compact-xs"
+      variant="subtle"
+      color="orange"
+      title="Mark this task done by hand — for work that never landed a trailer on main"
+      onClick={() => completeTask(task.id)}
+    >
+      Mark done
+    </Button>
   );
 }
 

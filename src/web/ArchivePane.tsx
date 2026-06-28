@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { Goal, Milestone, Task } from "../server/schema.ts";
 import { TaskStatus } from "../shared/types.ts";
 import { type Indexes, useArchiveData } from "./plan-data.ts";
-import { IdTag, STATUS_COLOR, TaskLinks } from "./plan-ui.tsx";
+import { CompleteTaskControl, IdTag, STATUS_COLOR, TaskLinks } from "./plan-ui.tsx";
 
 // The Archive pane is the book of work — everything finished (merged) or archived.
 // Read-only: no launch/land actions, just a browsable record with phase progress
@@ -45,6 +45,9 @@ function ArchiveRow({ task, context }: { task: Task; context?: string }) {
       <Badge size="sm" variant="light" color={archived ? "gray" : STATUS_COLOR[task.status]}>
         {archived ? "archived" : task.status}
       </Badge>
+      {/* Operator-asserted completions show a "done by hand" chip + reopen; reconciled
+          ones render nothing here (they belong to main). */}
+      {task.status === TaskStatus.Merged && <CompleteTaskControl task={task} />}
       <TaskLinks task={task} />
     </Group>
   );

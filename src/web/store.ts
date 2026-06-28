@@ -69,6 +69,13 @@ type State = {
   startLocalMany: (taskIds: number[]) => Promise<void>;
   dispatchMany: (taskIds: number[]) => Promise<void>;
   teleport: (taskId: number) => Promise<void>;
+  // Operator-asserted completion (the non-reconciled path): mark a phase/task done
+  // by hand, or walk an operator assertion back. The DB write streams back over
+  // /sync, so there's nothing to refresh.
+  completePhase: (phaseId: number) => Promise<void>;
+  reopenPhase: (phaseId: number) => Promise<void>;
+  completeTask: (taskId: number) => Promise<void>;
+  reopenTask: (taskId: number) => Promise<void>;
   land: (sessionId: number) => Promise<void>;
   stop: (sessionId: number) => Promise<void>;
   openEditor: (sessionId: number) => Promise<void>;
@@ -254,6 +261,22 @@ export const useStore = create<State>()(
           if (error) return void set({ error: errMsg(error) });
           if (data && "ok" in data && !data.ok) set({ error: data.error });
         }),
+      completePhase: async (phaseId) => {
+        const { error } = await api.phases({ id: phaseId }).complete.post();
+        if (error) set({ error: String(error.value ?? error.status) });
+      },
+      reopenPhase: async (phaseId) => {
+        const { error } = await api.phases({ id: phaseId }).reopen.post();
+        if (error) set({ error: String(error.value ?? error.status) });
+      },
+      completeTask: async (taskId) => {
+        const { error } = await api.tasks({ id: taskId }).complete.post();
+        if (error) set({ error: String(error.value ?? error.status) });
+      },
+      reopenTask: async (taskId) => {
+        const { error } = await api.tasks({ id: taskId }).reopen.post();
+        if (error) set({ error: String(error.value ?? error.status) });
+      },
       land: async (sessionId) => {
         const { error } = await api.sessions({ id: sessionId }).land.post();
         if (error) set({ error: String(error.value ?? error.status) });

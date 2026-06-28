@@ -17,6 +17,7 @@ import { SessionKind, TaskStatus } from "../shared/types.ts";
 import { partitionTasks } from "./active.ts";
 import { type Indexes, starFirst, usePlanData } from "./plan-data.ts";
 import {
+  CompleteTaskControl,
   IdTag,
   LaunchActions,
   PhaseList,
@@ -71,10 +72,13 @@ function BacklogCard({
         </Group>
         <TaskBadges task={task} />
       </Group>
-      <PhaseList phases={phases} />
+      <PhaseList phases={phases} interactive />
       <Group gap="xs" mt={10} justify="space-between">
         <LaunchActions taskId={task.id} />
-        <TaskLinks task={task} />
+        <Group gap="md" wrap="nowrap">
+          <CompleteTaskControl task={task} />
+          <TaskLinks task={task} />
+        </Group>
       </Group>
     </Card>
   );

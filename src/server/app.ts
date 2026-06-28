@@ -5,6 +5,7 @@ import { getTableColumns, getTableName } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 import { P, match } from "ts-pattern";
 import { SessionState } from "../shared/types.ts";
+import { completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
 import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
 import { pg } from "./db.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
@@ -164,6 +165,33 @@ const tasksGroup = resource("tasks", taskRepo, models.tasks)
     const result = await loadTaskPrompt(Number(params.id));
     if (!result) set.status = 404;
     return result ?? { error: "not found" };
+  })
+  // Operator-asserted completion (the non-reconciled path): mark a task done by hand
+  // for work that never landed a trailer. Stamps `done_source = operator`; reopen
+  // walks it back. Reconciled completions are never touched here.
+  .post("/:id/complete", async ({ params, set }) => {
+    const row = await completeTask(Number(params.id));
+    if (!row) set.status = 404;
+    return row ?? { error: "not found" };
+  })
+  .post("/:id/reopen", async ({ params, set }) => {
+    const row = await reopenTask(Number(params.id));
+    if (!row) set.status = 404;
+    return row ?? { error: "not found" };
+  });
+
+// Phases carry the same operator complete/reopen on top of CRUD — the grain at
+// which a squash-dropped trailer is most often patched up by hand.
+const phasesGroup = resource("phases", phaseRepo, models.phases)
+  .post("/:id/complete", async ({ params, set }) => {
+    const row = await completePhase(Number(params.id));
+    if (!row) set.status = 404;
+    return row ?? { error: "not found" };
+  })
+  .post("/:id/reopen", async ({ params, set }) => {
+    const row = await reopenPhase(Number(params.id));
+    if (!row) set.status = 404;
+    return row ?? { error: "not found" };
   });
 
 // Sessions carry `land` (graceful teardown of finished work), `stop` (abort a
@@ -510,7 +538,7 @@ export const app = new Elysia()
   .use(resource("goals", goalRepo, models.goals))
   .use(resource("milestones", milestoneRepo, models.milestones))
   .use(tasksGroup)
-  .use(resource("phases", phaseRepo, models.phases))
+  .use(phasesGroup)
   .use(sessionsGroup)
   .use(resource("notes", noteRepo, models.notes))
   // Static: bundled web app, SPA fallback to index.html. Served from the package's
