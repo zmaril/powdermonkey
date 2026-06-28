@@ -151,7 +151,8 @@ export const app = new Elysia()
   // github-watch loop does this every 10s; this triggers a pass on demand.
   .post("/github-sync", () => syncCloudPrs())
   // The watcher's latest PR state per task-linked PR (CI checks, mergeable, draft).
-  // Live runtime data, not persisted — the Active panel reads it for status badges.
+  // Persisted in the pull_requests table, so it's served from last-known state on
+  // boot — the Active panel reads it for status badges.
   .get("/cloud-prs", () => currentCloudPrs())
   // Every session↔task link. The browser intersects these with the sessions it
   // already holds to learn which tasks are active and which session each surfaces,

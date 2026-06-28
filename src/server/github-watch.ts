@@ -4,6 +4,13 @@ import { db } from "./db.ts";
 import { type CloudEventMeta, type CloudPr, bus } from "./events.ts";
 import { askClaude, gh } from "./gh.ts";
 import { pullMain } from "./git.ts";
+import {
+  clearRebaseAsked,
+  isRebaseAsked,
+  listPrs,
+  markRebaseAsked,
+  upsertPrState,
+} from "./pr-store.ts";
 import { reconcile } from "./reconcile.ts";
 import { phases } from "./schema.ts";
 
@@ -209,28 +216,27 @@ const REBASE_MESSAGE =
   "This PR has merge conflicts with `main`. Please rebase onto the latest `main`, " +
   "resolve the conflicts, and push — keeping the PM-Phase / PM-Task trailers intact.";
 
-// PR numbers we've already asked to rebase, cleared when the PR goes MERGEABLE so
-// a later, distinct conflict gets a fresh ask. In-memory by design: it survives
-// ticks, not restarts, and we skip `initial` events so a restart never re-spams
-// PRs that were already conflicting before boot.
-const rebaseAsked = new Set<number>();
-
+// Idempotency now lives in the pull_requests table (rebaseAskedAt), not memory, so
+// the "we already asked" fact survives a restart — closing a real re-spam window:
+// after a restart an in-memory set was empty, so any sig change while a PR stayed
+// CONFLICTING would ask again. We still skip `initial` events, so the startup
+// catch-up replay never fires a fresh ask on its own.
 async function maybeAskRebase(pr: CloudPr, meta: CloudEventMeta): Promise<void> {
   if (meta.initial) return; // don't re-ask pre-boot conflicts on a restart
-  const action = rebaseDecision(pr.mergeable, rebaseAsked.has(pr.number));
+  const action = rebaseDecision(pr.mergeable, await isRebaseAsked(pr.number));
   if (action === "clear") {
-    rebaseAsked.delete(pr.number);
+    await clearRebaseAsked(pr.number);
     return;
   }
   if (action !== "ask") return;
-  rebaseAsked.add(pr.number); // mark first, so a failed post doesn't loop-retry
+  await markRebaseAsked(pr.number); // mark first, so a failed post doesn't loop-retry
   const repo = await resolveRepo();
   const slug = repo ? `${repo.owner}/${repo.name}` : undefined;
   const r = await askClaude(pr.number, REBASE_MESSAGE, slug);
   if (r.ok) {
     console.log(`github-watch: PR #${pr.number} conflicting → asked @claude to rebase`);
   } else {
-    rebaseAsked.delete(pr.number); // post failed — let a later tick retry
+    await clearRebaseAsked(pr.number); // post failed — let a later tick retry
     console.warn(
       `github-watch: rebase ask for PR #${pr.number} failed:`,
       r.stderr.trim().slice(0, 200),
@@ -241,17 +247,23 @@ async function maybeAskRebase(pr: CloudPr, meta: CloudEventMeta): Promise<void> 
 // ---- the loop --------------------------------------------------------------
 let lastByNumber = new Map<number, CloudPr>();
 
-/** The watcher's latest known PR state, one per task-linked PR. Served live to the
- *  UI (GET /cloud-prs) so the Active panel can show CI / merge-conflict status
- *  without persisting this fast-moving data to the DB. */
-export function currentCloudPrs(): CloudPr[] {
-  return [...lastByNumber.values()];
+/** The watcher's latest known PR state, one per task-linked PR. Served to the UI
+ *  (GET /cloud-prs) for the Active panel's CI / merge-conflict badges. Read from
+ *  the pull_requests table, so it's populated immediately on boot from last-known
+ *  state — before the first poll lands. */
+export function currentCloudPrs(): Promise<CloudPr[]> {
+  return listPrs();
 }
 
 async function tick(initial: boolean): Promise<number> {
   const prs = await fetchCloudPrs();
   if (prs === null) return 0; // fetch failed — keep last-known state untouched
   const events = diffCloudPrs(lastByNumber, prs);
+  // Persist the changed PRs *before* emitting, so their rows exist when the rebase
+  // subscriber reads/writes the ask ledger. upsertPrState only writes cache
+  // columns — it never disturbs rebaseAskedAt. Unchanged PRs already have a row
+  // from a prior tick, so we skip the write churn for them.
+  for (const ev of events) await upsertPrState(ev.pr);
   for (const ev of events) await bus.emit(ev.type, ev.pr, { initial });
   lastByNumber = new Map(prs.map((p) => [p.number, p]));
   return events.length;
@@ -313,11 +325,9 @@ function registerSubscribers(): void {
   // maybeAskRebase dedupes so only the first per episode actually comments.
   bus.on("pr.opened", maybeAskRebase);
   bus.on("pr.updated", maybeAskRebase);
-  // A PR leaving the board ends its conflict episode — forget it so a future PR
-  // reusing the number (or a reopen) starts clean.
-  const forget = (pr: CloudPr) => {
-    rebaseAsked.delete(pr.number);
-  };
+  // A PR leaving the board ends its conflict episode — clear the ledger so a reopen
+  // starts clean.
+  const forget = (pr: CloudPr) => clearRebaseAsked(pr.number);
   bus.on("pr.merged", forget);
   bus.on("pr.closed", forget);
 

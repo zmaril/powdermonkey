@@ -43,6 +43,13 @@
       "when": 1782603889487,
       "tag": "0005_thick_nocturne",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1782661404020,
+      "tag": "0006_parched_sasquatch",
+      "breakpoints": true
     }
   ]
 }
