@@ -115,7 +115,7 @@ export function ArchivePane({ api }: { api?: DockviewPanelApi }) {
   // no separate fetch or poll.
   const { idx, tasks } = useArchiveData();
   const [view, setView] = useState<View>("flat");
-  const scroll = usePaneScroll("archive", api);
+  const scroll = usePaneScroll("archive", api); // lint-allow-string: pane scroll key, not an enum value
 
   return (
     <Box
