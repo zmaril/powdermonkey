@@ -1,9 +1,9 @@
-import { Badge, Box, Group, SegmentedControl, Stack, Text, Title } from "@mantine/core";
+import { Anchor, Badge, Box, Group, SegmentedControl, Stack, Text, Title } from "@mantine/core";
 import { useState } from "react";
 import type { Goal, Milestone, Task } from "../server/schema.ts";
 import { partitionTasks } from "./active.ts";
-import { type Indexes, usePlanData } from "./plan-data.ts";
-import { SessionActions, TaskBadges } from "./plan-ui.tsx";
+import { type Indexes, starFirst, usePlanData } from "./plan-data.ts";
+import { IdTag, PrStatus, SessionActions, StarToggle, TaskBadges } from "./plan-ui.tsx";
 
 // The Active pane is the live monitor — every task with a session running right
 // now (the derived-active set; see active.ts). Two views, toggled:
@@ -29,16 +29,21 @@ function ActiveRow({
   context?: string;
 }) {
   const session = idx.sessionByTask.get(task.id);
+  const pr = idx.prByTask.get(task.id);
   return (
     <Box px="sm" py={8} style={{ borderBottom: "1px solid #2c2e33" }}>
       <Group gap="sm" wrap="nowrap" align="flex-start">
+        <StarToggle task={task} />
         <Text size="sm" title={session?.kind}>
           {session?.kind === "remote" ? "☁️" : "💻"}
         </Text>
         <Box style={{ flex: 1, minWidth: 0 }}>
-          <Text size="sm" fw={500} truncate>
-            {task.title}
-          </Text>
+          <Group gap={6} wrap="nowrap">
+            <IdTag prefix="t" id={task.id} />
+            <Text size="sm" fw={500} truncate>
+              {task.title}
+            </Text>
+          </Group>
           {context && (
             <Text size="xs" c="dimmed" truncate>
               {context}
@@ -47,9 +52,15 @@ function ActiveRow({
         </Box>
         <TaskBadges task={task} session={session} />
       </Group>
-      {session && (
+      {(session || task.prUrl) && (
         <Group gap="xs" wrap="wrap" justify="flex-end" mt={6}>
-          <SessionActions session={session} />
+          {session && <SessionActions session={session} />}
+          {task.prUrl && (
+            <Anchor href={task.prUrl} target="_blank" size="sm" fw={500}>
+              PR ↗
+            </Anchor>
+          )}
+          {pr && <PrStatus pr={pr} />}
         </Group>
       )}
     </Box>
@@ -59,7 +70,7 @@ function ActiveRow({
 function FlatView({ tasks, idx }: { tasks: Task[]; idx: Indexes }) {
   return (
     <Stack gap={0}>
-      {tasks.map((t) => {
+      {starFirst(tasks).map((t) => {
         const m = idx.milestoneById.get(t.milestoneId);
         const g = m ? idx.goalById.get(m.goalId) : undefined;
         const context = [g?.title, m?.title].filter(Boolean).join(" › ");
@@ -74,7 +85,9 @@ function GroupedView({ activeIds, idx }: { activeIds: Set<number>; idx: Indexes 
   const sections: { goal: Goal; milestone: Milestone; tasks: Task[] }[] = [];
   for (const goal of goals) {
     for (const m of idx.milestonesByGoal.get(goal.id) ?? []) {
-      const tasks = (idx.tasksByMilestone.get(m.id) ?? []).filter((t) => activeIds.has(t.id));
+      const tasks = starFirst(
+        (idx.tasksByMilestone.get(m.id) ?? []).filter((t) => activeIds.has(t.id)),
+      );
       if (tasks.length > 0) sections.push({ goal, milestone: m, tasks });
     }
   }
@@ -82,12 +95,16 @@ function GroupedView({ activeIds, idx }: { activeIds: Set<number>; idx: Indexes 
     <Stack gap="lg">
       {sections.map(({ goal, milestone, tasks }) => (
         <Box key={milestone.id}>
-          <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
-            {goal.title}
-          </Text>
-          <Title order={5} mb={4}>
-            {milestone.title}
-          </Title>
+          <Group gap={6} wrap="nowrap" align="baseline">
+            <IdTag prefix="g" id={goal.id} />
+            <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
+              {goal.title}
+            </Text>
+          </Group>
+          <Group gap={8} wrap="nowrap" align="baseline" mb={4}>
+            <IdTag prefix="m" id={milestone.id} />
+            <Title order={5}>{milestone.title}</Title>
+          </Group>
           <Stack gap={0}>
             {tasks.map((t) => (
               <ActiveRow key={t.id} task={t} idx={idx} />

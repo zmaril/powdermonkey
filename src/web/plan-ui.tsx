@@ -1,4 +1,15 @@
-import { Anchor, Badge, Button, Group, List, Progress, Text, ThemeIcon } from "@mantine/core";
+import {
+  Anchor,
+  Badge,
+  Button,
+  Group,
+  List,
+  Progress,
+  Text,
+  ThemeIcon,
+  UnstyledButton,
+} from "@mantine/core";
+import type { CloudPr } from "../server/events.ts";
 import type { Phase, Session, Task } from "../server/schema.ts";
 import type { SessionState, TaskStatus } from "../shared/types.ts";
 import { rollup } from "./progress.ts";
@@ -21,6 +32,38 @@ export const SESSION_BADGE: Record<SessionState, { label: string; color: string 
   idle: { label: "idle", color: "gray" },
   stopped: { label: "stopped", color: "red" },
 };
+
+/** A small monospace id chip (g1 / m6 / t110 / p41) so the operator can reference
+ *  any entity by id. `flexShrink: 0` keeps it visible when a title truncates. */
+export function IdTag({ prefix, id }: { prefix: string; id: number }) {
+  return (
+    <Text span c="dimmed" size="xs" ff="monospace" style={{ flexShrink: 0 }}>
+      {prefix}
+      {id}
+    </Text>
+  );
+}
+
+/** A click-to-toggle priority star. Starred tasks sort to the top of their group
+ *  (active / backlog). `flexShrink: 0` so it never collapses in a tight row. */
+export function StarToggle({ task }: { task: Task }) {
+  const toggleStar = useStore((s) => s.toggleStar);
+  return (
+    <UnstyledButton
+      aria-label={task.starred ? "Unstar task" : "Star task"}
+      title={task.starred ? "Unstar" : "Star — sorts to the top of its group"}
+      onClick={(e) => {
+        e.stopPropagation();
+        toggleStar(task.id, !task.starred);
+      }}
+      style={{ flexShrink: 0, lineHeight: 1 }}
+    >
+      <Text span c={task.starred ? "yellow" : "dimmed"} style={{ userSelect: "none" }}>
+        {task.starred ? "★" : "☆"}
+      </Text>
+    </UnstyledButton>
+  );
+}
 
 export function ProgressBar({ phases }: { phases: Phase[] }) {
   const { done, total, pct } = rollup(phases);
@@ -96,44 +139,59 @@ export function TaskBadges({ task, session }: { task: Task; session?: Session })
   );
 }
 
-/** Actions for a task that currently HAS a live session: shell, editor, land, stop. */
+/** Actions for a task that currently HAS a live session. A local session runs in a
+ *  worktree, so it gets Shell + VS Code; a remote (cloud) session has neither — it
+ *  lives on claude.ai, so it gets a link out to the session plus Teleport to pull
+ *  it down. Both get Land / Stop. */
 export function SessionActions({ session }: { session: Session }) {
   const { land, stop, teleport, openSessionTerminal, openEditor } = useStore();
+  const isRemote = session.kind === "remote";
   return (
     <Group gap="xs" wrap="nowrap">
       <Badge variant="dot" color="teal" title={session.kind}>
-        <span aria-label={session.kind}>{session.kind === "local" ? "💻" : "☁️"}</span>{" "}
-        {session.branch ?? "remote"}
+        <span aria-label={session.kind}>{isRemote ? "☁️" : "💻"}</span> {session.branch ?? "remote"}
       </Badge>
-      <Button
-        size="compact-xs"
-        variant={session.needsInput ? "filled" : "light"}
-        color="grape"
-        onClick={() =>
-          openSessionTerminal(session.id, `${session.kind} · ${session.branch}`.toUpperCase())
-        }
-      >
-        Shell
-      </Button>
-      <Button
-        size="compact-xs"
-        variant="light"
-        color="blue"
-        onClick={() => openEditor(session.id)}
-        title={session.kind === "local" ? "Open worktree in VS Code" : "Open PR in github.dev"}
-      >
-        VS Code
-      </Button>
-      {session.kind === "remote" && session.taskId != null && (
-        <Button
-          size="compact-xs"
-          variant="light"
-          color="grape"
-          title="Pull this cloud session down to a local worktree (claude --teleport)"
-          onClick={() => teleport(session.taskId as number)}
-        >
-          Teleport
-        </Button>
+      {isRemote ? (
+        <>
+          {session.url && (
+            <Anchor href={session.url} target="_blank" size="sm" fw={500}>
+              session ↗
+            </Anchor>
+          )}
+          {session.taskId != null && (
+            <Button
+              size="compact-xs"
+              variant="light"
+              color="grape"
+              title="Pull this cloud session down to a local worktree (claude --teleport)"
+              onClick={() => teleport(session.taskId as number)}
+            >
+              Teleport
+            </Button>
+          )}
+        </>
+      ) : (
+        <>
+          <Button
+            size="compact-xs"
+            variant={session.needsInput ? "filled" : "light"}
+            color="grape"
+            onClick={() =>
+              openSessionTerminal(session.id, `${session.kind} · ${session.branch}`.toUpperCase())
+            }
+          >
+            Shell
+          </Button>
+          <Button
+            size="compact-xs"
+            variant="light"
+            color="blue"
+            onClick={() => openEditor(session.id)}
+            title="Open worktree in VS Code"
+          >
+            VS Code
+          </Button>
+        </>
       )}
       <Button size="compact-xs" variant="light" color="teal" onClick={() => land(session.id)}>
         Land
@@ -169,6 +227,43 @@ export function LaunchActions({ taskId }: { taskId: number }) {
       <Button size="compact-xs" variant="subtle" color="gray" onClick={() => dispatch(taskId)}>
         Dispatch remote
       </Button>
+    </Group>
+  );
+}
+
+// GitHub's statusCheckRollup states → a compact CI chip.
+const CHECK_BADGE: Record<string, { label: string; color: string } | undefined> = {
+  SUCCESS: { label: "CI ✓", color: "green" },
+  FAILURE: { label: "CI ✗", color: "red" },
+  ERROR: { label: "CI ✗", color: "red" },
+  PENDING: { label: "CI …", color: "yellow" },
+  EXPECTED: { label: "CI …", color: "yellow" },
+};
+
+/** Live PR status chips for a task with a tracked PR — draft, merge conflicts, CI.
+ *  Fed from github-watch (idx.prByTask), so it trails GitHub by at most the poll
+ *  interval (~10s). Renders nothing when there's nothing noteworthy to show. */
+export function PrStatus({ pr }: { pr: CloudPr }) {
+  const ci = pr.checks ? CHECK_BADGE[pr.checks] : undefined;
+  const conflicting = pr.mergeable === "CONFLICTING";
+  if (!pr.isDraft && !conflicting && !ci) return null;
+  return (
+    <Group gap={4} wrap="nowrap">
+      {pr.isDraft && (
+        <Badge size="xs" variant="light" color="gray">
+          draft
+        </Badge>
+      )}
+      {conflicting && (
+        <Badge size="xs" variant="filled" color="red" title="Has merge conflicts with main">
+          conflicts
+        </Badge>
+      )}
+      {ci && (
+        <Badge size="xs" variant="light" color={ci.color} title={`CI: ${pr.checks}`}>
+          {ci.label}
+        </Badge>
+      )}
     </Group>
   );
 }

@@ -1,8 +1,28 @@
-import { Box, Button, Card, Code, CopyButton, Group, Stack, Text, Title } from "@mantine/core";
+import {
+  Box,
+  Button,
+  Card,
+  Code,
+  CopyButton,
+  Group,
+  SegmentedControl,
+  Stack,
+  Text,
+  Title,
+} from "@mantine/core";
+import { useState } from "react";
 import type { Goal, Phase, Task } from "../server/schema.ts";
 import { partitionTasks } from "./active.ts";
-import { type Indexes, usePlanData } from "./plan-data.ts";
-import { LaunchActions, PhaseList, TaskBadges, TaskLinks } from "./plan-ui.tsx";
+import { type Indexes, starFirst, usePlanData } from "./plan-data.ts";
+import {
+  IdTag,
+  LaunchActions,
+  PhaseList,
+  ProgressPill,
+  StarToggle,
+  TaskBadges,
+  TaskLinks,
+} from "./plan-ui.tsx";
 import { useStore } from "./store.ts";
 
 // The Backlog pane is the launchpad — everything to-be-worked (not active),
@@ -17,7 +37,13 @@ function BacklogCard({ task, phases }: { task: Task; phases: Phase[] }) {
   return (
     <Card withBorder radius="md" padding="sm">
       <Group justify="space-between" wrap="nowrap" mb={6}>
-        <Text fw={500}>{task.title}</Text>
+        <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
+          <StarToggle task={task} />
+          <IdTag prefix="t" id={task.id} />
+          <Text fw={500} truncate>
+            {task.title}
+          </Text>
+        </Group>
         <TaskBadges task={task} />
       </Group>
       <PhaseList phases={phases} />
@@ -36,7 +62,7 @@ function GoalGroup({ goal, idx, backlog }: { goal: Goal; idx: Indexes; backlog: 
   const milestones = (idx.milestonesByGoal.get(goal.id) ?? [])
     .map((m) => ({
       m,
-      tasks: (idx.tasksByMilestone.get(m.id) ?? []).filter((t) => backlog.has(t.id)),
+      tasks: starFirst((idx.tasksByMilestone.get(m.id) ?? []).filter((t) => backlog.has(t.id))),
     }))
     .filter(({ tasks }) => tasks.length > 0);
 
@@ -45,7 +71,10 @@ function GoalGroup({ goal, idx, backlog }: { goal: Goal; idx: Indexes; backlog: 
   return (
     <Stack gap="md">
       <div>
-        <Title order={3}>{goal.title}</Title>
+        <Group gap={8} wrap="nowrap" align="baseline">
+          <IdTag prefix="g" id={goal.id} />
+          <Title order={3}>{goal.title}</Title>
+        </Group>
         {goal.objective && (
           <Text c="dimmed" size="sm" mt={4}>
             {goal.objective}
@@ -55,7 +84,10 @@ function GoalGroup({ goal, idx, backlog }: { goal: Goal; idx: Indexes; backlog: 
 
       {milestones.map(({ m, tasks }) => (
         <Stack key={m.id} gap="xs">
-          <Title order={5}>{m.title}</Title>
+          <Group gap={8} wrap="nowrap" align="baseline">
+            <IdTag prefix="m" id={m.id} />
+            <Title order={5}>{m.title}</Title>
+          </Group>
           <Stack gap="xs">
             {tasks.map((t) => (
               <BacklogCard key={t.id} task={t} phases={idx.phasesByTask.get(t.id) ?? []} />
@@ -63,6 +95,54 @@ function GoalGroup({ goal, idx, backlog }: { goal: Goal; idx: Indexes; backlog: 
           </Stack>
         </Stack>
       ))}
+    </Stack>
+  );
+}
+
+/** One dense backlog row for the flat view: star · id · title · context, a progress
+ *  pill and status badges, with the launch actions below. Mirrors the Active flat
+ *  row so the two panes read the same. */
+function BacklogRow({ task, idx, context }: { task: Task; idx: Indexes; context?: string }) {
+  const phases = idx.phasesByTask.get(task.id) ?? [];
+  return (
+    <Box px="sm" py={8} style={{ borderBottom: "1px solid #2c2e33" }}>
+      <Group gap="sm" wrap="nowrap" align="flex-start">
+        <StarToggle task={task} />
+        <Box style={{ flex: 1, minWidth: 0 }}>
+          <Group gap={6} wrap="nowrap">
+            <IdTag prefix="t" id={task.id} />
+            <Text size="sm" fw={500} truncate>
+              {task.title}
+            </Text>
+          </Group>
+          {context && (
+            <Text size="xs" c="dimmed" truncate>
+              {context}
+            </Text>
+          )}
+        </Box>
+        {phases.length > 0 && <ProgressPill phases={phases} />}
+        <TaskBadges task={task} />
+      </Group>
+      <Group gap="xs" wrap="wrap" justify="flex-end" mt={6}>
+        <LaunchActions taskId={task.id} />
+        <TaskLinks task={task} />
+      </Group>
+    </Box>
+  );
+}
+
+/** Flat backlog: every to-be-worked task in one dense list, starred first, each
+ *  carrying its goal › milestone context. The Backlog counterpart to Active's flat. */
+function FlatView({ tasks, idx }: { tasks: Task[]; idx: Indexes }) {
+  return (
+    <Stack gap={0}>
+      {starFirst(tasks).map((t) => {
+        const m = idx.milestoneById.get(t.milestoneId);
+        const g = m ? idx.goalById.get(m.goalId) : undefined;
+        const context = [g?.title, m?.title].filter(Boolean).join(" › ");
+        return <BacklogRow key={t.id} task={t} idx={idx} context={context} />;
+      })}
     </Stack>
   );
 }
@@ -93,13 +173,17 @@ function StartPanel() {
   );
 }
 
+type View = "flat" | "grouped";
+
 export function BacklogPane() {
   const { idx, activeIds, loading } = usePlanData();
+  const [view, setView] = useState<View>("grouped");
 
   // Backlog = everything to-be-worked: not active (no live session) and not merged.
   const allTasks = [...idx.tasksByMilestone.values()].flat();
   const { backlog: backlogList } = partitionTasks(allTasks, activeIds);
-  const backlog = new Set(backlogList.filter((t) => t.status !== "merged").map((t) => t.id));
+  const backlogTasks = backlogList.filter((t) => t.status !== "merged");
+  const backlog = new Set(backlogTasks.map((t) => t.id));
   const goals = [...idx.goals].sort((a, b) => a.id - b.id);
 
   return (
@@ -117,14 +201,33 @@ export function BacklogPane() {
             </Text>
           )}
         </Group>
+        <SegmentedControl
+          size="xs"
+          value={view}
+          onChange={(v) => setView(v as View)}
+          data={[
+            { label: "Flat", value: "flat" },
+            { label: "Grouped", value: "grouped" },
+          ]}
+        />
       </Group>
 
-      <Box style={{ flex: 1, overflowY: "auto" }} px="md" py={4}>
-        <StartPanel />
+      <Box style={{ flex: 1, overflowY: "auto" }} px={view === "grouped" ? "md" : 0} py={4}>
+        <Box px={view === "grouped" ? 0 : "md"}>
+          <StartPanel />
+        </Box>
         {goals.length === 0 ? (
-          <Text c="dimmed" size="sm" py="lg">
+          <Text c="dimmed" size="sm" px="md" py="lg">
             No plan loaded. POST one to /plan.
           </Text>
+        ) : view === "flat" ? (
+          backlogTasks.length === 0 ? (
+            <Text c="dimmed" size="sm" px="md" py="lg">
+              Backlog is empty — every task is active or done.
+            </Text>
+          ) : (
+            <FlatView tasks={backlogTasks} idx={idx} />
+          )
         ) : (
           <Stack gap="xl">
             {goals.map((g) => (

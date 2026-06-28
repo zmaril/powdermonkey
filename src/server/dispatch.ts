@@ -40,14 +40,17 @@ export function buildTaskPrompt(
     "Phases:",
     phaseLines,
     "",
-    // The cloud workspace sets up its own clone/remote/push auth via the Claude
-    // GitHub App (see README), so we just name the branch convention and let the
-    // worker push + open the PR however it normally does. Keep the pm/task-<id>-
-    // prefix so the branch traces back to this task; pick a descriptive slug.
-    `Work on a branch off main named pm/task-${task.id}-<slug>, where <slug> is a short, descriptive name you choose for this task. Open a PR against main when done.`,
+    // We don't dictate the branch name. The cloud workspace puts the worker on its
+    // own harness branch (e.g. `claude/…`) and they stay on it; a local worker is
+    // already on its worktree branch. Either way the PR↔task link comes from the
+    // PM-Phase trailers below — the same trailers reconciliation reads — not the
+    // branch name. (The workspace handles push/PR auth via the Claude GitHub App;
+    // see README.) So just: do the work and open a PR.
+    "Work on whatever branch the workspace puts you on, and open a PR against main when done.",
     "",
     "Follow the `powdermonkey` skill. As you finish each phase, add its trailer to",
-    "the commit that completes it (progress is read off these once they land on main):",
+    "the commit that completes it (this is how progress — and this PR — is tied back",
+    "to the task, so don't skip them; they're read off the commits once they land on main):",
     ...trailers,
   ].join("\n");
   return { prompt, trailers };

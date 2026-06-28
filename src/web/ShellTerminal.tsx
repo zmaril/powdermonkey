@@ -1,4 +1,5 @@
 import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef } from "react";
@@ -21,6 +22,14 @@ export function ShellTerminal({ cwd, session }: { cwd?: string; session?: number
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    // Detect URLs in the output and render them as clickable links. Clicking
+    // opens the URL in a new tab; noopener/noreferrer keeps the opened page
+    // from reaching back into this one.
+    term.loadAddon(
+      new WebLinksAddon((_ev, uri) => {
+        window.open(uri, "_blank", "noopener,noreferrer");
+      }),
+    );
     term.open(el);
     fit.fit();
 

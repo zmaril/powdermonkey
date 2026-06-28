@@ -3,6 +3,7 @@
 
 import { app } from "./app.ts";
 import { ready } from "./db.ts";
+import { startGithubWatch } from "./github-watch.ts";
 import { reconcile } from "./reconcile.ts";
 import { startSupervisorPty } from "./session-pty.ts";
 
@@ -53,8 +54,11 @@ if (RECONCILE_MS > 0) {
     running = true;
     try {
       const r = await reconcile();
-      if (r.phasesMarked > 0 || r.tasksCompleted > 0) {
-        console.log(`reconciled: ${r.phasesMarked} phase(s), ${r.tasksCompleted} task(s)`);
+      if (r.phasesMarked > 0 || r.tasksCompleted > 0 || r.sessionsArchived > 0) {
+        console.log(
+          `reconciled: ${r.phasesMarked} phase(s), ${r.tasksCompleted} task(s), ` +
+            `${r.sessionsArchived} session(s) archived`,
+        );
       }
     } catch (e) {
       console.warn("reconcile tick failed:", e instanceof Error ? e.message : e);
@@ -63,5 +67,10 @@ if (RECONCILE_MS > 0) {
     }
   }, RECONCILE_MS);
 }
+
+// Watch GitHub for cloud workers' PRs (pm/task-*): one poll loop fans out events
+// to subscribers that set task.prUrl and wake reconcile on merge. Catches up on
+// PRs opened before boot on its first tick. Disable with PM_GITHUB_WATCH_INTERVAL_MS=0.
+startGithubWatch();
 
 console.log(`supervisor listening on http://localhost:${app.server?.port}`);

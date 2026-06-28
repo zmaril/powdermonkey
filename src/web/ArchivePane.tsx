@@ -2,7 +2,7 @@ import { Badge, Box, Group, SegmentedControl, Stack, Text, Title } from "@mantin
 import { useEffect, useState } from "react";
 import type { Goal, Milestone, Task } from "../server/schema.ts";
 import { type Indexes, useArchiveData } from "./plan-data.ts";
-import { STATUS_COLOR, TaskLinks } from "./plan-ui.tsx";
+import { IdTag, STATUS_COLOR, TaskLinks } from "./plan-ui.tsx";
 import { useStore } from "./store.ts";
 
 // The Archive pane is the book of work — everything finished (merged) or archived.
@@ -28,9 +28,12 @@ function ArchiveRow({ task, context }: { task: Task; context?: string }) {
         {task.status === "merged" ? "✅" : "🗄️"}
       </Text>
       <Box style={{ flex: 1, minWidth: 0 }}>
-        <Text size="sm" fw={500} c="dimmed" truncate>
-          {task.title}
-        </Text>
+        <Group gap={6} wrap="nowrap">
+          <IdTag prefix="t" id={task.id} />
+          <Text size="sm" fw={500} c="dimmed" truncate>
+            {task.title}
+          </Text>
+        </Group>
         {context && (
           <Text size="xs" c="dimmed" truncate>
             {context}
@@ -74,12 +77,16 @@ function GroupedView({ tasks, idx }: { tasks: Task[]; idx: Indexes }) {
     <Stack gap="lg">
       {sections.map(({ goal, milestone, tasks: ts }) => (
         <Box key={milestone.id}>
-          <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
-            {goal.title}
-          </Text>
-          <Title order={5} mb={4}>
-            {milestone.title}
-          </Title>
+          <Group gap={6} wrap="nowrap" align="baseline">
+            <IdTag prefix="g" id={goal.id} />
+            <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
+              {goal.title}
+            </Text>
+          </Group>
+          <Group gap={8} wrap="nowrap" align="baseline" mb={4}>
+            <IdTag prefix="m" id={milestone.id} />
+            <Title order={5}>{milestone.title}</Title>
+          </Group>
           <Stack gap={0}>
             {ts.map((t) => (
               <ArchiveRow key={t.id} task={t} />

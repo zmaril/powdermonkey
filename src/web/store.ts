@@ -1,6 +1,7 @@
 import type { SerializedDockview } from "dockview-react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { CloudPr } from "../server/events.ts";
 import type { Goal, Milestone, Note, Phase, Session, Task } from "../server/schema.ts";
 import { api } from "./client.ts";
 
@@ -19,6 +20,9 @@ type State = {
   phases: Phase[];
   sessions: Session[];
   notes: Note[];
+  // Live PR status per task-linked PR (CI / mergeable / draft), served fresh from
+  // the github-watch loop — runtime data the Active panel reads, not persisted.
+  cloudPrs: CloudPr[];
   // The book of work: archived + finished rows (fetched with ?archived=true, which
   // returns live AND archived). The Archive pane reads this; the live panes don't.
   archive: {
@@ -52,6 +56,7 @@ type State = {
   // The scratchpad is a single note. Returns it, creating the row on first use.
   ensureScratch: () => Promise<Note | null>;
   saveNote: (id: number, values: { title?: string; body?: string }) => Promise<void>;
+  toggleStar: (taskId: number, starred: boolean) => Promise<void>;
   startLocal: (taskId: number) => Promise<void>;
   dispatch: (taskId: number) => Promise<void>;
   teleport: (taskId: number) => Promise<void>;
@@ -103,6 +108,7 @@ export const useStore = create<State>()(
       phases: [],
       sessions: [],
       notes: [],
+      cloudPrs: [],
       archive: { goals: [], milestones: [], tasks: [], phases: [], sessions: [] },
       loading: false,
       error: null,
@@ -147,13 +153,14 @@ export const useStore = create<State>()(
       refresh: async () => {
         set({ loading: true, error: null });
         try {
-          const [goals, milestones, tasks, phases, sessions, notes] = await Promise.all([
+          const [goals, milestones, tasks, phases, sessions, notes, cloudPrs] = await Promise.all([
             api.goals.get(),
             api.milestones.get(),
             api.tasks.get(),
             api.phases.get(),
             api.sessions.get(),
             api.notes.get(),
+            api["cloud-prs"].get(),
           ]);
           const err =
             goals.error ??
@@ -170,6 +177,8 @@ export const useStore = create<State>()(
             phases: (phases.data ?? []) as Phase[],
             sessions: (sessions.data ?? []) as Session[],
             notes: (notes.data ?? []) as Note[],
+            // Non-fatal if it fails (watcher disabled / GitHub blip): keep status empty.
+            cloudPrs: (cloudPrs.data ?? []) as CloudPr[],
             loading: false,
           });
         } catch (e) {
@@ -200,6 +209,16 @@ export const useStore = create<State>()(
             sessions: (sessions.data ?? []) as Session[],
           },
         });
+      },
+      toggleStar: async (taskId, starred) => {
+        // Optimistic: flip it locally so the row re-sorts instantly, then PATCH. The
+        // panes derive their order off store.tasks, so this re-sorts on the spot.
+        set((s) => ({ tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, starred } : t)) }));
+        const { error } = await api.tasks({ id: taskId }).patch({ starred });
+        if (error) {
+          set({ error: String(error.value ?? error.status) });
+          await get().refresh(); // revert to server truth on failure
+        }
       },
       startLocal: async (taskId) => {
         const { data, error } = await api.tasks({ id: taskId })["start-local"].post();

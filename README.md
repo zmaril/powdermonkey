@@ -67,6 +67,38 @@ Set `PM_DISPATCH_DRY_RUN=1` to exercise the dispatch flow without touching the
 cloud. `claude` must be installed and logged in.
 
 
+## CI
+
+`.github/workflows/ci.yml` runs on every push to `main` and every PR targeting
+`main`, in two jobs:
+
+- **Lint & format (biome)** — `bun run check` (`biome check src`).
+- **Tests (bun test)** — `bun run test` (the `tests/*.test.ts` suites).
+
+To block merges on failure, mark both jobs as **required status checks** in the
+branch protection rule for `main` (Settings → Branches → Branch protection
+rules → Require status checks to pass before merging). With that enabled a red
+run disables the merge button until it goes green.
+
+
+## Operability
+
+PowderMonkey runs the supervisor server, its own `claude`, and every per-task
+worker agent inside tmux on a **private `powdermonkey` socket**, kept separate
+from your own tmux server so PM can create and kill sessions without disturbing
+your work. When the UI stops responding, a shell hangs, or an agent gets stuck,
+drop to a terminal and talk to that socket directly:
+
+```bash
+tmux -L powdermonkey ls                    # list every PM-managed session
+tmux -L powdermonkey attach -t pm-server   # watch the server console
+```
+
+See the **[tmux cheatsheet](docs/tmux.md)** for the full set of inspect-and-recover
+commands — reserved session names, detaching safely, killing a stuck session, and
+finding the supervisor pane.
+
+
 ## Why 
 
 Coding agents have sped up the production of code tremendously. They are able to quickly accomplish tasks that would otherwise take a person with a decade or more of specialized experience to complete. Knowledge work is now a resource that you can pour over a problem, and see how much of it saturates and dissolves on its own, without human effort or intervention. What I feel myself struggling with day to day is the long term coordination of many agents working together towards related yet disparate goals.

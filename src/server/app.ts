@@ -5,6 +5,7 @@ import { Elysia, t } from "elysia";
 import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
+import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
 import { models } from "./models.ts";
 import { loadPlan, planSchema } from "./plan.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
@@ -16,7 +17,6 @@ import {
   startSupervisorPty,
   writeSessionPty,
 } from "./session-pty.ts";
-import { readSessionStatus } from "./session-status.ts";
 import { teleportTask } from "./teleport.ts";
 import { landSession, startLocalSession, stopSession } from "./worktree.ts";
 
@@ -80,17 +80,6 @@ const tasksGroup = resource("tasks", taskRepo, models.tasks)
     if (!result.ok) set.status = 400;
     return result;
   })
-  .post("/:id/status", async ({ params, set }) => {
-    const task = await taskRepo.get(Number(params.id));
-    if (!task?.sessionUrl) {
-      set.status = 400;
-      return { ok: false as const, error: "task has no session" };
-    }
-    const result = await readSessionStatus(task.sessionUrl);
-    if (result.ok) await taskRepo.update(task.id, { sessionState: result.state });
-    else set.status = 502;
-    return result;
-  })
   // Start a local session: worktree on pm/task-<id> + a session row + trailer block.
   .post("/:id/start-local", async ({ params, set }) => {
     const result = await startLocalSession(Number(params.id));
@@ -139,6 +128,12 @@ export const app = new Elysia()
   .post("/plan", ({ body }) => loadPlan(body), { body: planSchema })
   // Reconcile progress from PM trailers on main. Also runs on a poll loop.
   .post("/reconcile", () => reconcile())
+  // Poll GitHub for pm/task-* PRs now (set prUrl, wake reconcile on merge). The
+  // github-watch loop does this every 10s; this triggers a pass on demand.
+  .post("/github-sync", () => syncCloudPrs())
+  // The watcher's latest PR state per task-linked PR (CI checks, mergeable, draft).
+  // Live runtime data, not persisted — the Active panel reads it for status badges.
+  .get("/cloud-prs", () => currentCloudPrs())
   // Image upload from the web shell. The browser is remote, so a dropped image
   // has to land on the server filesystem first; we save it under data/uploads/
   // and return the absolute path, which the client then types into the PTY for

@@ -18,12 +18,12 @@
     "@mantine/hooks": "^7.15.0",
     "@sinclair/typebox": "0.34.49",
     "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",
     "dockview-react": "^7.0.2",
     "drizzle-orm": "^0.38.0",
     "drizzle-typebox": "^0.3.3",
     "elysia": "^1.4.29",
-    "playwright-core": "^1.49.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zustand": "^5.0.0"
