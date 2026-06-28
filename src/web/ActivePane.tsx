@@ -1,4 +1,15 @@
-import { Badge, Box, Card, Group, SegmentedControl, Stack, Text, Title } from "@mantine/core";
+import {
+  Badge,
+  Box,
+  Card,
+  Group,
+  SegmentedControl,
+  Stack,
+  Switch,
+  Text,
+  Title,
+  Tooltip,
+} from "@mantine/core";
 import { useState } from "react";
 import type { CloudPr } from "../server/events.ts";
 import type { Goal, Milestone, Session, Task } from "../server/schema.ts";
@@ -12,6 +23,7 @@ import {
   SessionStateBadge,
   StarToggle,
 } from "./plan-ui.tsx";
+import { useStore } from "./store.ts";
 
 // The Active pane is the live monitor — every task with a session running right
 // now (the derived-active set; see active.ts). The unit here is the WORKER, not
@@ -227,6 +239,8 @@ function GroupedView({ activeIds, idx }: { activeIds: Set<number>; idx: Indexes 
 
 export function ActivePane() {
   const { idx, activeIds } = usePlanData();
+  const autoRebase = useStore((s) => s.autoRebase);
+  const setAutoRebase = useStore((s) => s.setAutoRebase);
   const [view, setView] = useState<View>("flat");
 
   const allTasks = [...idx.tasksByMilestone.values()].flat();
@@ -245,15 +259,32 @@ export function ActivePane() {
             {active.length}
           </Badge>
         </Group>
-        <SegmentedControl
-          size="xs"
-          value={view}
-          onChange={(v) => setView(v as View)}
-          data={[
-            { label: "Flat", value: "flat" },
-            { label: "Grouped", value: "grouped" },
-          ]}
-        />
+        <Group gap="md" wrap="nowrap">
+          <Tooltip
+            label="Auto-ask @claude to rebase a PR that conflicts with main. Turn off to drive rebases by hand."
+            multiline
+            w={240}
+            withArrow
+          >
+            <Switch
+              size="xs"
+              checked={autoRebase}
+              onChange={(e) => setAutoRebase(e.currentTarget.checked)}
+              label="auto-rebase"
+              labelPosition="left"
+              styles={{ label: { fontSize: "var(--mantine-font-size-xs)", color: "#909296" } }}
+            />
+          </Tooltip>
+          <SegmentedControl
+            size="xs"
+            value={view}
+            onChange={(v) => setView(v as View)}
+            data={[
+              { label: "Flat", value: "flat" },
+              { label: "Grouped", value: "grouped" },
+            ]}
+          />
+        </Group>
       </Group>
 
       <Box style={{ flex: 1, overflowY: "auto" }} px="md" py="xs">

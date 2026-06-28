@@ -27,6 +27,9 @@ type State = {
   // Live PR status per task-linked PR (CI / mergeable / draft), served fresh from
   // the github-watch loop — runtime data the Active panel reads, not persisted.
   cloudPrs: CloudPr[];
+  // Operator toggle: whether the watcher auto-asks @claude to rebase conflicting
+  // PRs. Runtime-only on the server (resets to default on restart).
+  autoRebase: boolean;
   // The book of work: archived + finished rows (fetched with ?archived=true, which
   // returns live AND archived). The Archive pane reads this; the live panes don't.
   archive: {
@@ -67,6 +70,7 @@ type State = {
   ensureScratch: () => Promise<Note | null>;
   saveNote: (id: number, values: { title?: string; body?: string }) => Promise<void>;
   toggleStar: (taskId: number, starred: boolean) => Promise<void>;
+  setAutoRebase: (on: boolean) => Promise<void>;
   startLocal: (taskId: number) => Promise<void>;
   dispatch: (taskId: number) => Promise<void>;
   // Launch several backlog tasks together: ONE session works the whole batch. The
@@ -151,6 +155,7 @@ export const useStore = create<State>()(
       sessionTasks: [],
       notes: [],
       cloudPrs: [],
+      autoRebase: true,
       archive: { goals: [], milestones: [], tasks: [], phases: [], sessions: [], sessionTasks: [] },
       loading: false,
       error: null,
@@ -196,17 +201,27 @@ export const useStore = create<State>()(
       refresh: async () => {
         set({ loading: true, error: null });
         try {
-          const [goals, milestones, tasks, phases, sessions, sessionTasks, notes, cloudPrs] =
-            await Promise.all([
-              api.goals.get(),
-              api.milestones.get(),
-              api.tasks.get(),
-              api.phases.get(),
-              api.sessions.get(),
-              api["session-tasks"].get(),
-              api.notes.get(),
-              api["cloud-prs"].get(),
-            ]);
+          const [
+            goals,
+            milestones,
+            tasks,
+            phases,
+            sessions,
+            sessionTasks,
+            notes,
+            cloudPrs,
+            settings,
+          ] = await Promise.all([
+            api.goals.get(),
+            api.milestones.get(),
+            api.tasks.get(),
+            api.phases.get(),
+            api.sessions.get(),
+            api["session-tasks"].get(),
+            api.notes.get(),
+            api["cloud-prs"].get(),
+            api.settings.get(),
+          ]);
           const err =
             goals.error ??
             milestones.error ??
@@ -226,6 +241,7 @@ export const useStore = create<State>()(
             notes: (notes.data ?? []) as Note[],
             // Non-fatal if it fails (watcher disabled / GitHub blip): keep status empty.
             cloudPrs: (cloudPrs.data ?? []) as CloudPr[],
+            autoRebase: (settings.data as { autoRebase?: boolean } | null)?.autoRebase ?? true,
             loading: false,
           });
         } catch (e) {
@@ -269,6 +285,14 @@ export const useStore = create<State>()(
         // panes derive their order off store.tasks, so this re-sorts on the spot.
         set((s) => ({ tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, starred } : t)) }));
         const { error } = await api.tasks({ id: taskId }).patch({ starred });
+        if (error) {
+          set({ error: String(error.value ?? error.status) });
+          await get().refresh(); // revert to server truth on failure
+        }
+      },
+      setAutoRebase: async (on) => {
+        set({ autoRebase: on }); // optimistic
+        const { error } = await api.settings.post({ autoRebase: on });
         if (error) {
           set({ error: String(error.value ?? error.status) });
           await get().refresh(); // revert to server truth on failure

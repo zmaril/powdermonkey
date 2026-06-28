@@ -6,7 +6,12 @@ import { P, match } from "ts-pattern";
 import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
-import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
+import {
+  currentCloudPrs,
+  isAutoRebaseEnabled,
+  setAutoRebaseEnabled,
+  syncCloudPrs,
+} from "./github-watch.ts";
 import { models } from "./models.ts";
 import { PUBLIC_DIR } from "./paths.ts";
 import { loadPlan, planSchema } from "./plan.ts";
@@ -155,6 +160,17 @@ export const app = new Elysia()
   // Persisted in the pull_requests table, so it's served from last-known state on
   // boot — the Active panel reads it for status badges.
   .get("/cloud-prs", () => currentCloudPrs())
+  // Runtime operator settings (in-memory, reset on restart). `autoRebase` gates the
+  // watcher's auto @claude-rebase ask, so the Active pane can pause/resume it.
+  .get("/settings", () => ({ autoRebase: isAutoRebaseEnabled() }))
+  .post(
+    "/settings",
+    ({ body }) => {
+      setAutoRebaseEnabled(body.autoRebase);
+      return { autoRebase: isAutoRebaseEnabled() };
+    },
+    { body: t.Object({ autoRebase: t.Boolean() }) },
+  )
   // Every session↔task link. The browser intersects these with the sessions it
   // already holds to learn which tasks are active and which session each surfaces,
   // so one flat list serves both the live panes and the archive view.
