@@ -170,10 +170,7 @@ export function PhaseList({
                 c={done ? "dimmed" : undefined}
                 td={done ? "line-through" : undefined}
               >
-                {p.name}{" "}
-                <Text span c="dimmed" size="xs">
-                  #{p.id}
-                </Text>
+                {p.name}
               </Text>
               {interactive && !done && (
                 <UnstyledButton

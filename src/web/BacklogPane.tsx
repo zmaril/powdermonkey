@@ -2,7 +2,6 @@ import {
   Box,
   Button,
   Card,
-  Checkbox,
   Code,
   CopyButton,
   Group,
@@ -10,41 +9,132 @@ import {
   Stack,
   Text,
   Title,
+  UnstyledButton,
 } from "@mantine/core";
 import { useState } from "react";
-import type { Goal, Phase, Task } from "../server/schema.ts";
+import type { Goal, Milestone, Phase, Task } from "../server/schema.ts";
 import { SessionKind, TaskStatus } from "../shared/types.ts";
 import { AnimatedList } from "./AnimatedList.tsx";
 import { partitionTasks } from "./active.ts";
 import { type Indexes, starFirst, usePlanData } from "./plan-data.ts";
-import {
-  CompleteTaskControl,
-  IdTag,
-  LaunchActions,
-  PhaseList,
-  ProgressPill,
-  StarToggle,
-  TaskBadges,
-  TaskLinks,
-} from "./plan-ui.tsx";
+import { IdTag, PhaseList, ProgressPill, StarToggle } from "./plan-ui.tsx";
 import { useStore } from "./store.ts";
 
 // The Backlog pane is the launchpad — everything to-be-worked (not active),
-// grouped goal → milestone as cards (or one flat star-first list). Each card
-// carries its launch actions (Start local / Dispatch remote) plus a select
-// checkbox: check several and a batch bar launches them as ONE session. Task
-// creation is supervisor-only for now (via the API). Milestones and goals with no
-// backlog tasks left are hidden here — their finished work lives in the Archive
-// pane, so completed work doesn't float around as empty headers.
+// grouped goal → milestone as cards (or one flat star-first list). Every card
+// carries the same action cluster (TaskActions): launch it 💻/☁️ or close it
+// (DONE / WONTDO). Shift-click a card to add it to a multi-selection; while a
+// selection is live the per-card actions hide and one batch bar drives the whole
+// set as ONE launch — so it's clear they move together. Goals and milestones have
+// carets to collapse them.
 
-// Multi-select wiring threaded down to each card: whether a task is checked, and a
-// toggle. When the selection is non-empty a batch bar appears (see SelectionBar) to
-// Start local / Dispatch remote the whole set as ONE session.
-type Selection = { selected: Set<number>; toggle: (id: number) => void };
+// Electric-blue glow on a selected card / the batch bar, so the live selection pops.
+const SELECTED_SHADOW = "0 0 0 2px var(--mantine-color-blue-5), 0 0 16px 2px rgba(59,130,246,0.55)";
 
-/** One backlog task card: a select checkbox + star, id + title + status, its phase
- *  checklist, and the single-task launch actions. Checking several cards reveals
- *  the batch bar that launches them together. */
+// Multi-select wiring threaded down to each card: whether a task is checked, a
+// toggle, and whether ANY selection is live (so cards can hide their own actions).
+type Selection = { selected: Set<number>; toggle: (id: number) => void; active: boolean };
+
+/** A bigger collapse caret for a goal / milestone header. */
+function Caret({
+  collapsed,
+  onToggle,
+  label,
+}: { collapsed: boolean; onToggle: () => void; label: string }) {
+  return (
+    <UnstyledButton onClick={onToggle} title={label} style={{ lineHeight: 1, flexShrink: 0 }}>
+      <Text size="xl" c="dimmed" w={18} ta="center" style={{ userSelect: "none" }}>
+        {collapsed ? "▸" : "▾"}
+      </Text>
+    </UnstyledButton>
+  );
+}
+
+/** The shared action cluster for a backlog task (or a whole multi-selection): launch
+ *  local 💻▶ / remote ☁️▶, or close it (DONE / WONTDO). Works on one or many ids — the
+ *  solo card passes `[task.id]`, the batch bar passes the selection — so the buttons
+ *  look and behave identically in both. `onDone` lets the batch bar clear the selection
+ *  after an action. Clicks stop propagation so they don't shift-select the card. */
+function TaskActions({ ids, onDone }: { ids: number[]; onDone?: () => void }) {
+  const { startLocalMany, dispatchMany, completeTask, cancelTask } = useStore();
+  const [running, setRunning] = useState<SessionKind | null>(null);
+  const busy = running !== null;
+
+  const launch = async (kind: SessionKind) => {
+    if (busy || ids.length === 0) return;
+    setRunning(kind);
+    try {
+      if (kind === SessionKind.Local) await startLocalMany(ids);
+      else await dispatchMany(ids);
+      onDone?.();
+    } finally {
+      setRunning(null);
+    }
+  };
+  const markDone = () => {
+    for (const id of ids) completeTask(id);
+    onDone?.();
+  };
+  const wontDo = () => {
+    const msg =
+      ids.length > 1
+        ? `Close ${ids.length} tasks as won't-do? They move to the archive as cancelled.`
+        : "Close this task as won't-do? It moves to the archive as cancelled.";
+    if (window.confirm(msg)) {
+      for (const id of ids) cancelTask(id);
+      onDone?.();
+    }
+  };
+
+  return (
+    <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+      <Button
+        size="compact-xs"
+        variant="light"
+        title="Start local"
+        loading={running === SessionKind.Local}
+        disabled={busy}
+        onClick={() => launch(SessionKind.Local)}
+      >
+        💻 ▶
+      </Button>
+      <Button
+        size="compact-xs"
+        variant="light"
+        color="cyan"
+        title="Dispatch remote"
+        loading={running === SessionKind.Remote}
+        disabled={busy}
+        onClick={() => launch(SessionKind.Remote)}
+      >
+        ☁️ ▶
+      </Button>
+      <Button
+        size="compact-xs"
+        variant="light"
+        color="orange"
+        title="Mark this task done by hand"
+        onClick={markDone}
+      >
+        DONE
+      </Button>
+      <Button
+        size="compact-xs"
+        variant="light"
+        color="red"
+        title="Close as won't-do (archived, not counted as done)"
+        onClick={wontDo}
+      >
+        WONTDO
+      </Button>
+    </Group>
+  );
+}
+
+/** One backlog task card. Star + id + title on the left, actions on the right (hidden
+ *  while a selection is live, so the batch bar owns them). Shift-click anywhere selects
+ *  it (mousedown preventDefault stops the stray text-highlight); selected cards get an
+ *  electric-blue glow. */
 function BacklogCard({
   task,
   phases,
@@ -56,38 +146,80 @@ function BacklogCard({
 }) {
   const checked = selection.selected.has(task.id);
   return (
-    <Card withBorder radius="md" padding="sm" bg={checked ? "dark.5" : undefined}>
+    // biome-ignore lint/a11y/useKeyWithClickEvents: shift-click is additive over the explicit buttons.
+    <Card
+      withBorder
+      radius="md"
+      padding="sm"
+      bg={checked ? "dark.5" : undefined}
+      style={{ boxShadow: checked ? SELECTED_SHADOW : undefined }}
+      onMouseDown={(e) => {
+        if (e.shiftKey) e.preventDefault();
+      }}
+      onClick={(e) => {
+        if (e.shiftKey) {
+          e.preventDefault();
+          selection.toggle(task.id);
+        }
+      }}
+    >
       <Group justify="space-between" wrap="nowrap" mb={6}>
         <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-          <Checkbox
-            size="xs"
-            checked={checked}
-            onChange={() => selection.toggle(task.id)}
-            aria-label={`Select ${task.title}`}
-          />
           <StarToggle task={task} />
           <IdTag prefix="t" id={task.id} />
           <Text fw={500} truncate>
             {task.title}
           </Text>
         </Group>
-        <TaskBadges task={task} />
+        {!selection.active && <TaskActions ids={[task.id]} />}
       </Group>
-      <PhaseList phases={phases} interactive />
-      <Group gap="xs" mt={10} justify="space-between">
-        <LaunchActions taskId={task.id} />
-        <Group gap="md" wrap="nowrap">
-          <CompleteTaskControl task={task} />
-          <TaskLinks task={task} />
-        </Group>
-      </Group>
+      <PhaseList phases={phases} />
     </Card>
   );
 }
 
-/** A goal and its milestones, each milestone listing its backlog cards. Milestones
- *  with no backlog tasks are skipped; a goal with no remaining backlog renders
- *  nothing (its done work lives in the Archive pane). */
+/** A milestone and its backlog cards, with a caret to collapse the lot. */
+function MilestoneGroup({
+  milestone,
+  tasks,
+  idx,
+  selection,
+}: {
+  milestone: Milestone;
+  tasks: Task[];
+  idx: Indexes;
+  selection: Selection;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  return (
+    <Stack gap="xs" ml={20}>
+      <Group gap={6} wrap="nowrap" align="center">
+        <Caret
+          collapsed={collapsed}
+          onToggle={() => setCollapsed((c) => !c)}
+          label={collapsed ? "Expand milestone" : "Collapse milestone"}
+        />
+        <IdTag prefix="m" id={milestone.id} />
+        <Title order={5}>{milestone.title}</Title>
+      </Group>
+      {!collapsed && (
+        <AnimatedList gap={10}>
+          {tasks.map((t) => (
+            <BacklogCard
+              key={t.id}
+              task={t}
+              phases={idx.phasesByTask.get(t.id) ?? []}
+              selection={selection}
+            />
+          ))}
+        </AnimatedList>
+      )}
+    </Stack>
+  );
+}
+
+/** A goal and its milestones. A caret collapses the whole goal. Milestones with no
+ *  backlog tasks are skipped; a goal with no remaining backlog renders nothing. */
 function GoalGroup({
   goal,
   idx,
@@ -99,6 +231,7 @@ function GoalGroup({
   backlog: Set<number>;
   selection: Selection;
 }) {
+  const [collapsed, setCollapsed] = useState(false);
   const milestones = (idx.milestonesByGoal.get(goal.id) ?? [])
     .map((m) => ({
       m,
@@ -111,42 +244,32 @@ function GoalGroup({
   return (
     <Stack gap="md">
       <div>
-        <Group gap={8} wrap="nowrap" align="baseline">
+        <Group gap={8} wrap="nowrap" align="center">
+          <Caret
+            collapsed={collapsed}
+            onToggle={() => setCollapsed((c) => !c)}
+            label={collapsed ? "Expand goal" : "Collapse goal"}
+          />
           <IdTag prefix="g" id={goal.id} />
           <Title order={3}>{goal.title}</Title>
         </Group>
-        {goal.objective && (
-          <Text c="dimmed" size="sm" mt={4}>
+        {!collapsed && goal.objective && (
+          <Text c="dimmed" size="sm" mt={4} ml={26}>
             {goal.objective}
           </Text>
         )}
       </div>
 
-      {milestones.map(({ m, tasks }) => (
-        <Stack key={m.id} gap="xs">
-          <Group gap={8} wrap="nowrap" align="baseline">
-            <IdTag prefix="m" id={m.id} />
-            <Title order={5}>{m.title}</Title>
-          </Group>
-          <AnimatedList gap={10}>
-            {tasks.map((t) => (
-              <BacklogCard
-                key={t.id}
-                task={t}
-                phases={idx.phasesByTask.get(t.id) ?? []}
-                selection={selection}
-              />
-            ))}
-          </AnimatedList>
-        </Stack>
-      ))}
+      {!collapsed &&
+        milestones.map(({ m, tasks }) => (
+          <MilestoneGroup key={m.id} milestone={m} tasks={tasks} idx={idx} selection={selection} />
+        ))}
     </Stack>
   );
 }
 
-/** One dense backlog row for the flat view: select · star · id · title · context, a
- *  progress pill and status badges, with the launch actions below. Mirrors the
- *  Active flat row so the two panes read the same. */
+/** One dense backlog row for the flat view: star · id · title · context on the left,
+ *  the same actions on the right. Shift-click selects; selected rows get the glow. */
 function BacklogRow({
   task,
   idx,
@@ -161,18 +284,26 @@ function BacklogRow({
   const phases = idx.phasesByTask.get(task.id) ?? [];
   const checked = selection.selected.has(task.id);
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: shift-click is additive over the explicit buttons.
     <Box
       px="sm"
       py={8}
-      style={{ borderBottom: "1px solid #2c2e33", background: checked ? "#25262b" : undefined }}
+      style={{
+        borderBottom: "1px solid #2c2e33",
+        background: checked ? "#25262b" : undefined,
+        boxShadow: checked ? SELECTED_SHADOW : undefined,
+      }}
+      onMouseDown={(e) => {
+        if (e.shiftKey) e.preventDefault();
+      }}
+      onClick={(e) => {
+        if (e.shiftKey) {
+          e.preventDefault();
+          selection.toggle(task.id);
+        }
+      }}
     >
-      <Group gap="sm" wrap="nowrap" align="flex-start">
-        <Checkbox
-          size="xs"
-          checked={checked}
-          onChange={() => selection.toggle(task.id)}
-          aria-label={`Select ${task.title}`}
-        />
+      <Group gap="sm" wrap="nowrap" align="center">
         <StarToggle task={task} />
         <Box style={{ flex: 1, minWidth: 0 }}>
           <Group gap={6} wrap="nowrap">
@@ -188,11 +319,7 @@ function BacklogRow({
           )}
         </Box>
         {phases.length > 0 && <ProgressPill phases={phases} />}
-        <TaskBadges task={task} />
-      </Group>
-      <Group gap="xs" wrap="wrap" justify="flex-end" mt={6}>
-        <LaunchActions taskId={task.id} />
-        <TaskLinks task={task} />
+        {!selection.active && <TaskActions ids={[task.id]} />}
       </Group>
     </Box>
   );
@@ -217,59 +344,28 @@ function FlatView({
   );
 }
 
-/** The batch action bar, shown while one or more tasks are selected. Launches the
- *  whole selection as ONE session (local or remote) and then clears the selection.
- *  Order follows the rendered backlog so the first card is the primary task. */
+/** The batch action bar, shown while one or more tasks are selected: bigger and lit
+ *  with an electric-blue edge so it's unmissable. Same action cluster as a card, but
+ *  applied to the whole selection as ONE launch. */
 function SelectionBar({ ids, clear }: { ids: number[]; clear: () => void }) {
-  const { startLocalMany, dispatchMany } = useStore();
-  // Track WHICH batch action is in flight, so the clicked button shows its own
-  // spinner (matching the per-task Dispatch remote / Start local loading state).
-  const [running, setRunning] = useState<SessionKind | null>(null);
-  const busy = running !== null;
-
-  const run = async (kind: SessionKind) => {
-    if (busy || ids.length === 0) return;
-    setRunning(kind);
-    try {
-      if (kind === SessionKind.Local) await startLocalMany(ids);
-      else await dispatchMany(ids);
-      clear();
-    } finally {
-      setRunning(null);
-    }
-  };
-
   return (
     <Group
       justify="space-between"
-      px="md"
-      py={8}
-      style={{ flex: "0 0 auto", borderTop: "1px solid #2c2e33", background: "#25262b" }}
+      px="lg"
+      py="md"
+      style={{
+        flex: "0 0 auto",
+        borderTop: "2px solid var(--mantine-color-blue-5)",
+        background: "#1b2434",
+        boxShadow: "0 -4px 22px 2px rgba(59,130,246,0.5)",
+      }}
     >
-      <Text size="sm" fw={600}>
+      <Text size="md" fw={700}>
         {ids.length} selected
       </Text>
-      <Group gap="xs">
-        <Button
-          size="compact-xs"
-          variant="light"
-          loading={running === SessionKind.Local}
-          disabled={busy}
-          onClick={() => run(SessionKind.Local)}
-        >
-          Start local
-        </Button>
-        <Button
-          size="compact-xs"
-          variant="subtle"
-          color="gray"
-          loading={running === SessionKind.Remote}
-          disabled={busy}
-          onClick={() => run(SessionKind.Remote)}
-        >
-          Dispatch remote
-        </Button>
-        <Button size="compact-xs" variant="subtle" color="gray" disabled={busy} onClick={clear}>
+      <Group gap="sm" wrap="nowrap">
+        <TaskActions ids={ids} onDone={clear} />
+        <Button size="compact-sm" variant="subtle" color="gray" onClick={clear}>
           clear
         </Button>
       </Group>
@@ -324,7 +420,7 @@ export function BacklogPane() {
       else next.add(id);
       return next;
     });
-  const selection: Selection = { selected, toggle };
+  const selection: Selection = { selected, toggle, active: selected.size > 0 };
 
   // The launch order is the rendered backlog order (goal → milestone → position),
   // so the first selected card becomes the primary task of the shared session. Drop

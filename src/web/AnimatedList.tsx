@@ -22,8 +22,17 @@ import {
 
 // Subtle and fast — polish, not flourish. One short duration and one easing for every
 // transition so the whole pane moves as a piece.
-const DURATION_MS = 170;
+const DURATION_MS = 300;
 const EASING = "cubic-bezier(0.2, 0, 0, 1)";
+
+// Shared across ALL AnimatedList instances: while any list is mid-leave, the cards
+// (and sibling lists) below the collapsing one shift up via natural document flow as
+// its height transitions to 0 — already smooth. A coincidental re-render during that
+// window (dispatch fires refresh() + websocket deltas) would otherwise re-measure
+// those followers and slap a fresh FLIP transform on top of the flow movement, so
+// they jump back and fly. Suppressing reorder-FLIP everywhere for the leave's
+// duration lets the flow handle it. Reorder (starring, no leave) is unaffected.
+let suppressFlipUntil = 0;
 
 function prefersReducedMotion(): boolean {
   return (
@@ -141,6 +150,9 @@ export function AnimatedList({
       if (leaving.current.has(key)) {
         if (node.dataset.leavingStarted) continue;
         node.dataset.leavingStarted = "1";
+        // Followers shift up via flow while this collapses — keep every list from
+        // FLIP-fighting that movement until it settles.
+        suppressFlipUntil = performance.now() + DURATION_MS + 40;
         node.style.height = `${node.offsetHeight}px`;
         node.style.overflow = "hidden";
         void node.offsetHeight; // reflow so the height below actually transitions
@@ -173,8 +185,10 @@ export function AnimatedList({
       }
 
       // Reordered: FLIP — jump to the old spot with no transition, then slide to rest.
+      // Skipped while a leave is settling anywhere (see suppressFlipUntil) so the
+      // collapse-driven flow shift isn't fought into flying.
       const prevTop = tops.current.get(key);
-      if (prevTop !== undefined && prevTop !== top) {
+      if (prevTop !== undefined && prevTop !== top && performance.now() >= suppressFlipUntil) {
         node.style.transition = "none";
         node.style.transform = `translateY(${prevTop - top}px)`;
         requestAnimationFrame(() => {
