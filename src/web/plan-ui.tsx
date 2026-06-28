@@ -115,7 +115,7 @@ export function ProgressPill({ phases }: { phases: Phase[] }) {
 // reconciled phase is a solid green ✓; an operator-asserted one is an orange ✋
 // ("by hand"). Todo is a gray dot. See docs/completion-model.md.
 function phaseGlyph(p: Phase): { color: string; mark: string; title: string } {
-  if (p.status !== PhaseStatus.Done) return { color: "gray", mark: "·", title: "todo" };
+  if (p.status !== PhaseStatus.Done) return { color: "gray", mark: "·", title: PhaseStatus.Todo };
   if (p.doneSource === DoneSource.Operator)
     return { color: "orange", mark: "✋", title: "marked done by hand — not reconciled from main" };
   return { color: "green", mark: "✓", title: "reconciled from a trailer on main" };
