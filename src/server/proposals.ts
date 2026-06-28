@@ -1,0 +1,187 @@
+import { type TSchema, Type } from "@sinclair/typebox";
+import { and, eq, isNull } from "drizzle-orm";
+import type { ProposalChange, VocabKind } from "../shared/types.ts";
+import { goalRepo, milestoneRepo, phaseRepo, taskRepo } from "./crud.ts";
+import { db } from "./db.ts";
+import { type Proposal, proposals } from "./schema.ts";
+
+// A proposal is a pending change-set of typed vocab mutations. This module owns the
+// proposal row's lifecycle decisions (create / list / approve / reject) and the
+// `base` snapshot that lets the apply engine (apply.ts) detect a stale base. The
+// translation of an approved change-set into actual CRUD lives in apply.ts.
+
+/** The four vocab repos, keyed by the kind a change names. The apply engine and the
+ *  base snapshot both resolve a (kind, id) to a row through here. */
+export const repoFor = {
+  goal: goalRepo,
+  milestone: milestoneRepo,
+  task: taskRepo,
+  phase: phaseRepo,
+} as const;
+
+/** The parent foreign-key column a child kind hangs under. Goals are roots (none).
+ *  Used by both create (wire the new row's parent) and reorder (reparent). */
+export const PARENT_COLUMN: Record<VocabKind, string | null> = {
+  goal: null,
+  milestone: "goalId",
+  task: "milestoneId",
+  phase: "taskId",
+};
+
+// ── TypeBox body schemas ────────────────────────────────────────────────────
+// Hand-written (not drizzle-typebox) because `changes` is a JSON union, not a flat
+// column set. Elysia validates the create body against this.
+
+const kindSchema = Type.Union([
+  Type.Literal("goal"),
+  Type.Literal("milestone"),
+  Type.Literal("task"),
+  Type.Literal("phase"),
+]);
+
+// Fields are an open record — each kind has its own columns, validated for real when
+// the change is applied (a create/update goes through the same insert the CRUD route
+// would). Keeping it loose here keeps one schema for all four kinds.
+const fields = Type.Record(Type.String(), Type.Unknown());
+
+const changeSchema = Type.Union([
+  Type.Object({
+    op: Type.Literal("create"),
+    kind: kindSchema,
+    ref: Type.Optional(Type.String()),
+    parentId: Type.Optional(Type.Number()),
+    parentRef: Type.Optional(Type.String()),
+    fields,
+    position: Type.Optional(Type.Number()),
+  }),
+  Type.Object({
+    op: Type.Literal("update"),
+    kind: kindSchema,
+    id: Type.Number(),
+    fields,
+  }),
+  Type.Object({
+    op: Type.Literal("archive"),
+    kind: kindSchema,
+    id: Type.Number(),
+  }),
+  Type.Object({
+    op: Type.Literal("reorder"),
+    kind: kindSchema,
+    id: Type.Number(),
+    position: Type.Optional(Type.Number()),
+    parentId: Type.Optional(Type.Number()),
+  }),
+]);
+
+export const proposalCreateBody: TSchema = Type.Object({
+  title: Type.Optional(Type.String()),
+  summary: Type.Optional(Type.String()),
+  changes: Type.Array(changeSchema, { minItems: 1 }),
+});
+
+/** A stable key for an entity in the base snapshot — `${kind}:${id}`. */
+export function baseKey(kind: VocabKind, id: number): string {
+  return `${kind}:${id}`;
+}
+
+/** Every existing (kind, id) a change-set reads or mutates: the explicit targets of
+ *  update/archive/reorder, plus any `parentId` a create/reorder attaches to. These
+ *  are the rows whose drift would make the proposal stale, so they're what the base
+ *  snapshot covers. */
+export function referencedEntities(changes: ProposalChange[]): Array<[VocabKind, number]> {
+  const seen = new Set<string>();
+  const out: Array<[VocabKind, number]> = [];
+  const add = (kind: VocabKind, id: number) => {
+    const k = baseKey(kind, id);
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push([kind, id]);
+  };
+  for (const c of changes) {
+    if (c.op === "update" || c.op === "archive" || c.op === "reorder") add(c.kind, c.id);
+    if ((c.op === "create" || c.op === "reorder") && c.parentId != null) {
+      // The parent's kind is the kind one level up from the child.
+      const parentKind = parentKindOf(c.kind);
+      if (parentKind) add(parentKind, c.parentId);
+    }
+  }
+  return out;
+}
+
+/** The kind one level up the hierarchy — a milestone's parent is a goal, etc. */
+export function parentKindOf(kind: VocabKind): VocabKind | null {
+  return kind === "milestone"
+    ? "goal"
+    : kind === "task"
+      ? "milestone"
+      : kind === "phase"
+        ? "task"
+        : null;
+}
+
+/** Snapshot the `updated_at` of every existing row a change-set touches, so apply
+ *  can later detect that the plan moved underneath the proposal. A referenced row
+ *  that's missing is recorded as "absent" — apply treats a row that later appears,
+ *  disappears, or changes timestamp as a conflict. */
+export async function snapshotBase(changes: ProposalChange[]): Promise<Record<string, string>> {
+  const base: Record<string, string> = {};
+  for (const [kind, id] of referencedEntities(changes)) {
+    const row = (await repoFor[kind].get(id)) as { updatedAt?: Date } | undefined;
+    base[baseKey(kind, id)] = row?.updatedAt ? row.updatedAt.toISOString() : "absent";
+  }
+  return base;
+}
+
+export type CreateProposalInput = {
+  title?: string;
+  summary?: string;
+  changes: ProposalChange[];
+};
+
+/** Author a proposal: snapshot the base and persist it pending. */
+export async function createProposal(input: CreateProposalInput): Promise<Proposal> {
+  const base = await snapshotBase(input.changes);
+  const [row] = await db
+    .insert(proposals)
+    .values({
+      title: input.title ?? "",
+      summary: input.summary ?? "",
+      changes: input.changes,
+      base,
+      status: "pending",
+    })
+    .returning();
+  return row;
+}
+
+export async function getProposal(id: number): Promise<Proposal | undefined> {
+  const [row] = await db.select().from(proposals).where(eq(proposals.id, id));
+  return row;
+}
+
+export async function listProposals(opts?: { status?: string }): Promise<Proposal[]> {
+  const rows = await db.select().from(proposals).where(isNull(proposals.archivedAt));
+  return opts?.status ? rows.filter((p) => p.status === opts.status) : rows;
+}
+
+export async function listPending(): Promise<Proposal[]> {
+  return db
+    .select()
+    .from(proposals)
+    .where(and(eq(proposals.status, "pending"), isNull(proposals.archivedAt)));
+}
+
+/** Record a decision. A proposal can only be approved/rejected while pending — a
+ *  terminal state (applied/rejected) or a missing row returns undefined. */
+export async function decideProposal(
+  id: number,
+  decision: "approved" | "rejected",
+): Promise<Proposal | undefined> {
+  const [row] = await db
+    .update(proposals)
+    .set({ status: decision, updatedAt: new Date() })
+    .where(and(eq(proposals.id, id), eq(proposals.status, "pending")))
+    .returning();
+  return row;
+}

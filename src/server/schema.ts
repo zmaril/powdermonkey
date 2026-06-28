@@ -1,4 +1,4 @@
-import { boolean, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import {
   type AgentState,
   type CheckRollupState,
@@ -6,6 +6,8 @@ import {
   type MergeableState,
   PhaseStatus,
   type PrState,
+  type ProposalChange,
+  type ProposalStatus,
   SessionKind,
   SessionState,
   TaskStatus,
@@ -187,6 +189,29 @@ export const settings = pgTable("settings", {
   ...timestamps,
 });
 
+// A proposal: a pending change-set of typed vocab mutations the operator decides
+// on before it touches the live plan. The supervisor/agent authors one when it is
+// SUGGESTING a change (rather than direct CRUD for a just-do-it edit); the operator
+// reviews it — rendered as markdown — and approves or rejects it.
+//
+// `changes` is the ordered list of typed mutations (create/update/archive/reorder
+// across goals·milestones·tasks·phases). `base` is a snapshot of the updated_at of
+// every existing row the change-set touches, captured at authoring time — the apply
+// engine compares it against the live rows to detect a stale base (the plan moved
+// under the proposal) and refuse to clobber. `status` walks pending → approved →
+// applied (or → rejected); `applied_at` stamps the terminal apply so re-apply is a
+// no-op.
+export const proposals = pgTable("proposals", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  title: text("title").notNull().default(""),
+  summary: text("summary").notNull().default(""),
+  status: text("status").$type<ProposalStatus>().notNull().default("pending"),
+  changes: jsonb("changes").$type<ProposalChange[]>().notNull(),
+  base: jsonb("base").$type<Record<string, string>>().notNull(),
+  appliedAt: timestamp("applied_at"),
+  ...timestamps,
+});
+
 // Types derived directly from the table definitions — no separate schema layer.
 export type Goal = typeof goals.$inferSelect;
 export type Milestone = typeof milestones.$inferSelect;
@@ -197,3 +222,4 @@ export type SessionTask = typeof sessionTasks.$inferSelect;
 export type Note = typeof notes.$inferSelect;
 export type PullRequestRow = typeof pullRequests.$inferSelect;
 export type Settings = typeof settings.$inferSelect;
+export type Proposal = typeof proposals.$inferSelect;
