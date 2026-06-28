@@ -13,7 +13,11 @@ import {
   sessionsCollection,
   tasksCollection,
 } from "./collections.ts";
-import { useStore } from "./store.ts";
+
+// The collections stream every row (live + archived); the live panes want only the
+// non-archived ones. sessionTasks carry no archived_at — their liveness is the
+// session's, which buildIndexes already resolves — so they're never filtered here.
+const notArchived = <T extends { archivedAt?: Date | null }>(r: T): boolean => r.archivedAt == null;
 
 // Shared read-model for the two panes. Both the Active and Backlog panes need the
 // same goal→milestone→task→phase indexes and the same derived active set, so we
@@ -110,11 +114,11 @@ export function usePlanData(): PlanData {
   const sessionTasks = useLiveQuery(() => sessionTasksCollection);
   const cloudPrs = useLiveQuery(() => pullRequestsCollection);
 
-  const g = goals.data ?? [];
-  const m = milestones.data ?? [];
-  const t = tasks.data ?? [];
-  const p = phases.data ?? [];
-  const s = sessions.data ?? [];
+  const g = (goals.data ?? []).filter(notArchived);
+  const m = (milestones.data ?? []).filter(notArchived);
+  const t = (tasks.data ?? []).filter(notArchived);
+  const p = (phases.data ?? []).filter(notArchived);
+  const s = (sessions.data ?? []).filter(notArchived);
   const links: SessionLink[] = sessionTasks.data ?? [];
   const prs = cloudPrs.data ?? [];
 
@@ -126,26 +130,34 @@ export function usePlanData(): PlanData {
   return { idx, activeIds, loading, error: null };
 }
 
-/** Derivation off the archive slice (live + archived rows). `tasks` is the book of
- *  work: everything finished (merged) or archived. Indexes cover the full
- *  hierarchy so a task under an archived goal/milestone still resolves context. */
+/** The archive view, off the same collections. `tasks` is the book of work:
+ *  everything finished (merged) or archived. Indexes cover the FULL hierarchy (all
+ *  rows, archived included) so a task under an archived goal/milestone still resolves
+ *  its context. */
 export function useArchiveData(): { idx: Indexes; tasks: Task[] } {
-  const archive = useStore((s) => s.archive);
+  const goals = useLiveQuery(() => goalsCollection);
+  const milestones = useLiveQuery(() => milestonesCollection);
+  const tasks = useLiveQuery(() => tasksCollection);
+  const phases = useLiveQuery(() => phasesCollection);
+  const sessions = useLiveQuery(() => sessionsCollection);
+  const sessionTasks = useLiveQuery(() => sessionTasksCollection);
+
+  const allTasks = tasks.data ?? [];
   const idx = useMemo(
     () =>
       buildIndexes(
-        archive.goals,
-        archive.milestones,
-        archive.tasks,
-        archive.phases,
-        archive.sessions,
-        archive.sessionTasks,
+        goals.data ?? [],
+        milestones.data ?? [],
+        allTasks,
+        phases.data ?? [],
+        sessions.data ?? [],
+        sessionTasks.data ?? [],
       ),
-    [archive],
+    [goals.data, milestones.data, allTasks, phases.data, sessions.data, sessionTasks.data],
   );
-  const tasks = useMemo(
-    () => archive.tasks.filter((t) => t.archivedAt != null || t.status === TaskStatus.Merged),
-    [archive.tasks],
+  const archivedTasks = useMemo(
+    () => allTasks.filter((t) => t.archivedAt != null || t.status === TaskStatus.Merged),
+    [allTasks],
   );
-  return { idx, tasks };
+  return { idx, tasks: archivedTasks };
 }

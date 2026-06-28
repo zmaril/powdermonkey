@@ -1,6 +1,8 @@
+import { useLiveQuery } from "@tanstack/react-db";
 import { useEffect, useRef, useState } from "react";
-import type { Session } from "../server/schema.ts";
-import { useStore } from "./store.ts";
+import type { Session, Task } from "../server/schema.ts";
+import type { SessionLink } from "./active.ts";
+import { sessionTasksCollection, sessionsCollection, tasksCollection } from "./collections.ts";
 
 // OS-level web notifications: ping the operator when a session falls idle at a
 // prompt ("needs you"). This is the away-from-the-app layer — distinct from the
@@ -52,20 +54,19 @@ export function snapshotNeedsInput(sessions: Session[]): Map<number, boolean> {
 
 /** A short human label for the session that needs attention, preferring the title
  *  of a task it's working over the bare branch/id. */
-function sessionLabel(session: Session): string {
-  const { tasks, sessionTasks } = useStore.getState();
-  const taskId = sessionTasks.find((l) => l.sessionId === session.id)?.taskId;
+function sessionLabel(session: Session, tasks: Task[], links: SessionLink[]): string {
+  const taskId = links.find((l) => l.sessionId === session.id)?.taskId;
   const task = taskId != null ? tasks.find((t) => t.id === taskId) : undefined;
   if (task) return `t${task.id} · ${task.title}`;
   if (session.branch) return session.branch;
   return `session ${session.id}`;
 }
 
-function fireNeedsInputNotification(session: Session): void {
+function fireNeedsInputNotification(session: Session, label: string): void {
   if (!notificationsSupported() || Notification.permission !== "granted") return;
   try {
     const n = new Notification("A session needs you", {
-      body: sessionLabel(session),
+      body: label,
       tag: `pm-needs-input-${session.id}`,
       icon: "/favicon.ico",
     });
@@ -76,20 +77,24 @@ function fireNeedsInputNotification(session: Session): void {
   } catch {}
 }
 
-/** Watch the store's sessions and fire an OS notification on each false→true
+/** Watch the sessions collection and fire an OS notification on each false→true
  *  needs_input edge. The first run only seeds the snapshot (so a reload doesn't
  *  ping about sessions that were already parked); subsequent runs notify on edges. */
 export function useNeedsInputNotifications(): void {
-  const sessions = useStore((s) => s.sessions);
+  const sessions = useLiveQuery(() => sessionsCollection).data ?? [];
+  const tasks = useLiveQuery(() => tasksCollection).data ?? [];
+  const links = (useLiveQuery(() => sessionTasksCollection).data ?? []) as SessionLink[];
   const prev = useRef<Map<number, boolean> | null>(null);
   useEffect(() => {
     if (prev.current === null) {
       prev.current = snapshotNeedsInput(sessions);
       return;
     }
-    for (const s of needsInputEdges(prev.current, sessions)) fireNeedsInputNotification(s);
+    for (const s of needsInputEdges(prev.current, sessions)) {
+      fireNeedsInputNotification(s, sessionLabel(s, tasks, links));
+    }
     prev.current = snapshotNeedsInput(sessions);
-  }, [sessions]);
+  }, [sessions, tasks, links]);
 }
 
 /** Top-bar control state: a reactive permission value plus a request action. */

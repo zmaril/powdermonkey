@@ -1,10 +1,15 @@
 import type { SerializedDockview } from "dockview-react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { CloudPr } from "../server/events.ts";
-import type { Goal, Milestone, Note, Phase, Session, Task } from "../server/schema.ts";
-import type { SessionLink } from "./active.ts";
+import type { Note } from "../server/schema.ts";
 import { api } from "./client.ts";
+
+// UI + action store. All *plan/session data* now lives in TanStack DB collections
+// (collections.ts), synced live from PGlite — so this store no longer holds or
+// refetches server data. What's left is transient UI state (dock layout, shell/notes
+// requests, tab indicators, in-flight spinners) and the write actions. The actions
+// just POST/PATCH to the REST routes; the resulting DB write streams back through
+// /sync and updates the collections, so there's no `refresh()` to call.
 
 export type StartInfo = {
   taskId: number;
@@ -15,32 +20,9 @@ export type StartInfo = {
 };
 
 type State = {
-  goals: Goal[];
-  milestones: Milestone[];
-  tasks: Task[];
-  phases: Phase[];
-  sessions: Session[];
-  // The session↔task join (many tasks per session). Both panes intersect these
-  // with `sessions` to derive which tasks are active and which session each shows.
-  sessionTasks: SessionLink[];
-  notes: Note[];
-  // Live PR status per task-linked PR (CI / mergeable / draft), served fresh from
-  // the github-watch loop — runtime data the Active panel reads, not persisted.
-  cloudPrs: CloudPr[];
-  // Operator toggle: whether the watcher auto-asks @claude to rebase conflicting
-  // PRs. Runtime-only on the server (resets to default on restart).
+  // Operator toggle: whether the watcher auto-asks @claude to rebase conflicting PRs.
+  // Server runtime state (not a synced table), loaded via loadSettings.
   autoRebase: boolean;
-  // The book of work: archived + finished rows (fetched with ?archived=true, which
-  // returns live AND archived). The Archive pane reads this; the live panes don't.
-  archive: {
-    goals: Goal[];
-    milestones: Milestone[];
-    tasks: Task[];
-    phases: Phase[];
-    sessions: Session[];
-    sessionTasks: SessionLink[];
-  };
-  loading: boolean;
   error: string | null;
   // In-flight slow actions, keyed `${action}:${taskId}` (e.g. `dispatch:7`). A button
   // reads its own key to show a spinner the instant it's clicked — dispatch/start-local
@@ -69,9 +51,7 @@ type State = {
   openTerminal: (cwd?: string) => void;
   openSessionTerminal: (sessionId: number, title: string) => void;
   openNotes: () => void;
-  refresh: () => Promise<void>;
-  refreshArchive: () => Promise<void>;
-  refreshNotes: () => Promise<void>;
+  loadSettings: () => Promise<void>;
   // The scratchpad is a single note. Returns it, creating the row on first use.
   ensureScratch: () => Promise<Note | null>;
   saveNote: (id: number, values: { title?: string; body?: string }) => Promise<void>;
@@ -102,7 +82,7 @@ function errMsg(error: { value?: unknown; status?: number }): string {
 }
 
 // Run an action while flagging its `pending` key, so the button that triggered it can
-// show a spinner immediately and clear it once the work (including the refresh) settles.
+// show a spinner immediately and clear it once the work settles.
 async function withPending(
   set: (fn: (s: State) => Partial<State>) => void,
   key: string,
@@ -119,33 +99,28 @@ async function withPending(
   }
 }
 
-// Single-flight: the scratchpad is exactly one note. The first caller that finds
-// no note creates it; concurrent or StrictMode double-calls reuse the same promise
-// so we never create two scratch rows.
+// Single-flight: the scratchpad is exactly one note. The first caller that finds no
+// note creates it; concurrent or StrictMode double-calls reuse the same promise so we
+// never create two scratch rows. The created row streams into the notes collection.
 let scratchInit: Promise<Note | null> | null = null;
-function ensureScratch(set: (partial: Partial<State>) => void): Promise<Note | null> {
+function ensureScratch(setError: (e: string) => void): Promise<Note | null> {
   if (scratchInit) return scratchInit;
   scratchInit = (async () => {
     const { data, error } = await api.notes.get();
     if (error) {
-      set({ error: String(error.value ?? error.status) });
+      setError(String(error.value ?? error.status));
       scratchInit = null;
       return null;
     }
     const list = ((data ?? []) as Note[]).sort((a, b) => a.id - b.id);
-    if (list.length > 0) {
-      set({ notes: list });
-      return list[0];
-    }
+    if (list.length > 0) return list[0];
     const created = await api.notes.post({ title: "scratch", body: "", position: 0 });
     if (created.error) {
-      set({ error: String(created.error.value ?? created.error.status) });
+      setError(String(created.error.value ?? created.error.status));
       scratchInit = null;
       return null;
     }
-    const note = created.data as Note;
-    set({ notes: [note] });
-    return note;
+    return created.data as Note;
   })();
   return scratchInit;
 }
@@ -153,17 +128,7 @@ function ensureScratch(set: (partial: Partial<State>) => void): Promise<Note | n
 export const useStore = create<State>()(
   persist(
     (set, get) => ({
-      goals: [],
-      milestones: [],
-      tasks: [],
-      phases: [],
-      sessions: [],
-      sessionTasks: [],
-      notes: [],
-      cloudPrs: [],
       autoRebase: true,
-      archive: { goals: [], milestones: [], tasks: [], phases: [], sessions: [], sessionTasks: [] },
-      loading: false,
       error: null,
       pending: {},
       lastStart: null,
@@ -203,116 +168,30 @@ export const useStore = create<State>()(
           },
         })),
       openNotes: () => set((s) => ({ notesReq: s.notesReq + 1 })),
-      refreshNotes: async () => {
-        const { data, error } = await api.notes.get();
-        if (error) return void set({ error: String(error.value ?? error.status) });
-        set({ notes: (data ?? []) as Note[] });
+      loadSettings: async () => {
+        const { data, error } = await api.settings.get();
+        if (error) return;
+        set({ autoRebase: (data as { autoRebase?: boolean } | null)?.autoRebase ?? true });
       },
-      ensureScratch: () => ensureScratch(set),
+      ensureScratch: () => ensureScratch((e) => set({ error: e })),
       saveNote: async (id, values) => {
-        // Optimistic: reflect the edit locally so typing stays responsive, then PATCH.
-        set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, ...values } : n)) }));
+        // The local draft (in ScratchPad) keeps typing responsive; persist via PATCH
+        // and the notes collection reflects the saved value when the delta streams back.
         const { error } = await api.notes({ id }).patch(values);
         if (error) set({ error: String(error.value ?? error.status) });
       },
-      refresh: async () => {
-        set({ loading: true, error: null });
-        try {
-          const [
-            goals,
-            milestones,
-            tasks,
-            phases,
-            sessions,
-            sessionTasks,
-            notes,
-            cloudPrs,
-            settings,
-          ] = await Promise.all([
-            api.goals.get(),
-            api.milestones.get(),
-            api.tasks.get(),
-            api.phases.get(),
-            api.sessions.get(),
-            api["session-tasks"].get(),
-            api.notes.get(),
-            api["cloud-prs"].get(),
-            api.settings.get(),
-          ]);
-          const err =
-            goals.error ??
-            milestones.error ??
-            tasks.error ??
-            phases.error ??
-            sessions.error ??
-            sessionTasks.error ??
-            notes.error;
-          if (err) throw new Error(String(err.value ?? err.status));
-          set({
-            goals: (goals.data ?? []) as Goal[],
-            milestones: (milestones.data ?? []) as Milestone[],
-            tasks: (tasks.data ?? []) as Task[],
-            phases: (phases.data ?? []) as Phase[],
-            sessions: (sessions.data ?? []) as Session[],
-            sessionTasks: (sessionTasks.data ?? []) as SessionLink[],
-            notes: (notes.data ?? []) as Note[],
-            // Non-fatal if it fails (watcher disabled / GitHub blip): keep status empty.
-            cloudPrs: (cloudPrs.data ?? []) as CloudPr[],
-            autoRebase: (settings.data as { autoRebase?: boolean } | null)?.autoRebase ?? true,
-            loading: false,
-          });
-        } catch (e) {
-          set({ error: e instanceof Error ? e.message : String(e), loading: false });
-        }
-      },
-      refreshArchive: async () => {
-        // ?archived=true returns live AND archived rows; the pane filters to the
-        // finished/archived set. We pull the full hierarchy so a task whose goal or
-        // milestone was archived still resolves its context.
-        const q = { query: { archived: "true" } };
-        const [goals, milestones, tasks, phases, sessions, sessionTasks] = await Promise.all([
-          api.goals.get(q),
-          api.milestones.get(q),
-          api.tasks.get(q),
-          api.phases.get(q),
-          api.sessions.get(q),
-          api["session-tasks"].get(),
-        ]);
-        const err =
-          goals.error ??
-          milestones.error ??
-          tasks.error ??
-          phases.error ??
-          sessions.error ??
-          sessionTasks.error;
-        if (err) return void set({ error: String(err.value ?? err.status) });
-        set({
-          archive: {
-            goals: (goals.data ?? []) as Goal[],
-            milestones: (milestones.data ?? []) as Milestone[],
-            tasks: (tasks.data ?? []) as Task[],
-            phases: (phases.data ?? []) as Phase[],
-            sessions: (sessions.data ?? []) as Session[],
-            sessionTasks: (sessionTasks.data ?? []) as SessionLink[],
-          },
-        });
-      },
       toggleStar: async (taskId, starred) => {
-        // Optimistic: flip it locally so the row re-sorts instantly, then PATCH. The
-        // panes derive their order off store.tasks, so this re-sorts on the spot.
-        set((s) => ({ tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, starred } : t)) }));
+        // No optimism: the PATCH writes the row, the tasks collection re-sorts the
+        // pane when the delta arrives over /sync.
         const { error } = await api.tasks({ id: taskId }).patch({ starred });
-        if (error) {
-          set({ error: String(error.value ?? error.status) });
-          await get().refresh(); // revert to server truth on failure
-        }
+        if (error) set({ error: String(error.value ?? error.status) });
       },
       setAutoRebase: async (on) => {
-        set({ autoRebase: on }); // optimistic
+        set({ autoRebase: on }); // optimistic — this is store state, not a synced table
         const { error } = await api.settings.post({ autoRebase: on });
         if (error) {
           set({ error: String(error.value ?? error.status) });
-          await get().refresh(); // revert to server truth on failure
+          await get().loadSettings(); // revert to server truth on failure
         }
       },
       startLocal: (taskId) =>
@@ -330,16 +209,11 @@ export const useStore = create<State>()(
               },
             });
           }
-          await get().refresh();
         }),
       dispatch: (taskId) =>
         withPending(set, `dispatch:${taskId}`, async () => {
           const { error } = await api.tasks({ id: taskId }).dispatch.post();
-          // Bail before refresh() on failure — refresh clears `error`, which is what
-          // used to swallow dispatch failures (the PTY can exit non-zero, so the route
-          // replies ok:false) and leave the button looking like it did nothing.
-          if (error) return void set({ error: errMsg(error) });
-          await get().refresh();
+          if (error) set({ error: errMsg(error) });
         }),
       startLocalMany: async (taskIds) => {
         if (taskIds.length === 0) return;
@@ -359,32 +233,26 @@ export const useStore = create<State>()(
             },
           });
         }
-        await get().refresh();
       },
       dispatchMany: async (taskIds) => {
         if (taskIds.length === 0) return;
         const [primary, ...rest] = taskIds;
         const { error } = await api.tasks({ id: primary }).dispatch.post({ taskIds: rest });
-        // Same as single dispatch: bail before refresh() so a batch failure surfaces.
-        if (error) return void set({ error: errMsg(error) });
-        await get().refresh();
+        if (error) set({ error: errMsg(error) });
       },
       teleport: (taskId) =>
         withPending(set, `teleport:${taskId}`, async () => {
           const { data, error } = await api.tasks({ id: taskId }).teleport.post();
           if (error) return void set({ error: errMsg(error) });
-          if (data && "ok" in data && !data.ok) return void set({ error: data.error });
-          await get().refresh();
+          if (data && "ok" in data && !data.ok) set({ error: data.error });
         }),
       land: async (sessionId) => {
         const { error } = await api.sessions({ id: sessionId }).land.post();
         if (error) set({ error: String(error.value ?? error.status) });
-        await get().refresh();
       },
       stop: async (sessionId) => {
         const { error } = await api.sessions({ id: sessionId }).stop.post();
         if (error) set({ error: String(error.value ?? error.status) });
-        await get().refresh();
       },
       openEditor: async (sessionId) => {
         const { data, error } = await api.sessions({ id: sessionId })["open-editor"].post();
@@ -394,14 +262,13 @@ export const useStore = create<State>()(
       reconcile: async () => {
         const { error } = await api.reconcile.post();
         if (error) set({ error: String(error.value ?? error.status) });
-        await get().refresh();
       },
       dismissStart: () => set({ lastStart: null }),
       setError: (error) => set({ error }),
     }),
     {
-      // Persist only the dock layout — server data is refetched, and actions /
-      // transient request signals must never be rehydrated from storage.
+      // Persist only the dock layout — collections re-sync, and actions / transient
+      // request signals must never be rehydrated from storage.
       name: "pm-ui",
       partialize: (s) => ({ layout: s.layout }),
     },

@@ -1,10 +1,9 @@
 import { Badge, Box, Group, SegmentedControl, Stack, Text, Title } from "@mantine/core";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { Goal, Milestone, Task } from "../server/schema.ts";
 import { TaskStatus } from "../shared/types.ts";
 import { type Indexes, useArchiveData } from "./plan-data.ts";
 import { IdTag, STATUS_COLOR, TaskLinks } from "./plan-ui.tsx";
-import { useStore } from "./store.ts";
 
 // The Archive pane is the book of work — everything finished (merged) or archived.
 // Read-only: no launch/land actions, just a browsable record with phase progress
@@ -100,16 +99,10 @@ function GroupedView({ tasks, idx }: { tasks: Task[]; idx: Indexes }) {
 }
 
 export function ArchivePane() {
-  const refreshArchive = useStore((s) => s.refreshArchive);
+  // Archived/finished work comes off the same live collections as everything else —
+  // no separate fetch or poll.
   const { idx, tasks } = useArchiveData();
   const [view, setView] = useState<View>("flat");
-
-  // Archived/finished work changes slowly; pull on mount and on a relaxed poll.
-  useEffect(() => {
-    refreshArchive();
-    const id = setInterval(refreshArchive, 8000);
-    return () => clearInterval(id);
-  }, [refreshArchive]);
 
   return (
     <Box

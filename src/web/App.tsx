@@ -1,5 +1,6 @@
 import { Button, Code, CopyButton, Group, Popover, Stack, Text, Title } from "@mantine/core";
 import "dockview-core/dist/styles/dockview.css";
+import { useLiveQuery } from "@tanstack/react-db";
 import {
   type DockviewApi,
   DockviewReact,
@@ -13,16 +14,20 @@ import { ArchivePane } from "./ArchivePane.tsx";
 import { BacklogPane } from "./BacklogPane.tsx";
 import { ShellTerminal } from "./ShellTerminal.tsx";
 import { ActivityTab, useTabActivity } from "./TabActivity.tsx";
+import {
+  notesCollection,
+  sessionTasksCollection,
+  sessionsCollection,
+  tasksCollection,
+} from "./collections.ts";
 import { useNeedsInputNotifications, useNotificationPermission } from "./notifications.ts";
-import { useRealtime } from "./realtime.ts";
 import { useStore } from "./store.ts";
 
 // The single pane of glass. The plan is split into three panels — a live ACTIVE
 // monitor, a launchpad BACKLOG editor, and the ARCHIVE book of work — alongside
-// the scratchpad and the supervisor shell. A WebSocket change feed (useRealtime)
-// refetches the store on every server push, keeping the live panels' store-derived
-// views fresh (Archive runs its own slower poll for archived rows); the panes
-// themselves are pure derivations off the store (see plan-data.ts).
+// the scratchpad and the supervisor shell. Every panel renders off TanStack DB
+// collections (collections.ts) that sync themselves live from PGlite over /sync —
+// no store data, no poll, no refetch (see plan-data.ts).
 
 // The scratchpad: one note, one big textarea. Holds its own draft state seeded
 // once from the server so a background refetch can't clobber what you're typing;
@@ -37,11 +42,11 @@ function ScratchPad() {
   // The server value we're synced with. We only adopt an incoming change when the
   // local draft still equals this — i.e. there are no unsaved keystrokes to lose.
   const serverBody = useRef("");
-  // The scratch note as the background refetch keeps it in the store. Watching it
-  // lets out-of-band edits (another tab, or the supervisor editing @notes) show up.
-  const storeBody = useStore((s) =>
-    id == null ? undefined : s.notes.find((n) => n.id === id)?.body,
-  );
+  // The scratch note as the notes collection keeps it (synced live from PGlite).
+  // Watching it lets out-of-band edits (another tab, or the supervisor editing
+  // @notes) show up.
+  const notes = useLiveQuery(() => notesCollection);
+  const storeBody = id == null ? undefined : notes.data?.find((n) => n.id === id)?.body;
 
   useEffect(() => {
     let active = true;
@@ -123,19 +128,14 @@ function ScratchPad() {
 // so the PR link survives the session being archived on land/merge.
 function SessionEndedOverlay({ sessionId, onClose }: { sessionId: number; onClose: () => void }) {
   const openTerminal = useStore((s) => s.openTerminal);
-  const session = useStore(
-    (s) =>
-      s.sessions.find((x) => x.id === sessionId) ??
-      s.archive.sessions.find((x) => x.id === sessionId),
-  );
-  const prUrl = useStore((s) => {
-    const taskIds = new Set(
-      s.sessionTasks.filter((l) => l.sessionId === sessionId).map((l) => l.taskId),
-    );
-    return (
-      [...s.tasks, ...s.archive.tasks].find((t) => taskIds.has(t.id) && t.prUrl)?.prUrl ?? null
-    );
-  });
+  // The collections stream every row (live + archived), so the session and its PR
+  // link survive the session being archived on land/merge.
+  const sessions = useLiveQuery(() => sessionsCollection).data ?? [];
+  const tasks = useLiveQuery(() => tasksCollection).data ?? [];
+  const links = useLiveQuery(() => sessionTasksCollection).data ?? [];
+  const session = sessions.find((x) => x.id === sessionId);
+  const taskIds = new Set(links.filter((l) => l.sessionId === sessionId).map((l) => l.taskId));
+  const prUrl = tasks.find((t) => taskIds.has(t.id) && t.prUrl)?.prUrl ?? null;
   const worktree = session?.worktreePath ?? "";
   const message =
     session?.state === "stopped"
@@ -347,7 +347,9 @@ function AttachButton() {
 // Reconcile), and the error banner. Lives above the dockview so it's always visible
 // regardless of which panel is focused.
 function TopBar() {
-  const { error, loading, reconcile, openTerminal, openNotes } = useStore();
+  const { error, reconcile, openTerminal, openNotes } = useStore();
+  // "loading" until the first collection snapshot lands.
+  const loading = useLiveQuery(() => tasksCollection).isLoading;
   return (
     <div style={{ flex: "0 0 auto", borderBottom: "1px solid #2c2e33", background: "#141517" }}>
       <Group justify="space-between" px="md" py={6} wrap="nowrap">
@@ -446,15 +448,17 @@ export function App() {
   const shellReq = useStore((s) => s.shellReq);
   const notesReq = useStore((s) => s.notesReq);
   const setLayout = useStore((s) => s.setLayout);
+  const loadSettings = useStore((s) => s.loadSettings);
 
-  // The whole app stays fresh off server pushes: useRealtime opens one WebSocket
-  // to /events, refetches the store on connect and on every "changed" ping, and
-  // reconnects if the socket drops. That replaced the old 4s poll — every panel
-  // renders off the store, so a single refetch on push keeps them all current.
-  useRealtime();
+  // The plan/session data flows through the TanStack DB collections (each syncs
+  // itself over /sync). The only server state not in a collection is the auto-rebase
+  // toggle, so fetch that once on mount.
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
 
   // Ping the operator (OS notification) whenever a session falls idle at a prompt.
-  // Watches the same store the panes do, firing only on the needs_input edge.
+  // Watches the sessions collection, firing only on the needs_input edge.
   useNeedsInputNotifications();
 
   // In-app glanceable layer: light up a pane's tab when something happens in it

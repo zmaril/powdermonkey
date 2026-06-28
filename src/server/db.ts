@@ -37,8 +37,8 @@ const pgliteOpts: PGliteOptions = IS_COMPILED
 // The `live` extension installs per-table AFTER INSERT/UPDATE/DELETE triggers that
 // pg_notify on change, and re-runs registered live queries when they fire. Because
 // the triggers live in the DB, they observe EVERY write — through drizzle or raw
-// SQL — so the realtime change feed (see realtime.ts) can watch the tables directly
-// instead of every mutation site remembering to announce itself.
+// SQL — so the /sync route (app.ts) streams row deltas to the browser's TanStack DB
+// collections without any mutation site remembering to announce itself.
 const client = new PGlite(DATA_DIR, { ...pgliteOpts, extensions: { live } });
 export const db = drizzle(client, { schema });
 

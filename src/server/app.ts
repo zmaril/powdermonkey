@@ -18,7 +18,6 @@ import { models } from "./models.ts";
 import { PUBLIC_DIR } from "./paths.ts";
 import { loadPlan, planSchema } from "./plan.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
-import { addRealtimeClient, removeRealtimeClient } from "./realtime.ts";
 import { reconcile } from "./reconcile.ts";
 import {
   goals as goalsTable,
@@ -64,10 +63,11 @@ const ptys = new Map<object, PtyHandle>();
 // subscription, dropped when the socket closes.
 const syncSubs = new Map<object, () => void>();
 
-// The tables the browser mirrors as TanStack DB collections. The live SELECT and the
+// The tables the browser mirrors as TanStack DB collections. The SELECT and the
 // primary-key column are derived from the Drizzle schema — adding a table here is the
-// only per-table server code. Tables with a soft-delete column stream only LIVE rows
-// (archiving a row leaves the result set, which live.changes reports as a delete).
+// only per-table server code. We stream EVERY row (live + archived); the browser's
+// live queries filter to non-archived for the working panes and to archived/merged
+// for the Archive pane, so one collection set serves both.
 const SYNC_TABLES: Record<string, { sql: string; key: string }> = Object.fromEntries(
   [
     goalsTable,
@@ -85,8 +85,7 @@ const SYNC_TABLES: Record<string, { sql: string; key: string }> = Object.fromEnt
     const pk =
       (Object.values(cols) as Array<{ name: string; primary: boolean }>).find((c) => c.primary)
         ?.name ?? "id";
-    const live = "archivedAt" in cols ? " WHERE archived_at IS NULL" : "";
-    return [name, { sql: `SELECT * FROM "${name}"${live}`, key: pk }];
+    return [name, { sql: `SELECT * FROM "${name}"`, key: pk }];
   }),
 );
 
@@ -371,31 +370,15 @@ export const app = new Elysia()
       else closePty(handle.proc);
     },
   })
-  // Realtime change feed. The browser opens this once and refetches its snapshot
-  // on every ping, replacing the old 4s poll. Server → client only: a content-free
-  // "changed" ping, fired by the DB change feed whenever a watched table moves (see
-  // realtime.ts / startChangeFeed). We don't expect client messages, so there's no
-  // body schema.
-  .ws("/events", {
-    open(ws) {
-      addRealtimeClient(ws.raw, (msg) => {
-        try {
-          ws.send(msg);
-        } catch {}
-      });
-    },
-    close(ws) {
-      removeRealtimeClient(ws.raw);
-    },
-  })
-  // Realtime row-delta sync for the browser's TanStack DB collections. Where /events
-  // says only "something changed, refetch", this streams the actual row deltas
-  // (insert/update/delete) straight from PGlite's `live.changes`, one socket per
-  // table (?table=tasks). Each connection opens its OWN subscription, so its initial
-  // snapshot and the live stream are atomic — a reconnecting client just gets a fresh
-  // snapshot, no offset/catch-up bookkeeping. The browser half (src/web/collections.ts)
-  // applies these via begin/write/commit. Reads are reactive; writes still go through
-  // the REST routes and stream back here.
+  // Realtime row-delta sync for the browser's TanStack DB collections — the sole
+  // realtime channel (it replaced the old content-free /events ping, where the browser
+  // refetched everything). This streams the actual row deltas (insert/update/delete)
+  // straight from PGlite's `live.changes`, one socket per table (?table=tasks). Each
+  // connection opens its OWN subscription, so its initial snapshot and the live stream
+  // are atomic — a reconnecting client just gets a fresh snapshot, no offset/catch-up
+  // bookkeeping. The browser half (src/web/collections.ts) applies these via
+  // begin/write/commit. Reads are reactive; writes still go through the REST routes
+  // and stream back here.
   .ws("/sync", {
     query: t.Object({ table: t.String() }),
     async open(ws) {

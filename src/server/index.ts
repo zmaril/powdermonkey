@@ -2,20 +2,14 @@
 // thing that talks to the cloud.
 
 import { app } from "./app.ts";
-import { pg, ready } from "./db.ts";
+import { ready } from "./db.ts";
 import { startGithubWatch } from "./github-watch.ts";
-import { startChangeFeed } from "./realtime.ts";
 import { reconcile } from "./reconcile.ts";
 import { startSupervisorPty } from "./session-pty.ts";
 
 const PORT = Number(process.env.PORT ?? 4500);
 
 await ready();
-
-// Drive the realtime feed off the database: a live query per table pushes a WS ping
-// whenever any plan/session row changes. Must run after ready() so the tables (and
-// the live extension's triggers) exist.
-await startChangeFeed(pg);
 
 // Bind the preferred port, but never crash if it's already taken — another
 // instance (a teleported worker, or just a second copy) may already hold it.

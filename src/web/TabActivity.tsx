@@ -1,9 +1,11 @@
+import { useLiveQuery } from "@tanstack/react-db";
 import {
   type DockviewApi,
   DockviewDefaultTab,
   type IDockviewPanelHeaderProps,
 } from "dockview-react";
 import { type RefObject, useEffect, useRef } from "react";
+import { sessionsCollection, tasksCollection } from "./collections.ts";
 import { useStore } from "./store.ts";
 import { type ActivitySnapshot, paneActivity, snapshotActivity } from "./tab-activity.ts";
 
@@ -67,8 +69,8 @@ export function ActivityTab(props: IDockviewPanelHeaderProps) {
  *  currently on screen (a change in the pane you're looking at needs no cue). The
  *  first run only seeds the snapshot so a reload doesn't flag everything. */
 export function useTabActivity(apiRef: RefObject<DockviewApi | null>): void {
-  const sessions = useStore((s) => s.sessions);
-  const tasks = useStore((s) => s.tasks);
+  const sessions = useLiveQuery(() => sessionsCollection).data ?? [];
+  const tasks = useLiveQuery(() => tasksCollection).data ?? [];
   const flagTab = useStore((s) => s.flagTab);
   const prev = useRef<ActivitySnapshot | null>(null);
 
