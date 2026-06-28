@@ -61,7 +61,7 @@ function syncedCollection<T extends object>(table: string, key: keyof T & string
               if (cols.length === 0) continue; // ordering-only churn
               const value: Record<string, unknown> = { [key]: row[key] };
               for (const col of cols) value[col] = row[col];
-              write({ type: "update", value: value as T });
+              write({ type: "update", value: value as T }); // lint-allow-string: TanStack DB change type, not a ProposalOp
             }
           }
           commit();

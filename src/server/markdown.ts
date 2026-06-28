@@ -1,5 +1,11 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
-import type { ProposalChange, TaskStatus, VocabKind } from "../shared/types.ts";
+import {
+  PhaseStatus,
+  type ProposalChange,
+  ProposalOp,
+  type TaskStatus,
+  VocabKind,
+} from "../shared/types.ts";
 import { db } from "./db.ts";
 import { goals, milestones, phases, tasks } from "./schema.ts";
 
@@ -32,7 +38,7 @@ export type MdGoal = { id?: number; title: string; objective: string; milestones
 export type MdPlan = { goals: MdGoal[] };
 
 // The single-letter id chip prefix per level.
-const CHIP: Record<"goal" | "milestone" | "task" | "phase", string> = {
+const CHIP: Record<VocabKind, string> = {
   goal: "g",
   milestone: "m",
   task: "t",
@@ -149,7 +155,7 @@ export async function loadPlanTree(): Promise<MdPlan> {
   const phasesByTask = new Map<number, MdPhase[]>();
   for (const p of ps) {
     const list = phasesByTask.get(p.taskId) ?? [];
-    list.push({ id: p.id, name: p.name, done: p.status === "done" });
+    list.push({ id: p.id, name: p.name, done: p.status === PhaseStatus.Done });
     phasesByTask.set(p.taskId, list);
   }
   const tasksByMilestone = new Map<number, MdTask[]>();
@@ -196,22 +202,22 @@ function findNode(
 ):
   | { node: MdGoal | MdMilestone | MdTask | MdPhase; container: unknown[]; index: number }
   | undefined {
-  if (kind === "goal") {
+  if (kind === VocabKind.Goal) {
     const index = plan.goals.findIndex((g) => g.id === id);
     return index < 0 ? undefined : { node: plan.goals[index], container: plan.goals, index };
   }
   for (const g of plan.goals) {
-    if (kind === "milestone") {
+    if (kind === VocabKind.Milestone) {
       const index = g.milestones.findIndex((m) => m.id === id);
       if (index >= 0) return { node: g.milestones[index], container: g.milestones, index };
     }
     for (const m of g.milestones) {
-      if (kind === "task") {
+      if (kind === VocabKind.Task) {
         const index = m.tasks.findIndex((t) => t.id === id);
         if (index >= 0) return { node: m.tasks[index], container: m.tasks, index };
       }
       for (const t of m.tasks) {
-        if (kind === "phase") {
+        if (kind === VocabKind.Phase) {
           const index = t.phases.findIndex((p) => p.id === id);
           if (index >= 0) return { node: t.phases[index], container: t.phases, index };
         }
@@ -223,10 +229,10 @@ function findNode(
 
 /** The child list a kind hangs in, under a given parent id (for create/reorder). */
 function childList(plan: MdPlan, kind: VocabKind, parentId: number): unknown[] | undefined {
-  if (kind === "milestone") return plan.goals.find((g) => g.id === parentId)?.milestones;
-  if (kind === "task")
+  if (kind === VocabKind.Milestone) return plan.goals.find((g) => g.id === parentId)?.milestones;
+  if (kind === VocabKind.Task)
     return plan.goals.flatMap((g) => g.milestones).find((m) => m.id === parentId)?.tasks;
-  if (kind === "phase")
+  if (kind === VocabKind.Phase)
     return plan.goals
       .flatMap((g) => g.milestones)
       .flatMap((m) => m.tasks)
@@ -242,18 +248,18 @@ export function applyChangesToTree(base: MdPlan, changes: ProposalChange[]): MdP
   const refs = new Map<string, MdGoal | MdMilestone | MdTask | MdPhase>();
 
   for (const c of changes) {
-    if (c.op === "create") {
+    if (c.op === ProposalOp.Create) {
       const f = c.fields;
       const node =
-        c.kind === "phase"
-          ? ({ name: fieldStr(f, "name"), done: f.status === "done" } as MdPhase)
-          : c.kind === "goal"
+        c.kind === VocabKind.Phase
+          ? ({ name: fieldStr(f, "name"), done: f.status === PhaseStatus.Done } as MdPhase)
+          : c.kind === VocabKind.Goal
             ? ({
                 title: fieldStr(f, "title"),
                 objective: fieldStr(f, "objective"),
                 milestones: [],
               } as MdGoal)
-            : c.kind === "milestone"
+            : c.kind === VocabKind.Milestone
               ? ({ title: fieldStr(f, "title"), tasks: [] } as MdMilestone)
               : ({ title: fieldStr(f, "title"), phases: [] } as MdTask);
       if (c.ref) refs.set(c.ref, node);
@@ -267,13 +273,13 @@ export function applyChangesToTree(base: MdPlan, changes: ProposalChange[]): MdP
             : plan.goals;
       // biome-ignore lint/suspicious/noExplicitAny: the list is the right child type.
       if (list) (list as any[]).splice(c.position ?? list.length, 0, node);
-    } else if (c.op === "archive") {
+    } else if (c.op === ProposalOp.Archive) {
       const hit = findNode(plan, c.kind, c.id);
       if (hit) hit.container.splice(hit.index, 1);
-    } else if (c.op === "update") {
+    } else if (c.op === ProposalOp.Update) {
       const hit = findNode(plan, c.kind, c.id);
       if (hit) applyFields(c.kind, hit.node, c.fields);
-    } else if (c.op === "reorder") {
+    } else if (c.op === ProposalOp.Reorder) {
       const hit = findNode(plan, c.kind, c.id);
       if (!hit) continue;
       hit.container.splice(hit.index, 1);
@@ -292,9 +298,9 @@ function childArrayOf(
   childKind: VocabKind,
 ): unknown[] | undefined {
   if (!parent) return undefined;
-  if (childKind === "milestone") return (parent as MdGoal).milestones;
-  if (childKind === "task") return (parent as MdMilestone).tasks;
-  if (childKind === "phase") return (parent as MdTask).phases;
+  if (childKind === VocabKind.Milestone) return (parent as MdGoal).milestones;
+  if (childKind === VocabKind.Task) return (parent as MdMilestone).tasks;
+  if (childKind === VocabKind.Phase) return (parent as MdTask).phases;
   return undefined;
 }
 
@@ -303,14 +309,14 @@ function applyFields(
   node: MdGoal | MdMilestone | MdTask | MdPhase,
   fields: Record<string, unknown>,
 ): void {
-  if (kind === "phase") {
+  if (kind === VocabKind.Phase) {
     const p = node as MdPhase;
     if ("name" in fields) p.name = fieldStr(fields, "name");
-    if ("status" in fields) p.done = fields.status === "done";
+    if ("status" in fields) p.done = fields.status === PhaseStatus.Done;
     return;
   }
   if ("title" in fields) (node as MdGoal | MdMilestone | MdTask).title = fieldStr(fields, "title");
-  if (kind === "goal" && "objective" in fields)
+  if (kind === VocabKind.Goal && "objective" in fields)
     (node as MdGoal).objective = fieldStr(fields, "objective");
 }
 
@@ -399,7 +405,12 @@ export async function applyPlanMarkdown(md: string): Promise<MarkdownApplyResult
               tx,
               phases,
               p.id,
-              { taskId, name: p.name, status: p.done ? "done" : "todo", position: pi },
+              {
+                taskId,
+                name: p.name,
+                status: p.done ? PhaseStatus.Done : PhaseStatus.Todo,
+                position: pi,
+              },
               now,
               result,
             );
@@ -412,7 +423,7 @@ export async function applyPlanMarkdown(md: string): Promise<MarkdownApplyResult
     }
 
     // Archive any live node the markdown no longer mentions.
-    for (const kind of ["phase", "task", "milestone", "goal"] as const) {
+    for (const kind of [VocabKind.Phase, VocabKind.Task, VocabKind.Milestone, VocabKind.Goal]) {
       const table = { goal: goals, milestone: milestones, task: tasks, phase: phases }[kind];
       for (const id of live[kind]) {
         if (kept[kind].has(id)) continue;

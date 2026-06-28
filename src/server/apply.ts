@@ -1,5 +1,10 @@
 import { and, eq } from "drizzle-orm";
-import type { ProposalChange, VocabKind } from "../shared/types.ts";
+import {
+  type ProposalChange,
+  ProposalOp,
+  ProposalStatus,
+  type VocabKind,
+} from "../shared/types.ts";
 import { db } from "./db.ts";
 import { PARENT_COLUMN, getProposal, repoFor } from "./proposals.ts";
 import { type Proposal, goals, milestones, phases, proposals, tasks } from "./schema.ts";
@@ -67,7 +72,7 @@ async function applyChange(
   const table = TABLE[change.kind];
   const parentCol = PARENT_COLUMN[change.kind];
 
-  if (change.op === "create") {
+  if (change.op === ProposalOp.Create) {
     const values = cleanFields(change.fields);
     // Wire the parent FK: an existing row (parentId) or a sibling create (parentRef).
     if (parentCol) {
@@ -82,7 +87,7 @@ async function applyChange(
     return row.id;
   }
 
-  if (change.op === "update") {
+  if (change.op === ProposalOp.Update) {
     await tx
       .update(table)
       .set({ ...cleanFields(change.fields), updatedAt: now })
@@ -90,7 +95,7 @@ async function applyChange(
     return null;
   }
 
-  if (change.op === "archive") {
+  if (change.op === ProposalOp.Archive) {
     await tx.update(table).set({ archivedAt: now, updatedAt: now }).where(eq(table.id, change.id));
     return null;
   }
@@ -114,7 +119,7 @@ export async function applyProposal(id: number): Promise<ApplyResult> {
   if (!proposal) return { ok: false, error: "proposal not found" };
 
   // Idempotent re-apply: already done, nothing to do.
-  if (proposal.status === "applied") {
+  if (proposal.status === ProposalStatus.Applied) {
     return {
       ok: true,
       applied: false,
@@ -122,7 +127,7 @@ export async function applyProposal(id: number): Promise<ApplyResult> {
       proposal,
     };
   }
-  if (proposal.status !== "approved") {
+  if (proposal.status !== ProposalStatus.Approved) {
     return { ok: false, error: `proposal is ${proposal.status}, not approved` };
   }
 
@@ -139,8 +144,8 @@ export async function applyProposal(id: number): Promise<ApplyResult> {
     // concurrent applies can't both run the change-set. The loser sees 0 rows.
     const claimed = await tx
       .update(proposals)
-      .set({ status: "applied", appliedAt: now, updatedAt: now })
-      .where(and(eq(proposals.id, id), eq(proposals.status, "approved")))
+      .set({ status: ProposalStatus.Applied, appliedAt: now, updatedAt: now })
+      .where(and(eq(proposals.id, id), eq(proposals.status, ProposalStatus.Approved)))
       .returning();
     if (claimed.length === 0) return null;
 

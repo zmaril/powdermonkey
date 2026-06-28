@@ -4,7 +4,7 @@ import type { TSchema } from "@sinclair/typebox";
 import { getTableColumns, getTableName } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 import { P, match } from "ts-pattern";
-import { OverrideSource, SessionState } from "../shared/types.ts";
+import { OverrideSource, ProposalStatus, SessionState } from "../shared/types.ts";
 import { applyProposal } from "./apply.ts";
 import { cancelTask, completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
 import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
@@ -287,12 +287,12 @@ const proposalsGroup = new Elysia({ prefix: "/proposals" })
     body: proposalCreateBody,
   })
   .post("/:id/approve", async ({ params, set }) => {
-    const row = await decideProposal(Number(params.id), "approved");
+    const row = await decideProposal(Number(params.id), ProposalStatus.Approved);
     if (!row) set.status = 400;
     return row ?? { error: "proposal not found or not pending" };
   })
   .post("/:id/reject", async ({ params, set }) => {
-    const row = await decideProposal(Number(params.id), "rejected");
+    const row = await decideProposal(Number(params.id), ProposalStatus.Rejected);
     if (!row) set.status = 400;
     return row ?? { error: "proposal not found or not pending" };
   })

@@ -1,6 +1,6 @@
 import { type TSchema, Type } from "@sinclair/typebox";
 import { and, eq, isNull } from "drizzle-orm";
-import type { ProposalChange, VocabKind } from "../shared/types.ts";
+import { type ProposalChange, ProposalOp, ProposalStatus, VocabKind } from "../shared/types.ts";
 import { goalRepo, milestoneRepo, phaseRepo, taskRepo } from "./crud.ts";
 import { db } from "./db.ts";
 import { type Proposal, proposals } from "./schema.ts";
@@ -33,10 +33,10 @@ export const PARENT_COLUMN: Record<VocabKind, string | null> = {
 // column set. Elysia validates the create body against this.
 
 const kindSchema = Type.Union([
-  Type.Literal("goal"),
-  Type.Literal("milestone"),
-  Type.Literal("task"),
-  Type.Literal("phase"),
+  Type.Literal(VocabKind.Goal),
+  Type.Literal(VocabKind.Milestone),
+  Type.Literal(VocabKind.Task),
+  Type.Literal(VocabKind.Phase),
 ]);
 
 // Fields are an open record — each kind has its own columns, validated for real when
@@ -46,7 +46,7 @@ const fields = Type.Record(Type.String(), Type.Unknown());
 
 const changeSchema = Type.Union([
   Type.Object({
-    op: Type.Literal("create"),
+    op: Type.Literal(ProposalOp.Create),
     kind: kindSchema,
     ref: Type.Optional(Type.String()),
     parentId: Type.Optional(Type.Number()),
@@ -55,18 +55,18 @@ const changeSchema = Type.Union([
     position: Type.Optional(Type.Number()),
   }),
   Type.Object({
-    op: Type.Literal("update"),
+    op: Type.Literal(ProposalOp.Update),
     kind: kindSchema,
     id: Type.Number(),
     fields,
   }),
   Type.Object({
-    op: Type.Literal("archive"),
+    op: Type.Literal(ProposalOp.Archive),
     kind: kindSchema,
     id: Type.Number(),
   }),
   Type.Object({
-    op: Type.Literal("reorder"),
+    op: Type.Literal(ProposalOp.Reorder),
     kind: kindSchema,
     id: Type.Number(),
     position: Type.Optional(Type.Number()),
@@ -99,8 +99,9 @@ export function referencedEntities(changes: ProposalChange[]): Array<[VocabKind,
     out.push([kind, id]);
   };
   for (const c of changes) {
-    if (c.op === "update" || c.op === "archive" || c.op === "reorder") add(c.kind, c.id);
-    if ((c.op === "create" || c.op === "reorder") && c.parentId != null) {
+    if (c.op === ProposalOp.Update || c.op === ProposalOp.Archive || c.op === ProposalOp.Reorder)
+      add(c.kind, c.id);
+    if ((c.op === ProposalOp.Create || c.op === ProposalOp.Reorder) && c.parentId != null) {
       // The parent's kind is the kind one level up from the child.
       const parentKind = parentKindOf(c.kind);
       if (parentKind) add(parentKind, c.parentId);
@@ -111,12 +112,12 @@ export function referencedEntities(changes: ProposalChange[]): Array<[VocabKind,
 
 /** The kind one level up the hierarchy — a milestone's parent is a goal, etc. */
 export function parentKindOf(kind: VocabKind): VocabKind | null {
-  return kind === "milestone"
-    ? "goal"
-    : kind === "task"
-      ? "milestone"
-      : kind === "phase"
-        ? "task"
+  return kind === VocabKind.Milestone
+    ? VocabKind.Goal
+    : kind === VocabKind.Task
+      ? VocabKind.Milestone
+      : kind === VocabKind.Phase
+        ? VocabKind.Task
         : null;
 }
 
@@ -149,7 +150,7 @@ export async function createProposal(input: CreateProposalInput): Promise<Propos
       summary: input.summary ?? "",
       changes: input.changes,
       base,
-      status: "pending",
+      status: ProposalStatus.Pending,
     })
     .returning();
   return row;
@@ -169,19 +170,19 @@ export async function listPending(): Promise<Proposal[]> {
   return db
     .select()
     .from(proposals)
-    .where(and(eq(proposals.status, "pending"), isNull(proposals.archivedAt)));
+    .where(and(eq(proposals.status, ProposalStatus.Pending), isNull(proposals.archivedAt)));
 }
 
 /** Record a decision. A proposal can only be approved/rejected while pending — a
  *  terminal state (applied/rejected) or a missing row returns undefined. */
 export async function decideProposal(
   id: number,
-  decision: "approved" | "rejected",
+  decision: typeof ProposalStatus.Approved | typeof ProposalStatus.Rejected,
 ): Promise<Proposal | undefined> {
   const [row] = await db
     .update(proposals)
     .set({ status: decision, updatedAt: new Date() })
-    .where(and(eq(proposals.id, id), eq(proposals.status, "pending")))
+    .where(and(eq(proposals.id, id), eq(proposals.status, ProposalStatus.Pending)))
     .returning();
   return row;
 }

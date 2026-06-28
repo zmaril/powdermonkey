@@ -129,14 +129,35 @@ export type AgentState = ValueOf<typeof AgentState>;
 
 /**
  * Lifecycle of a plan proposal — a pending change-set the operator decides on.
- * `pending` awaits a decision; `approved` was accepted but not yet applied;
- * `rejected` was declined; `applied` has been folded into the live plan (terminal,
+ * `Pending` awaits a decision; `Approved` was accepted but not yet applied;
+ * `Rejected` was declined; `Applied` has been folded into the live plan (terminal,
  * makes re-apply a no-op).
  */
-export type ProposalStatus = "pending" | "approved" | "rejected" | "applied";
+export const ProposalStatus = {
+  Pending: "pending",
+  Approved: "approved",
+  Rejected: "rejected",
+  Applied: "applied",
+} as const;
+export type ProposalStatus = ValueOf<typeof ProposalStatus>;
 
 /** The vocab entities a proposal can mutate. */
-export type VocabKind = "goal" | "milestone" | "task" | "phase";
+export const VocabKind = {
+  Goal: "goal",
+  Milestone: "milestone",
+  Task: "task",
+  Phase: "phase",
+} as const;
+export type VocabKind = ValueOf<typeof VocabKind>;
+
+/** The four kinds of mutation a change-set carries. */
+export const ProposalOp = {
+  Create: "create",
+  Update: "update",
+  Archive: "archive",
+  Reorder: "reorder",
+} as const;
+export type ProposalOp = ValueOf<typeof ProposalOp>;
 
 /**
  * One typed mutation in a proposal's change-set. Four ops across the four vocab

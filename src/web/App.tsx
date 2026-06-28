@@ -323,8 +323,8 @@ function buildDefaultLayout(api: DockviewApi) {
     position: { direction: "within", referencePanel: "active" },
   });
   api.addPanel({
-    id: "archive",
-    component: "archive",
+    id: "archive", // lint-allow-string: dockview panel id, not an enum value
+    component: "archive", // lint-allow-string: dockview component name, not an enum value
     title: "Archive",
     position: { direction: "within", referencePanel: "active" },
   });
