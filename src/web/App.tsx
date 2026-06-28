@@ -13,6 +13,7 @@ import { SessionState } from "../shared/types.ts";
 import { ActivePane } from "./ActivePane.tsx";
 import { ArchivePane } from "./ArchivePane.tsx";
 import { BacklogPane } from "./BacklogPane.tsx";
+import { BrowserPane } from "./BrowserPane.tsx";
 import { ReviewPane } from "./ReviewPane.tsx";
 import { ShellTerminal } from "./ShellTerminal.tsx";
 import { ActivityTab, useTabActivity } from "./TabActivity.tsx";
@@ -219,12 +220,17 @@ function ScratchPanel() {
   return <ScratchPad />;
 }
 
+function BrowserPanel(props: IDockviewPanelProps<{ url: string }>) {
+  return <BrowserPane url={props.params.url ?? ""} />;
+}
+
 const dockComponents = {
   shell: ShellPanel,
   active: ActivePanel,
   backlog: BacklogPanel,
   archive: ArchivePanel,
   scratch: ScratchPanel,
+  browser: BrowserPanel,
 };
 
 // Reviewing a PR is a focused, take-over activity, not another tab competing for the
@@ -383,7 +389,7 @@ function AttachButton() {
 // Reconcile), and the error banner. Lives above the dockview so it's always visible
 // regardless of which panel is focused.
 function TopBar() {
-  const { error, reconcile, openTerminal, openNotes } = useStore();
+  const { error, reconcile, openTerminal, openBrowser, openNotes } = useStore();
   // "loading" until the first collection snapshot lands.
   const loading = useLiveQuery(() => tasksCollection).isLoading;
   return (
@@ -406,6 +412,9 @@ function TopBar() {
           <NotifyButton />
           <Button size="compact-xs" variant="default" onClick={() => openTerminal("")}>
             Shell
+          </Button>
+          <Button size="compact-xs" variant="default" onClick={() => openBrowser()}>
+            Browser
           </Button>
           <AttachButton />
           <Button size="compact-xs" variant="default" onClick={openNotes}>
@@ -482,6 +491,7 @@ export function App() {
   const apiRef = useRef<DockviewApi | null>(null);
   const layoutSubRef = useRef<{ dispose: () => void } | null>(null);
   const shellReq = useStore((s) => s.shellReq);
+  const browserReq = useStore((s) => s.browserReq);
   const notesReq = useStore((s) => s.notesReq);
   const setLayout = useStore((s) => s.setLayout);
   const loadSettings = useStore((s) => s.loadSettings);
@@ -549,6 +559,22 @@ export function App() {
       position: { referencePanel: "shell-0", direction: "within" },
     });
   }, [shellReq]);
+
+  // Browser button → add a new browser pane (an iframe on a dev server / preview).
+  // Each request opens a distinct panel (keyed by `n`) so you can watch several
+  // previews at once; the loaded URL rides in the panel params so it persists with
+  // the layout. Added in the main group, alongside Active/Backlog/Archive.
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!browserReq) return;
+    api?.addPanel({
+      id: `browser-${browserReq.n}`,
+      component: "browser",
+      params: { url: browserReq.url },
+      title: "Browser",
+      position: { referencePanel: "active", direction: "within" },
+    });
+  }, [browserReq]);
 
   // Scratch button → focus the scratchpad (recreate it top-left if it was closed).
   useEffect(() => {

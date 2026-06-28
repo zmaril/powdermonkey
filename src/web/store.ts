@@ -34,6 +34,10 @@ type State = {
   // agent PTY; otherwise `cwd` opens a fresh shell ("" = repo dir). `key` dedupes
   // panels, `title` labels them, `n` makes repeats distinct so the effect re-fires.
   shellReq: { key: string; cwd: string; session: number | null; title: string; n: number } | null;
+  // Latest request to open a browser pane (an iframe pointed at a dev server /
+  // local preview). `url` is the page to load; `n` makes repeats distinct so App's
+  // effect re-fires. App adds a `browser` panel keyed so a fresh one opens each time.
+  browserReq: { url: string; n: number } | null;
   // Bumped each time the operator asks to open the notepad; App watches it.
   notesReq: number;
   // In-app activity indicators, keyed by dockview panel id (e.g. "active"). True
@@ -53,6 +57,7 @@ type State = {
   setLayout: (layout: SerializedDockview | null) => void;
   openTerminal: (cwd?: string) => void;
   openSessionTerminal: (sessionId: number, title: string) => void;
+  openBrowser: (url?: string) => void;
   openNotes: () => void;
   loadSettings: () => Promise<void>;
   openReview: (number: number, title: string) => void;
@@ -148,6 +153,7 @@ export const useStore = create<State>()(
       pending: {},
       lastStart: null,
       shellReq: null,
+      browserReq: null,
       notesReq: 0,
       tabActivity: {},
       flagTab: (paneId) =>
@@ -183,6 +189,8 @@ export const useStore = create<State>()(
             n: (s.shellReq?.n ?? 0) + 1,
           },
         })),
+      openBrowser: (url = "http://localhost:3000") =>
+        set((s) => ({ browserReq: { url, n: (s.browserReq?.n ?? 0) + 1 } })),
       openNotes: () => set((s) => ({ notesReq: s.notesReq + 1 })),
       openReview: (number, title) => set({ review: { number, title } }),
       closeReview: () => set({ review: null }),
