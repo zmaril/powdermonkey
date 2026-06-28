@@ -97,12 +97,26 @@ test("parseStatusComment pulls the structured block out of the sticky comment", 
     state: "working",
     summary: "Wiring up the sticky status parser.",
     next: "Surface it on the Active panel.",
+    sessionUrl: null,
     body: [
       "status: working",
       "summary: Wiring up the sticky status parser.",
       "next: Surface it on the Active panel.",
     ].join("\n"),
   });
+});
+
+test("parseStatusComment extracts the session link and keeps URL underscores intact", () => {
+  const url = "https://claude.ai/code/session_015vrEiYejRQoSXGDL13FMy9";
+  // bare URL
+  expect(
+    parseStatusComment(`<!-- pm:status -->\nstatus: working\nsession: ${url}`)?.sessionUrl,
+  ).toBe(url);
+  // tolerant of a markdown link / autolink wrapping the URL
+  expect(parseStatusComment(`<!-- pm:status -->\nsession: [run](${url})`)?.sessionUrl).toBe(url);
+  expect(parseStatusComment(`<!-- pm:status -->\nsession: <${url}>`)?.sessionUrl).toBe(url);
+  // absent → null
+  expect(parseStatusComment("<!-- pm:status -->\nstatus: working")?.sessionUrl).toBeNull();
 });
 
 test("parseStatusComment tolerates markdown formatting (bold / list markers)", () => {
@@ -135,13 +149,27 @@ test("a sticky-comment rewrite (agent.updatedAt bump) emits pr.updated so it per
   const prev = index([
     pr({
       ...base,
-      agent: { state: "working", summary: "a", next: null, body: "x", updatedAt: "t1" },
+      agent: {
+        state: "working",
+        summary: "a",
+        next: null,
+        sessionUrl: null,
+        body: "x",
+        updatedAt: "t1",
+      },
     }),
   ]);
   const next = [
     pr({
       ...base,
-      agent: { state: "blocked", summary: "b", next: null, body: "y", updatedAt: "t2" },
+      agent: {
+        state: "blocked",
+        summary: "b",
+        next: null,
+        sessionUrl: null,
+        body: "y",
+        updatedAt: "t2",
+      },
     }),
   ];
   expect(diffCloudPrs(prev, next).map((e) => e.type)).toEqual(["pr.updated"]);

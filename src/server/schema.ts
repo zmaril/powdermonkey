@@ -156,6 +156,9 @@ export const pullRequests = pgTable("pull_requests", {
   agentState: text("agent_state").$type<AgentState>(),
   agentSummary: text("agent_summary"),
   agentNext: text("agent_next"),
+  // The cloud session that authored the status comment (the worker-stamped
+  // `claude.ai/code/…` link) — a direct PR→session map, see events.ts AgentStatus.
+  agentSessionUrl: text("agent_session_url"),
   agentBody: text("agent_body"),
   agentUpdatedAt: text("agent_updated_at"),
   // The ledger: when set, we've already asked @claude to rebase this conflict

@@ -75,16 +75,18 @@ A cloud session runs out of sight of the supervisor. Your link back is a **singl
 status: working
 summary: one line on what's happening right now
 next: one line on what's next (or the decision you're blocked on)
+session: https://claude.ai/code/session_<your-session-id>
 ```
 
 - `status:` is one of `starting` | `working` | `blocked` | `done` (the canonical set is the `AgentState` enum in `src/shared/types.ts` — anything else is parsed as "no recognised status" and won't drive the panel). Use **`blocked`** when you need the operator — it lights up a *needs-you* flag on their panel. Use `done` when the PR is ready for review.
-- `summary:` / `next:` are one line each, written for a human glancing at the panel. The whole comment body is shown verbatim on expand, so you can add more narrative below the block if it helps — just keep the three keys at the top.
+- `summary:` / `next:` are one line each, written for a human glancing at the panel. The whole comment body is shown verbatim on expand, so you can add more narrative below the block if it helps — just keep the keys at the top.
+- `session:` is a link to **this cloud session** — the `https://claude.ai/code/…` URL for this run (the same one the harness gives you in the `Claude-Session:` commit trailer). It maps the status (and its PR) straight back to your session, and keeps things unambiguous if several agents ever post status comments on one PR. Stamp it once and leave it; omit the line only if you genuinely can't determine your session URL.
 
 **Sticky = one comment, rewritten.** At the **end of every turn**, update *the same* comment (find the one carrying `<!-- pm:status -->` and edit it — don't post a new one each turn). With `gh`:
 
 ```sh
 PR=<your pr number>
-BODY=$'<!-- pm:status -->\nstatus: working\nsummary: …\nnext: …'
+BODY=$'<!-- pm:status -->\nstatus: working\nsummary: …\nnext: …\nsession: https://claude.ai/code/session_<your-session-id>'
 # find the existing sticky comment id by its marker, edit it; else create it
 ID=$(gh api "repos/{owner}/{repo}/issues/$PR/comments" \
        --jq '.[] | select(.body | contains("<!-- pm:status -->")) | .id' | head -1)

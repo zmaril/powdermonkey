@@ -381,6 +381,18 @@ function AgentNarrative({ agent }: { agent: AgentStatus }) {
             </Text>
           )}
         </Box>
+        {agent.sessionUrl && (
+          <Anchor
+            href={agent.sessionUrl}
+            target="_blank"
+            size="xs"
+            fw={500}
+            style={{ flex: "0 0 auto" }}
+            title="The cloud session that authored this status"
+          >
+            session ↗
+          </Anchor>
+        )}
         {hasBody && (
           <UnstyledButton onClick={() => setOpen((o) => !o)} style={{ flex: "0 0 auto" }}>
             <Text size="xs" c="blue.4">

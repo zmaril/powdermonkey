@@ -69,6 +69,7 @@ test("agent status round-trips through the agent_* columns", async () => {
     state: "blocked" as const,
     summary: "Need a decision.",
     next: "Waiting on the operator.",
+    sessionUrl: "https://claude.ai/code/session_015vrEiYejRQoSXGDL13FMy9",
     body: "status: blocked\nsummary: Need a decision.",
     updatedAt: "2026-06-28T01:00:00Z",
   };
@@ -85,6 +86,7 @@ test("a later upsert with no status comment clears the persisted agent", async (
         state: "working",
         summary: null,
         next: null,
+        sessionUrl: null,
         body: "status: working",
         updatedAt: "t",
       },

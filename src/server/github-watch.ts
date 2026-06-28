@@ -142,12 +142,14 @@ export function parseStatusComment(body: string): Omit<AgentStatus, "updatedAt">
   const fields: Record<string, string> = {};
   for (const raw of body.split(/\r?\n/)) {
     // Strip emphasis/code/quote chars and a leading list marker so `**status:**`,
-    // `- status:` and `> status:` all reduce to a plain `key: value`.
+    // `- status:` and `> status:` all reduce to a plain `key: value`. We pointedly do
+    // NOT strip `_`, so a value with underscores — notably the session URL's
+    // `session_<id>` — survives intact.
     const line = raw
-      .replace(/[*_`>]/g, "")
+      .replace(/[*`>]/g, "")
       .replace(/^\s*[-+]\s*/, "")
       .trim();
-    const m = line.match(/^(status|summary|next)\s*:\s*(.*)$/i);
+    const m = line.match(/^(status|summary|next|session)\s*:\s*(.*)$/i);
     if (m) fields[m[1].toLowerCase()] = m[2].trim();
   }
   const word = (fields.status ?? "").toLowerCase();
@@ -155,6 +157,9 @@ export function parseStatusComment(body: string): Omit<AgentStatus, "updatedAt">
     state: AGENT_STATES.has(word) ? (word as AgentState) : null,
     summary: fields.summary || null,
     next: fields.next || null,
+    // Pull the bare URL out of the `session:` value, tolerant of a markdown link or
+    // autolink wrapping it ([…](url) / <url>) — stops at whitespace or closing bracket.
+    sessionUrl: fields.session?.match(/https?:\/\/[^\s)>\]]+/)?.[0] ?? null,
     // The marker line stripped, the rest kept verbatim for the human-readable glance.
     body: body.replace(STATUS_MARKER, "").trim(),
   };
@@ -162,7 +167,9 @@ export function parseStatusComment(body: string): Omit<AgentStatus, "updatedAt">
 
 /** Pick the worker's status out of a PR's comments: the most recent one carrying the
  *  marker (the sticky comment is rewritten in place, but if duplicates ever exist the
- *  newest wins). Returns null when no comment carries the marker. */
+ *  newest wins). Returns null when no comment carries the marker. If we ever support
+ *  several agents posting status on one PR, this is the seam to widen — group the
+ *  marked comments by their stamped `sessionUrl` instead of collapsing to one. */
 function statusFromComments(comments: { body?: string; updatedAt?: string }[]): AgentStatus | null {
   let agent: AgentStatus | null = null;
   for (const c of comments) {

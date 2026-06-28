@@ -20,6 +20,12 @@ export type AgentStatus = {
   state: AgentState | null;
   summary: string | null;
   next: string | null;
+  /** A link to the cloud session that authored this comment — the `claude.ai/code/…`
+   *  URL the worker stamps (the same one the harness puts in its `Claude-Session:`
+   *  commit trailer). Maps a status comment straight to its session without going
+   *  through the branch/trailer task resolution — and stays unambiguous if several
+   *  agents ever post status comments on one PR. Null when the worker didn't stamp it. */
+  sessionUrl: string | null;
   /** The full sticky comment body with the marker line stripped — the human-readable
    *  glance at what the agent thinks is happening. */
   body: string;
