@@ -1,39 +1,155 @@
-import { Text } from "@mantine/core";
+import { ActionIcon, Button, Group, Text, TextInput, Tooltip } from "@mantine/core";
+import { useEffect, useRef, useState } from "react";
+import { normalizeUrl } from "./browser-url.ts";
 
 // A browser pane: loads a URL in an iframe so you can watch a dev server / local
 // preview without leaving the app. Point it at a worker's `bun run dev` (or any
 // localhost preview) and see what it built on the same pane of glass as the shell
 // and the plan tree.
 //
-// This is the bare loader — the URL comes in as a dockview panel param. Entering /
-// remembering a URL, reload, open-in-real-browser and the iframe-limit handling
-// land on top of this (next phase).
-export function BrowserPane({ url }: { url: string }) {
-  if (!url) {
-    return (
-      <div
-        style={{
-          height: "100%",
-          width: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#1a1b1e",
-        }}
-      >
-        <Text size="sm" c="dimmed">
-          No URL to load.
-        </Text>
-      </div>
-    );
-  }
+// The toolbar is the whole interaction: type a URL and hit enter to load it,
+// reload, or pop it open in a real browser tab. `url` is the remembered address
+// (persisted by the caller into the dockview panel params, so it survives a reload
+// and the disconnect→refresh recovery); `onNavigate` is how a new address is
+// handed back to be remembered.
+//
+// Iframe caveat: many sites refuse to be embedded (X-Frame-Options / CSP
+// frame-ancestors) and will show up blank or as a browser error — there's no
+// reliable cross-origin way to detect that from here, so we surface a dismissable
+// hint and always keep "Open ↗" handy. localhost dev servers almost always embed
+// fine, which is the case this pane is for.
+export function BrowserPane({
+  url,
+  onNavigate,
+}: {
+  url: string;
+  onNavigate: (url: string) => void;
+}) {
+  // `draft` is the editable text in the bar; `current` is what the iframe loads.
+  // They diverge while the operator is typing and re-converge on submit.
+  const [draft, setDraft] = useState(url);
+  const [current, setCurrent] = useState(url);
+  // Bumped to force the iframe to reload — re-setting src to the same value won't
+  // re-fetch, and a cross-origin frame can't be reloaded via contentWindow, so we
+  // remount the element by changing its React key.
+  const [nonce, setNonce] = useState(0);
+  const [showHint, setShowHint] = useState(true);
+
+  // Adopt an externally-changed url prop (e.g. a layout restore seeding the pane)
+  // without clobbering an in-progress edit on every render.
+  const lastProp = useRef(url);
+  useEffect(() => {
+    if (url !== lastProp.current) {
+      lastProp.current = url;
+      setDraft(url);
+      setCurrent(url);
+    }
+  }, [url]);
+
+  const go = (raw: string) => {
+    const next = normalizeUrl(raw);
+    setDraft(next);
+    setCurrent(next);
+    setNonce((n) => n + 1);
+    if (next !== url) onNavigate(next);
+  };
+
   return (
-    <div style={{ height: "100%", width: "100%", background: "#fff" }}>
-      <iframe
-        src={url}
-        title={url}
-        style={{ width: "100%", height: "100%", border: "none", display: "block" }}
-      />
+    <div style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column" }}>
+      <Group
+        gap={6}
+        wrap="nowrap"
+        px="xs"
+        py={6}
+        style={{ flex: "0 0 auto", background: "#1a1b1e" }}
+      >
+        <Tooltip label="Reload" withArrow openDelay={400}>
+          <ActionIcon
+            variant="default"
+            size="md"
+            aria-label="Reload"
+            onClick={() => setNonce((n) => n + 1)}
+            disabled={!current}
+          >
+            ↻
+          </ActionIcon>
+        </Tooltip>
+        <form
+          style={{ flex: 1, minWidth: 0 }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            go(draft);
+          }}
+        >
+          <TextInput
+            value={draft}
+            onChange={(e) => setDraft(e.currentTarget.value)}
+            placeholder="localhost:3000"
+            size="xs"
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+            styles={{ input: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" } }}
+          />
+        </form>
+        <Button
+          size="compact-xs"
+          variant="default"
+          component="a"
+          href={current || undefined}
+          target="_blank"
+          rel="noopener noreferrer"
+          disabled={!current}
+        >
+          Open ↗
+        </Button>
+      </Group>
+      {showHint && (
+        <Group
+          gap={6}
+          wrap="nowrap"
+          px="xs"
+          py={4}
+          style={{ flex: "0 0 auto", background: "#25262b", borderTop: "1px solid #2c2e33" }}
+        >
+          <Text size="xs" c="dimmed" style={{ flex: 1 }}>
+            Some sites block embedding (X-Frame-Options / CSP) and show up blank — use Open ↗.
+            localhost dev servers usually work.
+          </Text>
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            color="gray"
+            onClick={() => setShowHint(false)}
+          >
+            Dismiss
+          </Button>
+        </Group>
+      )}
+      <div style={{ flex: 1, minHeight: 0, background: "#fff" }}>
+        {current ? (
+          <iframe
+            key={`${current}#${nonce}`}
+            src={current}
+            title={current}
+            style={{ width: "100%", height: "100%", border: "none", display: "block" }}
+          />
+        ) : (
+          <div
+            style={{
+              height: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "#1a1b1e",
+            }}
+          >
+            <Text size="sm" c="dimmed">
+              Enter a URL above to load a preview.
+            </Text>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -38,6 +38,10 @@ type State = {
   // local preview). `url` is the page to load; `n` makes repeats distinct so App's
   // effect re-fires. App adds a `browser` panel keyed so a fresh one opens each time.
   browserReq: { url: string; n: number } | null;
+  // The last URL loaded in a Browser pane, remembered across reloads (persisted) so a
+  // fresh pane opens where you left off. Updated whenever a pane navigates.
+  lastBrowserUrl: string;
+  rememberBrowserUrl: (url: string) => void;
   // Bumped each time the operator asks to open the notepad; App watches it.
   notesReq: number;
   // In-app activity indicators, keyed by dockview panel id (e.g. "active"). True
@@ -154,6 +158,8 @@ export const useStore = create<State>()(
       lastStart: null,
       shellReq: null,
       browserReq: null,
+      lastBrowserUrl: "http://localhost:3000",
+      rememberBrowserUrl: (url) => set({ lastBrowserUrl: url }),
       notesReq: 0,
       tabActivity: {},
       flagTab: (paneId) =>
@@ -189,8 +195,10 @@ export const useStore = create<State>()(
             n: (s.shellReq?.n ?? 0) + 1,
           },
         })),
-      openBrowser: (url = "http://localhost:3000") =>
-        set((s) => ({ browserReq: { url, n: (s.browserReq?.n ?? 0) + 1 } })),
+      openBrowser: (url) =>
+        set((s) => ({
+          browserReq: { url: url ?? s.lastBrowserUrl, n: (s.browserReq?.n ?? 0) + 1 },
+        })),
       openNotes: () => set((s) => ({ notesReq: s.notesReq + 1 })),
       openReview: (number, title) => set({ review: { number, title } }),
       closeReview: () => set({ review: null }),
@@ -319,7 +327,11 @@ export const useStore = create<State>()(
       // Persist the dock layout and the auto-rebase toggle so they rehydrate
       // synchronously on load — the toggle renders in its last position instead of
       // flipping from the default once the server value arrives.
-      partialize: (s) => ({ layout: s.layout, autoRebase: s.autoRebase }),
+      partialize: (s) => ({
+        layout: s.layout,
+        autoRebase: s.autoRebase,
+        lastBrowserUrl: s.lastBrowserUrl,
+      }),
     },
   ),
 );
