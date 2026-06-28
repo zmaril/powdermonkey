@@ -14,6 +14,7 @@ import {
 } from "./pr-store.ts";
 import { reconcile } from "./reconcile.ts";
 import { phases } from "./schema.ts";
+import { getAutoRebase } from "./settings.ts";
 
 // The one loop. It polls GitHub for the PRs our cloud workers open — branches
 // named `pm/task-<id>-<slug>` — diffs each tick against the last-seen state, and
@@ -275,18 +276,10 @@ const REBASE_MESSAGE =
   "This PR has merge conflicts with `main`. Please rebase onto the latest `main`, " +
   "resolve the conflicts, and push — keeping the PM-Phase / PM-Task trailers intact.";
 
-// Operator toggle for the auto-rebase ask. Default on (overridable at boot via
-// PM_AUTO_REBASE=false). In-memory on purpose: it's a per-session "I'm driving
-// rebases by hand right now" switch, not a persisted preference, so a restart
-// returns to the default. Gates only the *ask* — the ledger housekeeping (clearing
-// a resolved conflict) still runs, so toggling it back on doesn't ask stale.
-let autoRebaseEnabled = process.env.PM_AUTO_REBASE !== "false";
-export function isAutoRebaseEnabled(): boolean {
-  return autoRebaseEnabled;
-}
-export function setAutoRebaseEnabled(on: boolean): void {
-  autoRebaseEnabled = on;
-}
+// The auto-rebase toggle is a persisted operator setting (see settings.ts) —
+// `getAutoRebase()` reads it off an in-memory cache, so this hot path stays sync.
+// It gates only the *ask*; the ledger housekeeping (clearing a resolved conflict)
+// still runs below, so toggling it back on never asks stale.
 
 // Idempotency now lives in the pull_requests table (rebaseAskedAt), not memory, so
 // the "we already asked" fact survives a restart — closing a real re-spam window:
@@ -301,7 +294,7 @@ async function maybeAskRebase(pr: CloudPr, meta: CloudEventMeta): Promise<void> 
     return;
   }
   if (action !== "ask") return;
-  if (!autoRebaseEnabled) return; // operator paused auto-rebase — drive it by hand
+  if (!getAutoRebase()) return; // operator paused auto-rebase — drive it by hand
   await markRebaseAsked(pr.number); // mark first, so a failed post doesn't loop-retry
   const repo = await resolveRepo();
   const slug = repo ? `${repo.owner}/${repo.name}` : undefined;

@@ -278,7 +278,10 @@ export const useStore = create<State>()(
       // Persist only the dock layout — collections re-sync, and actions / transient
       // request signals must never be rehydrated from storage.
       name: "pm-ui",
-      partialize: (s) => ({ layout: s.layout }),
+      // Persist the dock layout and the auto-rebase toggle so they rehydrate
+      // synchronously on load — the toggle renders in its last position instead of
+      // flipping from the default once the server value arrives.
+      partialize: (s) => ({ layout: s.layout, autoRebase: s.autoRebase }),
     },
   ),
 );

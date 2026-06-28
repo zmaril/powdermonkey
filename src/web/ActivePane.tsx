@@ -13,6 +13,7 @@ import {
 import { useState } from "react";
 import type { CloudPr } from "../server/events.ts";
 import type { Goal, Milestone, Session, Task } from "../server/schema.ts";
+import { SessionKind } from "../shared/types.ts";
 import { partitionTasks } from "./active.ts";
 import { type Indexes, starFirst, usePlanData } from "./plan-data.ts";
 import {
@@ -244,6 +245,20 @@ export function ActivePane() {
 
   const allTasks = [...idx.tasksByMilestone.values()].flat();
   const { active } = partitionTasks(allTasks, activeIds);
+  // The ACTIVE count is the number of WORKERS (distinct live sessions), not tasks —
+  // one worker can carry several tasks, so counting tasks overstates what's running.
+  // Broken out per environment: how many cloud workers vs local worktrees.
+  const activeSessions = new Map<number, Session>();
+  for (const t of active) {
+    const s = idx.sessionByTask.get(t.id);
+    if (s) activeSessions.set(s.id, s);
+  }
+  const cloudCount = [...activeSessions.values()].filter(
+    (s) => s.kind === SessionKind.Remote,
+  ).length;
+  const localCount = [...activeSessions.values()].filter(
+    (s) => s.kind === SessionKind.Local,
+  ).length;
 
   return (
     <Box
@@ -254,8 +269,21 @@ export function ActivePane() {
           <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
             ACTIVE
           </Text>
-          <Badge size="sm" variant="light" color={active.length > 0 ? "blue" : "gray"}>
-            {active.length}
+          <Badge
+            size="sm"
+            variant="light"
+            color={cloudCount > 0 ? "blue" : "gray"}
+            title="cloud sessions"
+          >
+            {KIND_ICON[SessionKind.Remote]} {cloudCount}
+          </Badge>
+          <Badge
+            size="sm"
+            variant="light"
+            color={localCount > 0 ? "blue" : "gray"}
+            title="local sessions"
+          >
+            {KIND_ICON[SessionKind.Local]} {localCount}
           </Badge>
         </Group>
         <Group gap="md" wrap="nowrap">

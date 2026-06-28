@@ -6,10 +6,14 @@ import { ready } from "./db.ts";
 import { startGithubWatch } from "./github-watch.ts";
 import { reconcile } from "./reconcile.ts";
 import { startSupervisorPty } from "./session-pty.ts";
+import { loadSettings } from "./settings.ts";
 
 const PORT = Number(process.env.PORT ?? 4500);
 
 await ready();
+// Load persisted operator settings (e.g. autoRebase) into the in-memory cache the
+// watcher reads, so a toggle made before a restart is honored on boot.
+await loadSettings();
 
 // Bind the preferred port, but never crash if it's already taken — another
 // instance (a teleported worker, or just a second copy) may already hold it.

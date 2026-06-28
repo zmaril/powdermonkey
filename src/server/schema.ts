@@ -168,6 +168,15 @@ export const pullRequests = pgTable("pull_requests", {
   ...timestamps,
 });
 
+// Operator runtime settings — a single-row table (id always 1) of toggles that
+// should survive a restart. Starts with just `autoRebase` (whether the watcher
+// auto-asks @claude to rebase a conflicting PR); add columns as more settings appear.
+export const settings = pgTable("settings", {
+  id: integer("id").primaryKey().default(1),
+  autoRebase: boolean("auto_rebase").notNull().default(true),
+  ...timestamps,
+});
+
 // Types derived directly from the table definitions — no separate schema layer.
 export type Goal = typeof goals.$inferSelect;
 export type Milestone = typeof milestones.$inferSelect;
@@ -177,3 +186,4 @@ export type Session = typeof sessions.$inferSelect;
 export type SessionTask = typeof sessionTasks.$inferSelect;
 export type Note = typeof notes.$inferSelect;
 export type PullRequestRow = typeof pullRequests.$inferSelect;
+export type Settings = typeof settings.$inferSelect;

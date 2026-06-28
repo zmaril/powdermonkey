@@ -8,12 +8,7 @@ import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } f
 import { pg } from "./db.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
-import {
-  currentCloudPrs,
-  isAutoRebaseEnabled,
-  setAutoRebaseEnabled,
-  syncCloudPrs,
-} from "./github-watch.ts";
+import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
 import { models } from "./models.ts";
 import { PUBLIC_DIR } from "./paths.ts";
 import { loadPlan, planSchema } from "./plan.ts";
@@ -38,6 +33,7 @@ import {
   writeSessionPty,
 } from "./session-pty.ts";
 import { listSessionTasks } from "./session-tasks.ts";
+import { getAutoRebase, setAutoRebase } from "./settings.ts";
 import { teleportTask } from "./teleport.ts";
 import { landSession, startLocalSession, stopSession } from "./worktree.ts";
 
@@ -205,12 +201,12 @@ export const app = new Elysia()
   .get("/cloud-prs", () => currentCloudPrs())
   // Runtime operator settings (in-memory, reset on restart). `autoRebase` gates the
   // watcher's auto @claude-rebase ask, so the Active pane can pause/resume it.
-  .get("/settings", () => ({ autoRebase: isAutoRebaseEnabled() }))
+  .get("/settings", () => ({ autoRebase: getAutoRebase() }))
   .post(
     "/settings",
-    ({ body }) => {
-      setAutoRebaseEnabled(body.autoRebase);
-      return { autoRebase: isAutoRebaseEnabled() };
+    async ({ body }) => {
+      await setAutoRebase(body.autoRebase);
+      return { autoRebase: getAutoRebase() };
     },
     { body: t.Object({ autoRebase: t.Boolean() }) },
   )
