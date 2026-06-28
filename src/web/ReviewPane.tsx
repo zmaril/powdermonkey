@@ -25,6 +25,7 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import {
   type CSSProperties,
+  type ReactNode,
   createContext,
   useCallback,
   useContext,
@@ -382,6 +383,39 @@ function FilePatch({ file }: { file: ReviewFile }) {
   );
 }
 
+/** Mount `children` only once the slot scrolls near the viewport, so a many-file PR
+ *  doesn't run every file's Shiki highlight up front — the practical win of
+ *  virtualization without rewriting onto CodeView. A height-estimate placeholder
+ *  keeps the scrollbar roughly stable; once shown it stays mounted (so comment/
+ *  composer state isn't lost on scroll). */
+function LazyMount({ estimate, children }: { estimate: number; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    if (show) return;
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setShow(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: "800px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [show]);
+  return <div ref={ref}>{show ? children : <div style={{ height: estimate }} />}</div>;
+}
+
+/** Rough rendered height of a patch (line count × row height), for the lazy-mount
+ *  placeholder. Capped so a huge file doesn't blow out the scrollbar estimate. */
+function estimateHeight(patch: string): number {
+  return Math.min(40 + patch.split("\n").length * 18, 4000);
+}
+
 /** One file in the diff list: our header (name · status · +/- · Viewed) over the
  *  PatchDiff. Marking it viewed collapses the diff (GitHub's mechanic). */
 function FileBlock({ file }: { file: ReviewFile }) {
@@ -417,7 +451,9 @@ function FileBlock({ file }: { file: ReviewFile }) {
       </Group>
       {!isViewed &&
         (file.patch ? (
-          <FilePatch file={file} />
+          <LazyMount estimate={estimateHeight(file.patch)}>
+            <FilePatch file={file} />
+          </LazyMount>
         ) : (
           <Text size="xs" c="dimmed" px="md" py="sm">
             No textual diff (binary, rename, or too large to display).
