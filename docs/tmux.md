@@ -36,10 +36,20 @@ Knowing the socket flag and session names is the price of raw `tmux`. The helper
 hides both — run it from the repo and it drops you onto the socket:
 
 ```sh
-pm attach              # attach to the supervisor server console (pm-server)
-pm attach pm-session-7 # …or any named session
+pm attach              # the dashboard: one pane per live session + the server
+pm attach pm-session-7 # …or attach straight to one named session
 bun run attach         # same, without the bin/pm wrapper on your PATH
 ```
+
+Bare `pm attach` builds a **dashboard** — a single tmux window that tiles one
+pane per thing PowderMonkey is running (the `pm-server` console first, then each
+`pm-session-<id>` agent), so you see the whole machine at once instead of one
+console at a time. Each pane is a nested client attached to that session, so it's
+the same live screen the browser shell shows; type into a pane to drive that
+agent, `Ctrl-b d` to detach the whole dashboard. It's rebuilt from scratch each
+time you run it, so it always matches what's currently live — run it again after
+starting or landing a session to re-tile. Pass a session name to skip the
+dashboard and attach to just that one.
 
 `pm` is `bin/pm` in the repo; symlink it onto your PATH once
 (`ln -s "$PWD/bin/pm" ~/.local/bin/pm`) and `pm attach` works from anywhere. It's
