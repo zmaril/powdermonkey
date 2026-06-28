@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { loadTaskPrompt } from "./dispatch.ts";
@@ -152,7 +152,11 @@ export type StopResult =
 /** Abort a session that's still running. Unlike `land` (graceful teardown of
  *  *finished* work, which refuses a dirty worktree), `stop` is the kill switch: it
  *  tears the agent down without requiring a clean tree, records the session as
- *  `stopped` + archived, and rolls the task back to `pending` so it can be re-run.
+ *  `stopped` + archived, and rolls its still-in-flight tasks back to `pending` so
+ *  they can be re-run. Tasks that already reached a terminal status (`merged` —
+ *  done — or `cancelled` — won't-do) are left alone: a session spanning several
+ *  tasks may be aborted long after one of them merged, and stopping the shared
+ *  session must not un-merge that finished work.
  *
  *  - local: kill the agent's tmux/PTY, then force-remove its worktree (discarding
  *    any in-progress work) so a re-run can recreate it at the same path.
@@ -180,9 +184,11 @@ export async function stopSession(sessionId: number): Promise<StopResult> {
     .where(eq(sessions.id, sessionId))
     .returning();
 
-  // Roll every task this session was working back to pending so they're
-  // dispatchable again, and clear the runtime session fields that pointed at this
-  // aborted run (a remote session set these).
+  // Roll every still-in-flight task this session was working back to pending so
+  // they're dispatchable again, and clear the runtime session fields that pointed
+  // at this aborted run (a remote session set these). Terminal tasks (merged /
+  // cancelled) are excluded by the status guard: aborting a shared session must
+  // never regress already-finished work back to pending.
   const taskIds = await taskIdsForSession(sessionId);
   if (taskIds.length > 0) {
     await db
@@ -193,7 +199,12 @@ export async function stopSession(sessionId: number): Promise<StopResult> {
         sessionUrl: null,
         updatedAt: new Date(),
       })
-      .where(inArray(tasks.id, taskIds));
+      .where(
+        and(
+          inArray(tasks.id, taskIds),
+          notInArray(tasks.status, [TaskStatus.Merged, TaskStatus.Cancelled]),
+        ),
+      );
   }
 
   return { ok: true, session: updated };
