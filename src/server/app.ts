@@ -17,6 +17,7 @@ import {
   startSupervisorPty,
   writeSessionPty,
 } from "./session-pty.ts";
+import { listSessionTasks } from "./session-tasks.ts";
 import { teleportTask } from "./teleport.ts";
 import { landSession, startLocalSession, stopSession } from "./worktree.ts";
 
@@ -74,18 +75,35 @@ function resource(name: string, repo: Repo, body: { create: TSchema; update: TSc
 
 // Tasks carry runtime routes (dispatch/status) on top of CRUD. Keeping them in the
 // same group means Eden sees one coherent /tasks subtree.
+// Body for the launch routes: the path `:id` is the primary task; `taskIds` may
+// carry additional tasks to fold into the SAME session. We union them (primary
+// first) and dedupe, so the UI can pass the whole multi-selection either way.
+const launchBody = t.Optional(t.Object({ taskIds: t.Optional(t.Array(t.Number())) }));
+function launchIds(idParam: string, body?: { taskIds?: number[] } | null): number[] {
+  return [...new Set([Number(idParam), ...(body?.taskIds ?? [])])];
+}
+
 const tasksGroup = resource("tasks", taskRepo, models.tasks)
-  .post("/:id/dispatch", async ({ params, set }) => {
-    const result = await dispatchTask(Number(params.id));
-    if (!result.ok) set.status = 400;
-    return result;
-  })
+  .post(
+    "/:id/dispatch",
+    async ({ params, body, set }) => {
+      const result = await dispatchTask(launchIds(params.id, body));
+      if (!result.ok) set.status = 400;
+      return result;
+    },
+    { body: launchBody },
+  )
   // Start a local session: worktree on pm/task-<id> + a session row + trailer block.
-  .post("/:id/start-local", async ({ params, set }) => {
-    const result = await startLocalSession(Number(params.id));
-    if (!result.ok) set.status = 400;
-    return result;
-  })
+  // Accepts extra `taskIds` to fold several tasks into the one worktree session.
+  .post(
+    "/:id/start-local",
+    async ({ params, body, set }) => {
+      const result = await startLocalSession(launchIds(params.id, body));
+      if (!result.ok) set.status = 400;
+      return result;
+    },
+    { body: launchBody },
+  )
   // Teleport a running cloud session down to a local worktree session, continuing
   // the same conversation via `claude --teleport <id>`.
   .post("/:id/teleport", async ({ params, set }) => {
@@ -134,6 +152,10 @@ export const app = new Elysia()
   // The watcher's latest PR state per task-linked PR (CI checks, mergeable, draft).
   // Live runtime data, not persisted — the Active panel reads it for status badges.
   .get("/cloud-prs", () => currentCloudPrs())
+  // Every session↔task link. The browser intersects these with the sessions it
+  // already holds to learn which tasks are active and which session each surfaces,
+  // so one flat list serves both the live panes and the archive view.
+  .get("/session-tasks", () => listSessionTasks())
   // Image upload from the web shell. The browser is remote, so a dropped image
   // has to land on the server filesystem first; we save it under data/uploads/
   // and return the absolute path, which the client then types into the PTY for

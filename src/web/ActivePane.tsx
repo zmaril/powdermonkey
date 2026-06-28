@@ -1,99 +1,166 @@
 import { Anchor, Badge, Box, Group, SegmentedControl, Stack, Text, Title } from "@mantine/core";
 import { useState } from "react";
-import type { Goal, Milestone, Task } from "../server/schema.ts";
+import type { Goal, Milestone, Session, Task } from "../server/schema.ts";
 import { partitionTasks } from "./active.ts";
 import { type Indexes, starFirst, usePlanData } from "./plan-data.ts";
 import { IdTag, PrStatus, SessionActions, StarToggle, TaskBadges } from "./plan-ui.tsx";
 
 // The Active pane is the live monitor — every task with a session running right
-// now (the derived-active set; see active.ts). Two views, toggled:
-//   • Flat   — one dense row per task, htop-style: the whole fleet at a glance.
-//   • Grouped — the same rows nested under their goal → milestone.
+// now (the derived-active set; see active.ts). The unit here is the SESSION, not
+// the task: one worker can be dispatched for several tasks at once (the
+// session_tasks join), so those tasks are grouped under their shared session and
+// the session's controls (Shell · VS Code · Land · Stop) appear once for the whole
+// group. Two views, toggled:
+//   • Flat   — session groups in one dense list, htop-style.
+//   • Grouped — the same groups nested under goal → milestone.
 // It re-renders off the same 4s poll as the rest of the app, so session state
 // (running / Try Again / needs you) stays current without a refresh.
 
 type View = "flat" | "grouped";
 
-/** One active-task row. Two lines so nothing clips in a narrow pane: line 1 is
- *  the identity + status (icon · title/context · progress · badges), line 2 is the
- *  action cluster (branch · Shell · VS Code · Land · Stop), which wraps rather than
- *  overflow. `context` shows the goal › milestone trail in the flat view (redundant
- *  under headings in the grouped view, so it's omitted there). */
-function ActiveRow({
+type SessionGrouping = { session: Session; tasks: Task[] };
+
+/** Group active tasks by the live session they share, preserving input order (so a
+ *  star-first list stays star-first). Every active task has a session — the active
+ *  set is derived from sessions — but a task whose session somehow doesn't resolve
+ *  is skipped rather than rendered sessionless. */
+function groupBySession(tasks: Task[], idx: Indexes): SessionGrouping[] {
+  const groups = new Map<number, SessionGrouping>();
+  const order: number[] = [];
+  for (const t of tasks) {
+    const session = idx.sessionByTask.get(t.id);
+    if (!session) continue;
+    let g = groups.get(session.id);
+    if (!g) {
+      g = { session, tasks: [] };
+      groups.set(session.id, g);
+      order.push(session.id);
+    }
+    g.tasks.push(t);
+  }
+  return order.map((id) => groups.get(id) as SessionGrouping);
+}
+
+/** One task line inside a session group: star · id · title · (context) · badges ·
+ *  PR. No session controls here — those belong to the group, not the task. */
+function TaskLine({
   task,
+  session,
   idx,
   context,
 }: {
   task: Task;
+  session: Session;
   idx: Indexes;
   context?: string;
 }) {
-  const session = idx.sessionByTask.get(task.id);
   const pr = idx.prByTask.get(task.id);
   return (
-    <Box px="sm" py={8} style={{ borderBottom: "1px solid #2c2e33" }}>
-      <Group gap="sm" wrap="nowrap" align="flex-start">
-        <StarToggle task={task} />
-        <Text size="sm" title={session?.kind}>
-          {session?.kind === "remote" ? "☁️" : "💻"}
-        </Text>
-        <Box style={{ flex: 1, minWidth: 0 }}>
-          <Group gap={6} wrap="nowrap">
-            <IdTag prefix="t" id={task.id} />
-            <Text size="sm" fw={500} truncate>
-              {task.title}
-            </Text>
-          </Group>
-          {context && (
-            <Text size="xs" c="dimmed" truncate>
-              {context}
-            </Text>
-          )}
-        </Box>
-        <TaskBadges task={task} session={session} showStatus={false} />
-      </Group>
-      {(session || task.prUrl) && (
-        <Group gap="xs" wrap="wrap" justify="flex-end" mt={6}>
-          {session && <SessionActions session={session} />}
-          {task.prUrl && (
-            <Anchor href={task.prUrl} target="_blank" size="sm" fw={500}>
-              PR ↗
-            </Anchor>
-          )}
-          {pr && <PrStatus pr={pr} />}
+    <Group gap="sm" wrap="nowrap" align="flex-start">
+      <StarToggle task={task} />
+      <Box style={{ flex: 1, minWidth: 0 }}>
+        <Group gap={6} wrap="nowrap">
+          <IdTag prefix="t" id={task.id} />
+          <Text size="sm" fw={500} truncate>
+            {task.title}
+          </Text>
         </Group>
+        {context && (
+          <Text size="xs" c="dimmed" truncate>
+            {context}
+          </Text>
+        )}
+      </Box>
+      <TaskBadges task={task} session={session} showStatus={false} />
+      {task.prUrl && (
+        <Anchor href={task.prUrl} target="_blank" size="sm" fw={500}>
+          PR ↗
+        </Anchor>
       )}
+      {pr && <PrStatus pr={pr} />}
+    </Group>
+  );
+}
+
+/** One session group: the task(s) the worker is running, then a single action
+ *  cluster (branch · Shell · VS Code · Teleport · Land · Stop) for the session.
+ *  A multi-task group gets a left accent + a "N tasks · one worker" caption so it
+ *  reads as a single unit. `showContext` adds the goal › milestone trail to each
+ *  task line (on in the flat view, off under grouped headings where it's redundant). */
+function SessionGroup({
+  session,
+  tasks,
+  idx,
+  showContext,
+}: {
+  session: Session;
+  tasks: Task[];
+  idx: Indexes;
+  showContext: boolean;
+}) {
+  const multi = tasks.length > 1;
+  return (
+    <Box
+      px="sm"
+      py={8}
+      style={{
+        borderBottom: "1px solid #2c2e33",
+        borderLeft: multi ? "2px solid #4c5568" : undefined,
+      }}
+    >
+      <Stack gap={6}>
+        {tasks.map((t) => {
+          const m = idx.milestoneById.get(t.milestoneId);
+          const g = m ? idx.goalById.get(m.goalId) : undefined;
+          const context = showContext
+            ? [g?.title, m?.title].filter(Boolean).join(" › ")
+            : undefined;
+          return <TaskLine key={t.id} task={t} session={session} idx={idx} context={context} />;
+        })}
+      </Stack>
+      <Group gap="xs" wrap="wrap" justify="space-between" align="center" mt={8}>
+        <Text size="xs" c="dimmed">
+          {session.kind === "remote" ? "☁️" : "💻"}
+          {multi ? ` ${tasks.length} tasks · one worker` : ""}
+        </Text>
+        <SessionActions session={session} taskId={tasks[0].id} />
+      </Group>
     </Box>
   );
 }
 
 function FlatView({ tasks, idx }: { tasks: Task[]; idx: Indexes }) {
+  const groups = groupBySession(starFirst(tasks), idx);
   return (
     <Stack gap={0}>
-      {starFirst(tasks).map((t) => {
-        const m = idx.milestoneById.get(t.milestoneId);
-        const g = m ? idx.goalById.get(m.goalId) : undefined;
-        const context = [g?.title, m?.title].filter(Boolean).join(" › ");
-        return <ActiveRow key={t.id} task={t} idx={idx} context={context} />;
-      })}
+      {groups.map((g) => (
+        <SessionGroup
+          key={g.session.id}
+          session={g.session}
+          tasks={g.tasks}
+          idx={idx}
+          showContext
+        />
+      ))}
     </Stack>
   );
 }
 
 function GroupedView({ activeIds, idx }: { activeIds: Set<number>; idx: Indexes }) {
   const goals = [...idx.goals].sort((a, b) => a.id - b.id);
-  const sections: { goal: Goal; milestone: Milestone; tasks: Task[] }[] = [];
+  const sections: { goal: Goal; milestone: Milestone; groups: SessionGrouping[] }[] = [];
   for (const goal of goals) {
     for (const m of idx.milestonesByGoal.get(goal.id) ?? []) {
       const tasks = starFirst(
         (idx.tasksByMilestone.get(m.id) ?? []).filter((t) => activeIds.has(t.id)),
       );
-      if (tasks.length > 0) sections.push({ goal, milestone: m, tasks });
+      if (tasks.length > 0)
+        sections.push({ goal, milestone: m, groups: groupBySession(tasks, idx) });
     }
   }
   return (
     <Stack gap="lg">
-      {sections.map(({ goal, milestone, tasks }) => (
+      {sections.map(({ goal, milestone, groups }) => (
         <Box key={milestone.id}>
           <Group gap={6} wrap="nowrap" align="baseline">
             <IdTag prefix="g" id={goal.id} />
@@ -106,8 +173,14 @@ function GroupedView({ activeIds, idx }: { activeIds: Set<number>; idx: Indexes 
             <Title order={5}>{milestone.title}</Title>
           </Group>
           <Stack gap={0}>
-            {tasks.map((t) => (
-              <ActiveRow key={t.id} task={t} idx={idx} />
+            {groups.map((g) => (
+              <SessionGroup
+                key={g.session.id}
+                session={g.session}
+                tasks={g.tasks}
+                idx={idx}
+                showContext={false}
+              />
             ))}
           </Stack>
         </Box>

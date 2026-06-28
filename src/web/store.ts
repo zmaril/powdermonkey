@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { CloudPr } from "../server/events.ts";
 import type { Goal, Milestone, Note, Phase, Session, Task } from "../server/schema.ts";
+import type { SessionLink } from "./active.ts";
 import { api } from "./client.ts";
 
 export type StartInfo = {
@@ -19,6 +20,9 @@ type State = {
   tasks: Task[];
   phases: Phase[];
   sessions: Session[];
+  // The session↔task join (many tasks per session). Both panes intersect these
+  // with `sessions` to derive which tasks are active and which session each shows.
+  sessionTasks: SessionLink[];
   notes: Note[];
   // Live PR status per task-linked PR (CI / mergeable / draft), served fresh from
   // the github-watch loop — runtime data the Active panel reads, not persisted.
@@ -31,6 +35,7 @@ type State = {
     tasks: Task[];
     phases: Phase[];
     sessions: Session[];
+    sessionTasks: SessionLink[];
   };
   loading: boolean;
   error: string | null;
@@ -59,6 +64,10 @@ type State = {
   toggleStar: (taskId: number, starred: boolean) => Promise<void>;
   startLocal: (taskId: number) => Promise<void>;
   dispatch: (taskId: number) => Promise<void>;
+  // Launch several backlog tasks together: ONE session works the whole batch. The
+  // first id is the primary (it names the worktree/branch); the rest ride along.
+  startLocalMany: (taskIds: number[]) => Promise<void>;
+  dispatchMany: (taskIds: number[]) => Promise<void>;
   teleport: (taskId: number) => Promise<void>;
   land: (sessionId: number) => Promise<void>;
   stop: (sessionId: number) => Promise<void>;
@@ -107,9 +116,10 @@ export const useStore = create<State>()(
       tasks: [],
       phases: [],
       sessions: [],
+      sessionTasks: [],
       notes: [],
       cloudPrs: [],
-      archive: { goals: [], milestones: [], tasks: [], phases: [], sessions: [] },
+      archive: { goals: [], milestones: [], tasks: [], phases: [], sessions: [], sessionTasks: [] },
       loading: false,
       error: null,
       lastStart: null,
@@ -153,21 +163,24 @@ export const useStore = create<State>()(
       refresh: async () => {
         set({ loading: true, error: null });
         try {
-          const [goals, milestones, tasks, phases, sessions, notes, cloudPrs] = await Promise.all([
-            api.goals.get(),
-            api.milestones.get(),
-            api.tasks.get(),
-            api.phases.get(),
-            api.sessions.get(),
-            api.notes.get(),
-            api["cloud-prs"].get(),
-          ]);
+          const [goals, milestones, tasks, phases, sessions, sessionTasks, notes, cloudPrs] =
+            await Promise.all([
+              api.goals.get(),
+              api.milestones.get(),
+              api.tasks.get(),
+              api.phases.get(),
+              api.sessions.get(),
+              api["session-tasks"].get(),
+              api.notes.get(),
+              api["cloud-prs"].get(),
+            ]);
           const err =
             goals.error ??
             milestones.error ??
             tasks.error ??
             phases.error ??
             sessions.error ??
+            sessionTasks.error ??
             notes.error;
           if (err) throw new Error(String(err.value ?? err.status));
           set({
@@ -176,6 +189,7 @@ export const useStore = create<State>()(
             tasks: (tasks.data ?? []) as Task[],
             phases: (phases.data ?? []) as Phase[],
             sessions: (sessions.data ?? []) as Session[],
+            sessionTasks: (sessionTasks.data ?? []) as SessionLink[],
             notes: (notes.data ?? []) as Note[],
             // Non-fatal if it fails (watcher disabled / GitHub blip): keep status empty.
             cloudPrs: (cloudPrs.data ?? []) as CloudPr[],
@@ -190,15 +204,21 @@ export const useStore = create<State>()(
         // finished/archived set. We pull the full hierarchy so a task whose goal or
         // milestone was archived still resolves its context.
         const q = { query: { archived: "true" } };
-        const [goals, milestones, tasks, phases, sessions] = await Promise.all([
+        const [goals, milestones, tasks, phases, sessions, sessionTasks] = await Promise.all([
           api.goals.get(q),
           api.milestones.get(q),
           api.tasks.get(q),
           api.phases.get(q),
           api.sessions.get(q),
+          api["session-tasks"].get(),
         ]);
         const err =
-          goals.error ?? milestones.error ?? tasks.error ?? phases.error ?? sessions.error;
+          goals.error ??
+          milestones.error ??
+          tasks.error ??
+          phases.error ??
+          sessions.error ??
+          sessionTasks.error;
         if (err) return void set({ error: String(err.value ?? err.status) });
         set({
           archive: {
@@ -207,6 +227,7 @@ export const useStore = create<State>()(
             tasks: (tasks.data ?? []) as Task[],
             phases: (phases.data ?? []) as Phase[],
             sessions: (sessions.data ?? []) as Session[],
+            sessionTasks: (sessionTasks.data ?? []) as SessionLink[],
           },
         });
       },
@@ -238,6 +259,33 @@ export const useStore = create<State>()(
       },
       dispatch: async (taskId) => {
         const { error } = await api.tasks({ id: taskId }).dispatch.post();
+        if (error) set({ error: String(error.value ?? error.status) });
+        await get().refresh();
+      },
+      startLocalMany: async (taskIds) => {
+        if (taskIds.length === 0) return;
+        const [primary, ...rest] = taskIds;
+        const { data, error } = await api
+          .tasks({ id: primary })
+          ["start-local"].post({ taskIds: rest });
+        if (error) return void set({ error: String(error.value ?? error.status) });
+        if (data && "ok" in data && data.ok) {
+          set({
+            lastStart: {
+              taskId: primary,
+              branch: data.branch,
+              worktreePath: data.worktreePath,
+              prompt: data.prompt,
+              trailers: data.trailers,
+            },
+          });
+        }
+        await get().refresh();
+      },
+      dispatchMany: async (taskIds) => {
+        if (taskIds.length === 0) return;
+        const [primary, ...rest] = taskIds;
+        const { error } = await api.tasks({ id: primary }).dispatch.post({ taskIds: rest });
         if (error) set({ error: String(error.value ?? error.status) });
         await get().refresh();
       },

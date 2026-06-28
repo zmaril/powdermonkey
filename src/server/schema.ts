@@ -63,12 +63,12 @@ export const phases = pgTable("phases", {
 // One run of work. Independent of the hierarchy — a session may pull work from
 // multiple goals at once. Created at runtime, never authored. A `local` session
 // executes in a git worktree on `branch`; a `remote` one is a `claude --remote`
-// run reachable at `url`.
+// run reachable at `url`. The tasks a session is working sit in the session_tasks
+// join below (a single session can be dispatched for several tasks at once).
 export const sessions = pgTable("sessions", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   kind: text("kind").$type<SessionKind>().notNull().default("local"),
   state: text("state").$type<SessionState>().notNull().default("running"),
-  taskId: integer("task_id").references(() => tasks.id),
   branch: text("branch"),
   worktreePath: text("worktree_path"),
   url: text("url"),
@@ -77,6 +77,22 @@ export const sessions = pgTable("sessions", {
   // waiting for the operator" and surfaced here so the UI can pull them in.
   needsInput: boolean("needs_input").notNull().default(false),
   ...timestamps,
+});
+
+// Which tasks a session is working. A session can be dispatched for several tasks
+// at once (one worker, one combined brief), and each task surfaces the shared
+// session — so the link is many-to-many rather than a single sessions.task_id.
+// Liveness is the session's, not the link's: a link counts as active only while
+// its session row is live (non-archived), so there's no archived_at here.
+export const sessionTasks = pgTable("session_tasks", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  sessionId: integer("session_id")
+    .notNull()
+    .references(() => sessions.id),
+  taskId: integer("task_id")
+    .notNull()
+    .references(() => tasks.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 // Operator notepad. Free-form notes the operator keeps alongside the plan —
@@ -96,4 +112,5 @@ export type Milestone = typeof milestones.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type Phase = typeof phases.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
+export type SessionTask = typeof sessionTasks.$inferSelect;
 export type Note = typeof notes.$inferSelect;

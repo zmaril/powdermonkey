@@ -19,6 +19,7 @@ const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
 const { taskRepo, phaseRepo, sessionRepo } = await import("../src/server/crud.ts");
 const { reconcile } = await import("../src/server/reconcile.ts");
 const { startLocalSession } = await import("../src/server/worktree.ts");
+const { linkSessionTasks } = await import("../src/server/session-tasks.ts");
 
 async function git(...args: string[]): Promise<void> {
   const proc = Bun.spawn(["git", ...args], {
@@ -140,15 +141,15 @@ test("merging a task archives its live sessions; non-merged tasks are untouched"
   const remoteSession = await sessionRepo.create({
     kind: "remote",
     state: "running",
-    taskId: remoteTask.id,
     url: "https://claude.ai/code/remote-merged",
   });
+  await linkSessionTasks(remoteSession.id, [remoteTask.id]);
   const runningSession = await sessionRepo.create({
     kind: "remote",
     state: "running",
-    taskId: runningTask.id,
     url: "https://claude.ai/code/still-running",
   });
+  await linkSessionTasks(runningSession.id, [runningTask.id]);
 
   // Land the two PRs on main (PM-Task shortcut merges those tasks); the running task
   // gets no trailer, so it stays pending.

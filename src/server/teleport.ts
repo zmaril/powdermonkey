@@ -1,7 +1,8 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "./db.ts";
 import { lsRemoteHeads } from "./git.ts";
-import { type Session, sessions, tasks } from "./schema.ts";
+import { type Session, sessionTasks, sessions, tasks } from "./schema.ts";
+import { taskIdsForSession } from "./session-tasks.ts";
 import { startLocalSession } from "./worktree.ts";
 
 // Teleport pulls a running CLOUD (`claude --remote`) session down onto the laptop
@@ -49,12 +50,19 @@ export async function teleportTask(taskId: number): Promise<TeleportResult> {
 
   // The live remote session row holds the URL; fall back to the task's own
   // sessionUrl (set at dispatch) so teleport works even if the row was pruned.
-  const [remote] = await db
+  // The session is reached through the session_tasks join now, not a column.
+  const [match] = await db
     .select()
     .from(sessions)
+    .innerJoin(sessionTasks, eq(sessionTasks.sessionId, sessions.id))
     .where(
-      and(eq(sessions.taskId, taskId), eq(sessions.kind, "remote"), isNull(sessions.archivedAt)),
+      and(
+        eq(sessionTasks.taskId, taskId),
+        eq(sessions.kind, "remote"),
+        isNull(sessions.archivedAt),
+      ),
     );
+  const remote = match?.sessions;
   const url = remote?.url ?? task.sessionUrl;
   if (!url) return { ok: false, error: "task has no remote session to teleport" };
 
@@ -67,7 +75,13 @@ export async function teleportTask(taskId: number): Promise<TeleportResult> {
   const picked = pickWorkerBranch(heads, taskId);
   const branch = picked ?? `pm/task-${taskId}`;
 
-  const started = await startLocalSession(taskId, {
+  // Pull the whole batch down: a cloud session may have been dispatched for several
+  // tasks, so the new local session works the same set. The teleported task leads
+  // (it names the branch/worktree); any siblings follow.
+  const linked = remote ? await taskIdsForSession(remote.id) : [taskId];
+  const startIds = [taskId, ...linked.filter((id) => id !== taskId)];
+
+  const started = await startLocalSession(startIds, {
     branch,
     fetchRemote: picked != null,
     startup: `claude --teleport ${teleportId}`,
@@ -75,7 +89,9 @@ export async function teleportTask(taskId: number): Promise<TeleportResult> {
   if (!started.ok) return started;
 
   // Swap the remote session for the new local one: archive the remote row and
-  // clear the task's remote runtime state (the cloud run is now local).
+  // clear the batch's remote runtime state (the cloud run is now local). The
+  // archived remote's links stay put (harmless — liveness keys on the session row);
+  // the new local session carries its own links from startLocalSession.
   if (remote) {
     await db
       .update(sessions)
@@ -85,7 +101,7 @@ export async function teleportTask(taskId: number): Promise<TeleportResult> {
   await db
     .update(tasks)
     .set({ sessionState: null, updatedAt: new Date() })
-    .where(eq(tasks.id, taskId));
+    .where(inArray(tasks.id, startIds));
 
   return { ok: true, session: started.session, branch, teleportId };
 }

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { CloudPr } from "../server/events.ts";
 import type { Goal, Milestone, Phase, Session, Task } from "../server/schema.ts";
-import { activeTaskIds } from "./active.ts";
+import { type SessionLink, activeTaskIds } from "./active.ts";
 import { useStore } from "./store.ts";
 
 // Shared read-model for the two panes. Both the Active and Backlog panes need the
@@ -39,6 +39,7 @@ export function buildIndexes(
   tasks: Task[],
   phases: Phase[],
   sessions: Session[],
+  links: SessionLink[],
   cloudPrs: CloudPr[] = [],
 ): Indexes {
   const goalById = new Map<number, Goal>();
@@ -67,8 +68,16 @@ export function buildIndexes(
     phasesByTask.set(p.taskId, list);
   }
 
+  // Each task surfaces the live session linked to it through session_tasks. Links
+  // to sessions not in this slice (archived, or the other slice) simply don't
+  // resolve, so the same link list works for both the live and archive views.
+  const sessionById = new Map<number, Session>();
+  for (const s of sessions) sessionById.set(s.id, s);
   const sessionByTask = new Map<number, Session>();
-  for (const s of sessions) if (s.taskId != null) sessionByTask.set(s.taskId, s);
+  for (const l of links) {
+    const s = sessionById.get(l.sessionId);
+    if (s) sessionByTask.set(l.taskId, s);
+  }
 
   // Prefer a merged PR, else the highest-numbered (newest) one, if a task somehow
   // has more than one tracked PR.
@@ -105,15 +114,16 @@ export function usePlanData(): PlanData {
   const tasks = useStore((s) => s.tasks);
   const phases = useStore((s) => s.phases);
   const sessions = useStore((s) => s.sessions);
+  const sessionTasks = useStore((s) => s.sessionTasks);
   const cloudPrs = useStore((s) => s.cloudPrs);
   const loading = useStore((s) => s.loading);
   const error = useStore((s) => s.error);
 
   const idx = useMemo(
-    () => buildIndexes(goals, milestones, tasks, phases, sessions, cloudPrs),
-    [goals, milestones, tasks, phases, sessions, cloudPrs],
+    () => buildIndexes(goals, milestones, tasks, phases, sessions, sessionTasks, cloudPrs),
+    [goals, milestones, tasks, phases, sessions, sessionTasks, cloudPrs],
   );
-  const activeIds = useMemo(() => activeTaskIds(sessions), [sessions]);
+  const activeIds = useMemo(() => activeTaskIds(sessions, sessionTasks), [sessions, sessionTasks]);
 
   return { idx, activeIds, loading, error };
 }
@@ -131,6 +141,7 @@ export function useArchiveData(): { idx: Indexes; tasks: Task[] } {
         archive.tasks,
         archive.phases,
         archive.sessions,
+        archive.sessionTasks,
       ),
     [archive],
   );
