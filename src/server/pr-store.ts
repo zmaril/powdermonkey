@@ -64,7 +64,7 @@ export async function upsertPrState(pr: CloudPr): Promise<void> {
     mergeable: pr.mergeable,
     headRefName: pr.headRefName,
     ghUpdatedAt: pr.updatedAt,
-    // Agent status: cache columns like the rest, written from the parsed sticky
+    // Agent status: cache columns like the rest, written from the parsed status
     // comment (null across the board when the PR has no status comment).
     agentState: pr.agent?.state ?? null,
     agentSummary: pr.agent?.summary ?? null,

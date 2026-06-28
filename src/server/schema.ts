@@ -157,7 +157,7 @@ export const pullRequests = pgTable("pull_requests", {
   // GitHub's own PR updatedAt (ISO string). Named apart from the row's `updatedAt`
   // below, which tracks when *we* last wrote the row.
   ghUpdatedAt: text("gh_updated_at").notNull(),
-  // The worker's self-reported status, parsed from its sticky `<!-- pm:status -->`
+  // The worker's self-reported status, parsed from its newest `<!-- pm:status -->`-marked
   // PR comment (see github-watch.parseStatusComment + the powdermonkey skill). Cache
   // columns like the GitHub state above — overwritten every tick, null when the PR
   // has no status comment. `agentState` is the typed lifecycle (AgentState) or null

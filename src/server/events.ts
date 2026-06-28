@@ -7,8 +7,9 @@
 
 import type { AgentState, CheckRollupState, MergeableState, PrState } from "../shared/types.ts";
 
-/** The agent-authored status, parsed from the sticky `<!-- pm:status -->` comment a
- *  cloud worker keeps current on its PR (see the powdermonkey skill). `state` is the
+/** The agent-authored status, parsed from the newest `<!-- pm:status -->`-marked comment
+ *  a cloud worker posts on its PR — append-only, a fresh marked comment per update (see
+ *  the powdermonkey skill). `state` is the
  *  structured signal the UI drives logic from (blocked → needs-you); `body` is the
  *  raw comment so the panel can show the worker's own narrative, not just the parsed
  *  fields. Persisted alongside the rest of the PR state in the pull_requests table. */
@@ -26,7 +27,7 @@ export type AgentStatus = {
    *  through the branch/trailer task resolution — and stays unambiguous if several
    *  agents ever post status comments on one PR. Null when the worker didn't stamp it. */
   sessionUrl: string | null;
-  /** The full sticky comment body with the marker line stripped — the human-readable
+  /** The full status comment body with the marker line stripped — the human-readable
    *  glance at what the agent thinks is happening. */
   body: string;
   /** When GitHub last saw the comment edited — a freshness hint, or null. */
@@ -51,7 +52,7 @@ export type CloudPr = {
   mergeable: MergeableState | null;
   headRefName: string;
   updatedAt: string;
-  /** The worker's self-reported status, parsed from its sticky `<!-- pm:status -->`
+  /** The worker's self-reported status, parsed from its newest `<!-- pm:status -->`-marked
    *  comment, or null when it hasn't posted one (or the marker can't be found). */
   agent: AgentStatus | null;
 };

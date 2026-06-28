@@ -107,9 +107,13 @@ export async function fetchCloudPrs(): Promise<CloudPr[] | null> {
   return prs;
 }
 
-// The marker that makes the worker's status comment "sticky" — github-watch finds
-// the one comment carrying it and rewrites of it stay one comment. The skill tells
-// the worker to keep a single comment with this marker current on its PR.
+// The marker on a worker's status comment. Cloud workers can't edit comments — the
+// cloud environment has no comment-edit tool, only "post a new comment" — so the
+// status channel is append-only: the worker POSTs a FRESH comment carrying this marker
+// on each update, and github-watch reads the newest marked comment as the current
+// status (older marked comments are superseded and ignored). The pile-up of stale
+// status comments is fine; the marker + newest-wins is the whole contract. The skill
+// tells the worker this.
 export const STATUS_MARKER = "<!-- pm:status -->";
 
 // The recognised status words — the AgentState enum is the single source of truth.
@@ -151,12 +155,18 @@ export function parseStatusComment(body: string): Omit<AgentStatus, "updatedAt">
   };
 }
 
-/** Pick the worker's status out of a PR's comments: the most recent one carrying the
- *  marker (the sticky comment is rewritten in place, but if duplicates ever exist the
- *  newest wins). Returns null when no comment carries the marker. If we ever support
- *  several agents posting status on one PR, this is the seam to widen — group the
- *  marked comments by their stamped `sessionUrl` instead of collapsing to one. */
-function statusFromComments(comments: { body?: string; updatedAt?: string }[]): AgentStatus | null {
+/** Pick the worker's status out of a PR's comments: the newest one carrying the marker.
+ *  This is the whole read side of the append-only status contract — workers can't edit
+ *  comments, so they POST a fresh marked comment per update and the newest one is the
+ *  live status; older marked comments are superseded and ignored. Comments arrive
+ *  oldest→newest (GitHub returns `comments(last:N)` ascending), so last-parsed-wins
+ *  lands on the most recent. Returns null when no comment carries the marker. If we
+ *  ever support several agents posting status on one PR, this is the seam to widen —
+ *  group the marked comments by their stamped `sessionUrl` instead of collapsing to one.
+ *  Exported for tests. */
+export function statusFromComments(
+  comments: { body?: string; updatedAt?: string }[],
+): AgentStatus | null {
   let agent: AgentStatus | null = null;
   for (const c of comments) {
     const parsed = parseStatusComment(c.body ?? "");
@@ -206,8 +216,8 @@ async function resolveTaskId(headRefName: string, commitText: string): Promise<n
 
 /** Signature of the fields whose change we care about — drives "did this PR
  *  actually change?" so we don't re-emit on irrelevant churn (e.g. the PR's own
- *  updatedAt). The sticky status comment's own edit time (`agent.updatedAt`) is
- *  included so a status rewrite counts as a change — that's what makes the new
+ *  updatedAt). The newest status comment's own timestamp (`agent.updatedAt`) is
+ *  included so a fresh status comment counts as a change — that's what makes the new
  *  status persist (the upsert runs on changed PRs) and reach the UI — without
  *  reacting to unrelated PR churn. */
 function sig(pr: CloudPr): string {
