@@ -30,6 +30,22 @@ freely** without disturbing whatever tmux sessions you're running for yourself.
 | `pm-session-0`     | The **supervisor's own `claude`** (reserved id 0 — never a real task). |
 | `pm-session-<id>`  | A per-task worker agent, one per local session (`<id>` = the session id). |
 
+## The `pm attach` shortcut
+
+Knowing the socket flag and session names is the price of raw `tmux`. The helper
+hides both — run it from the repo and it drops you onto the socket:
+
+```sh
+pm attach              # attach to the supervisor server console (pm-server)
+pm attach pm-session-7 # …or any named session
+bun run attach         # same, without the bin/pm wrapper on your PATH
+```
+
+`pm` is `bin/pm` in the repo; symlink it onto your PATH once
+(`ln -s "$PWD/bin/pm" ~/.local/bin/pm`) and `pm attach` works from anywhere. It's
+a thin wrapper over the `tmux -L powdermonkey attach` commands below — reach for
+those directly whenever you want a specific target or flag.
+
 ## Key commands
 
 ```sh

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "bun run --watch src/server/index.ts",
     "serve": "bun run src/server/supervise.ts",
+    "attach": "bun run src/server/attach.ts",
     "build:web": "bun build src/web/main.tsx --outdir public/assets --target browser",
     "db:generate": "drizzle-kit generate",
     "check": "biome check src",
