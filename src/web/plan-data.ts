@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { CloudPr } from "../server/events.ts";
 import type { Goal, Milestone, Phase, Session, Task } from "../server/schema.ts";
+import { TaskStatus } from "../shared/types.ts";
 import { type SessionLink, activeTaskIds } from "./active.ts";
 import { useStore } from "./store.ts";
 
@@ -42,37 +43,17 @@ export function buildIndexes(
   links: SessionLink[],
   cloudPrs: CloudPr[] = [],
 ): Indexes {
-  const goalById = new Map<number, Goal>();
-  for (const g of goals) goalById.set(g.id, g);
-
-  const milestonesByGoal = new Map<number, Milestone[]>();
-  const milestoneById = new Map<number, Milestone>();
-  for (const m of [...milestones].sort(byPosition)) {
-    milestoneById.set(m.id, m);
-    const list = milestonesByGoal.get(m.goalId) ?? [];
-    list.push(m);
-    milestonesByGoal.set(m.goalId, list);
-  }
-
-  const tasksByMilestone = new Map<number, Task[]>();
-  for (const t of [...tasks].sort(byPosition)) {
-    const list = tasksByMilestone.get(t.milestoneId) ?? [];
-    list.push(t);
-    tasksByMilestone.set(t.milestoneId, list);
-  }
-
-  const phasesByTask = new Map<number, Phase[]>();
-  for (const p of [...phases].sort(byPosition)) {
-    const list = phasesByTask.get(p.taskId) ?? [];
-    list.push(p);
-    phasesByTask.set(p.taskId, list);
-  }
+  const sortedMilestones = [...milestones].sort(byPosition);
+  const goalById = new Map(goals.map((g) => [g.id, g]));
+  const milestoneById = new Map(sortedMilestones.map((m) => [m.id, m]));
+  const milestonesByGoal = Map.groupBy(sortedMilestones, (m) => m.goalId);
+  const tasksByMilestone = Map.groupBy([...tasks].sort(byPosition), (t) => t.milestoneId);
+  const phasesByTask = Map.groupBy([...phases].sort(byPosition), (p) => p.taskId);
 
   // Each task surfaces the live session linked to it through session_tasks. Links
   // to sessions not in this slice (archived, or the other slice) simply don't
   // resolve, so the same link list works for both the live and archive views.
-  const sessionById = new Map<number, Session>();
-  for (const s of sessions) sessionById.set(s.id, s);
+  const sessionById = new Map(sessions.map((s) => [s.id, s]));
   const sessionByTask = new Map<number, Session>();
   for (const l of links) {
     const s = sessionById.get(l.sessionId);
@@ -146,7 +127,7 @@ export function useArchiveData(): { idx: Indexes; tasks: Task[] } {
     [archive],
   );
   const tasks = useMemo(
-    () => archive.tasks.filter((t) => t.archivedAt != null || t.status === "merged"),
+    () => archive.tasks.filter((t) => t.archivedAt != null || t.status === TaskStatus.Merged),
     [archive.tasks],
   );
   return { idx, tasks };

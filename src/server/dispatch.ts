@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { pullMain } from "./git.ts";
 import { type Phase, type Session, type Task, phases, sessions, tasks } from "./schema.ts";
@@ -208,12 +209,17 @@ export async function dispatchTask(taskIds: number | number[]): Promise<Dispatch
   // each task surfaces the shared cloud run. Each task is also marked dispatched.
   const [session] = await db
     .insert(sessions)
-    .values({ kind: "remote", state: "running", url: sessionUrl })
+    .values({ kind: SessionKind.Remote, state: SessionState.Running, url: sessionUrl })
     .returning();
   await linkSessionTasks(session.id, ids);
   await db
     .update(tasks)
-    .set({ sessionUrl, status: "dispatched", sessionState: "running", updatedAt: new Date() })
+    .set({
+      sessionUrl,
+      status: TaskStatus.Dispatched,
+      sessionState: SessionState.Running,
+      updatedAt: new Date(),
+    })
     .where(inArray(tasks.id, ids));
 
   return { ok: true, sessionUrl, session };

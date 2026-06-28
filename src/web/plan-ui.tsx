@@ -11,7 +11,7 @@ import {
 } from "@mantine/core";
 import type { CloudPr } from "../server/events.ts";
 import type { Phase, Session, Task } from "../server/schema.ts";
-import type { SessionState, TaskStatus } from "../shared/types.ts";
+import { PhaseStatus, SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 import { rollup } from "./progress.ts";
 import { useStore } from "./store.ts";
 
@@ -20,17 +20,25 @@ import { useStore } from "./store.ts";
 // Keeping these in one place means a task looks the same whichever pane shows it.
 
 export const STATUS_COLOR: Record<TaskStatus, string> = {
-  pending: "gray",
-  dispatched: "blue",
-  merged: "green",
+  [TaskStatus.Pending]: "gray",
+  [TaskStatus.Dispatched]: "blue",
+  [TaskStatus.Merged]: "green",
 };
 
 // "Try Again" is the user-facing label for a session parked waiting to resume.
 export const SESSION_BADGE: Record<SessionState, { label: string; color: string }> = {
-  running: { label: "running", color: "blue" },
-  waiting: { label: "Try Again", color: "yellow" },
-  idle: { label: "idle", color: "gray" },
-  stopped: { label: "stopped", color: "red" },
+  [SessionState.Running]: { label: "running", color: "blue" },
+  [SessionState.Waiting]: { label: "Try Again", color: "yellow" },
+  [SessionState.Idle]: { label: "idle", color: "gray" },
+  [SessionState.Stopped]: { label: "stopped", color: "red" },
+};
+
+// Glyph per session kind. Typed as Record<SessionKind, …> so adding a kind is a
+// compile error here until it has an icon — the same total-coverage guarantee the
+// status/badge maps rely on.
+export const KIND_ICON: Record<SessionKind, string> = {
+  [SessionKind.Local]: "💻",
+  [SessionKind.Remote]: "☁️",
 };
 
 /** A small monospace id chip (g1 / m6 / t110 / p41) so the operator can reference
@@ -97,15 +105,19 @@ export function PhaseList({ phases }: { phases: Phase[] }) {
         <List.Item
           key={p.id}
           icon={
-            <ThemeIcon color={p.status === "done" ? "green" : "gray"} size={16} radius="xl">
-              <Text size="9px">{p.status === "done" ? "✓" : "·"}</Text>
+            <ThemeIcon
+              color={p.status === PhaseStatus.Done ? "green" : "gray"}
+              size={16}
+              radius="xl"
+            >
+              <Text size="9px">{p.status === PhaseStatus.Done ? "✓" : "·"}</Text>
             </ThemeIcon>
           }
         >
           <Text
             size="sm"
-            c={p.status === "done" ? "dimmed" : undefined}
-            td={p.status === "done" ? "line-through" : undefined}
+            c={p.status === PhaseStatus.Done ? "dimmed" : undefined}
+            td={p.status === PhaseStatus.Done ? "line-through" : undefined}
           >
             {p.name}{" "}
             <Text span c="dimmed" size="xs">
@@ -159,12 +171,13 @@ export function TaskBadges({
  *  batch follows). */
 export function SessionActions({ session, taskId }: { session: Session; taskId: number }) {
   const { land, stop, teleport, openSessionTerminal, openEditor, pending } = useStore();
-  const isRemote = session.kind === "remote";
+  const isRemote = session.kind === SessionKind.Remote;
   const teleporting = pending[`teleport:${taskId}`] ?? false;
   return (
     <Group gap="xs" wrap="nowrap">
       <Badge variant="dot" color="teal" title={session.kind}>
-        <span aria-label={session.kind}>{isRemote ? "☁️" : "💻"}</span> {session.branch ?? "remote"}
+        <span aria-label={session.kind}>{KIND_ICON[session.kind]}</span>{" "}
+        {session.branch ?? "remote"}
       </Badge>
       {isRemote ? (
         <>

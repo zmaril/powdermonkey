@@ -1,3 +1,4 @@
+import { partition } from "es-toolkit";
 import type { Session, Task } from "../server/schema.ts";
 
 // A session↔task link as the client consumes it (the /session-tasks endpoint
@@ -35,8 +36,6 @@ export function partitionTasks(
   tasks: Task[],
   active: Set<number>,
 ): { active: Task[]; backlog: Task[] } {
-  const inActive: Task[] = [];
-  const inBacklog: Task[] = [];
-  for (const t of tasks) (active.has(t.id) ? inActive : inBacklog).push(t);
-  return { active: inActive, backlog: inBacklog };
+  const [inActive, backlog] = partition(tasks, (t) => active.has(t.id));
+  return { active: inActive, backlog };
 }

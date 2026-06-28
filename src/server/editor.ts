@@ -1,4 +1,6 @@
 import { eq, inArray } from "drizzle-orm";
+import { match } from "ts-pattern";
+import { SessionKind } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { sessions, tasks } from "./schema.ts";
 import { taskIdsForSession } from "./session-tasks.ts";
@@ -31,21 +33,29 @@ export async function openSessionEditor(sessionId: number): Promise<OpenEditorRe
   const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId));
   if (!session) return { ok: false, error: `unknown session "${sessionId}"` };
 
-  if (session.kind === "local") {
-    if (!session.worktreePath) return { ok: false, error: "session has no worktree" };
-    spawnDetached([CODE_BIN, session.worktreePath]);
-    return { ok: true, target: session.worktreePath };
-  }
-
-  // remote: open the PR in github.dev (web VS Code). A session can cover several
-  // tasks; open the first linked task that has a PR.
-  const taskIds = await taskIdsForSession(sessionId);
-  const linked = taskIds.length
-    ? await db.select().from(tasks).where(inArray(tasks.id, taskIds))
-    : [];
-  const task = taskIds.map((id) => linked.find((t) => t.id === id)).find((t) => t?.prUrl);
-  if (!task?.prUrl) return { ok: false, error: "no PR for this task yet" };
-  const target = task.prUrl.replace("://github.com/", "://github.dev/");
-  spawnDetached([urlOpener(), target]);
-  return { ok: true, target };
+  // Exhaustive over SessionKind: adding a kind makes this a compile error until
+  // it's handled here, so a new session type can never silently fall through.
+  return (
+    match(session.kind)
+      // local: open the worktree in desktop VS Code.
+      .with(SessionKind.Local, (): OpenEditorResult => {
+        if (!session.worktreePath) return { ok: false, error: "session has no worktree" };
+        spawnDetached([CODE_BIN, session.worktreePath]);
+        return { ok: true, target: session.worktreePath };
+      })
+      // remote: open the PR in github.dev (web VS Code). A session can cover several
+      // tasks; open the first linked task that has a PR.
+      .with(SessionKind.Remote, async (): Promise<OpenEditorResult> => {
+        const taskIds = await taskIdsForSession(sessionId);
+        const linked = taskIds.length
+          ? await db.select().from(tasks).where(inArray(tasks.id, taskIds))
+          : [];
+        const task = taskIds.map((id) => linked.find((t) => t.id === id)).find((t) => t?.prUrl);
+        if (!task?.prUrl) return { ok: false, error: "no PR for this task yet" };
+        const target = task.prUrl.replace("://github.com/", "://github.dev/");
+        spawnDetached([urlOpener(), target]);
+        return { ok: true, target };
+      })
+      .exhaustive()
+  );
 }

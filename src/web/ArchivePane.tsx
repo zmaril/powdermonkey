@@ -1,6 +1,7 @@
 import { Badge, Box, Group, SegmentedControl, Stack, Text, Title } from "@mantine/core";
 import { useEffect, useState } from "react";
 import type { Goal, Milestone, Task } from "../server/schema.ts";
+import { TaskStatus } from "../shared/types.ts";
 import { type Indexes, useArchiveData } from "./plan-data.ts";
 import { IdTag, STATUS_COLOR, TaskLinks } from "./plan-ui.tsx";
 import { useStore } from "./store.ts";
@@ -24,8 +25,8 @@ function ArchiveRow({ task, context }: { task: Task; context?: string }) {
       py={6}
       style={{ borderBottom: "1px solid #2c2e33", minHeight: 38 }}
     >
-      <Text size="sm" title={task.status === "merged" ? "merged" : "archived"}>
-        {task.status === "merged" ? "✅" : "🗄️"}
+      <Text size="sm" title={task.status === TaskStatus.Merged ? "merged" : "archived"}>
+        {task.status === TaskStatus.Merged ? "✅" : "🗄️"}
       </Text>
       <Box style={{ flex: 1, minWidth: 0 }}>
         <Group gap={6} wrap="nowrap">
