@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { TSchema } from "@sinclair/typebox";
 import { Elysia, t } from "elysia";
 import { P, match } from "ts-pattern";
+import { SessionState } from "../shared/types.ts";
 import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
@@ -263,7 +264,12 @@ export const app = new Elysia()
         // never ends, so it always falls through to the recovery shell below.
         if (!isSupervisor) {
           const row = await sessionRepo.get(sessionId);
-          if (!row || row.archivedAt || row.state === "idle" || row.state === "stopped") {
+          if (
+            !row ||
+            row.archivedAt ||
+            row.state === SessionState.Idle ||
+            row.state === SessionState.Stopped
+          ) {
             sendEnded();
             return;
           }

@@ -37,10 +37,10 @@ export const STATUS_COLOR: Record<TaskStatus, string> = {
 
 // "Try Again" is the user-facing label for a session parked waiting to resume.
 export const SESSION_BADGE: Record<SessionState, { label: string; color: string }> = {
-  [SessionState.Running]: { label: "running", color: "blue" },
+  [SessionState.Running]: { label: "running", color: "blue" }, // lint-allow-string: UI label
   [SessionState.Waiting]: { label: "Try Again", color: "yellow" },
-  [SessionState.Idle]: { label: "idle", color: "gray" },
-  [SessionState.Stopped]: { label: "stopped", color: "red" },
+  [SessionState.Idle]: { label: "idle", color: "gray" }, // lint-allow-string: UI label
+  [SessionState.Stopped]: { label: "stopped", color: "red" }, // lint-allow-string: UI label
 };
 
 // Glyph per session kind. Typed as Record<SessionKind, …> so adding a kind is a
@@ -304,7 +304,7 @@ export function LaunchActions({ taskId }: { taskId: number }) {
  *  conflicts / CI failure → red, CI running → yellow, passing or no-conflicts →
  *  green, merged → violet, nothing-known-yet → gray. */
 function prDot(pr: CloudPr): { color: string; title: string } {
-  if (pr.merged) return { color: "violet", title: "merged" };
+  if (pr.merged) return { color: "violet", title: "merged" }; // lint-allow-string: hover title
   if (pr.mergeable === MergeableState.Conflicting)
     return { color: "red", title: "merge conflicts" };
   if (pr.checks === CheckRollupState.Failure || pr.checks === CheckRollupState.Error)
