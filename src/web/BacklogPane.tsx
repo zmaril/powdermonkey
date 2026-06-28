@@ -1,3 +1,4 @@
+import { useAutoAnimate } from "@formkit/auto-animate/react";
 import {
   Box,
   Button,
@@ -15,7 +16,6 @@ import type { DockviewPanelApi } from "dockview-react";
 import { useState } from "react";
 import type { Goal, Milestone, Phase, Task } from "../server/schema.ts";
 import { SessionKind, TaskStatus } from "../shared/types.ts";
-import { AnimatedList } from "./AnimatedList.tsx";
 import { partitionTasks } from "./active.ts";
 import { usePaneScroll } from "./pane-scroll.ts";
 import { type Indexes, starFirst, usePlanData } from "./plan-data.ts";
@@ -32,6 +32,11 @@ import { useStore } from "./store.ts";
 
 // Electric-blue glow on a selected card / the batch bar, so the live selection pops.
 const SELECTED_SHADOW = "0 0 0 2px var(--mantine-color-blue-5), 0 0 16px 2px rgba(59,130,246,0.55)";
+
+// List add/remove/reorder animation — auto-animate handles enter/leave/FLIP (and skips
+// the initial mount), so launching a card eases it out and starring re-sorts smoothly
+// without the hand-rolled jank. One gentle duration for the whole pane.
+const ANIM_OPTS = { duration: 300 } as const;
 
 // Multi-select wiring threaded down to each card: whether a task is checked, a
 // toggle, and whether ANY selection is live (so cards can hide their own actions).
@@ -148,7 +153,6 @@ function BacklogCard({
 }) {
   const checked = selection.selected.has(task.id);
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: shift-click is additive over the explicit buttons.
     <Card
       withBorder
       radius="md"
@@ -193,6 +197,7 @@ function MilestoneGroup({
   selection: Selection;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [listRef] = useAutoAnimate(ANIM_OPTS);
   return (
     <Stack gap="xs" ml={20}>
       <Group gap={6} wrap="nowrap" align="center">
@@ -205,7 +210,7 @@ function MilestoneGroup({
         <Title order={5}>{milestone.title}</Title>
       </Group>
       {!collapsed && (
-        <AnimatedList gap={10}>
+        <div ref={listRef} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {tasks.map((t) => (
             <BacklogCard
               key={t.id}
@@ -214,7 +219,7 @@ function MilestoneGroup({
               selection={selection}
             />
           ))}
-        </AnimatedList>
+        </div>
       )}
     </Stack>
   );
@@ -286,7 +291,6 @@ function BacklogRow({
   const phases = idx.phasesByTask.get(task.id) ?? [];
   const checked = selection.selected.has(task.id);
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: shift-click is additive over the explicit buttons.
     <Box
       px="sm"
       py={8}
@@ -334,15 +338,16 @@ function FlatView({
   idx,
   selection,
 }: { tasks: Task[]; idx: Indexes; selection: Selection }) {
+  const [listRef] = useAutoAnimate(ANIM_OPTS);
   return (
-    <AnimatedList gap={0}>
+    <div ref={listRef}>
       {starFirst(tasks).map((t) => {
         const m = idx.milestoneById.get(t.milestoneId);
         const g = m ? idx.goalById.get(m.goalId) : undefined;
         const context = [g?.title, m?.title].filter(Boolean).join(" › ");
         return <BacklogRow key={t.id} task={t} idx={idx} context={context} selection={selection} />;
       })}
-    </AnimatedList>
+    </div>
   );
 }
 
