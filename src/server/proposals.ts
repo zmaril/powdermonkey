@@ -173,6 +173,33 @@ export async function listPending(): Promise<Proposal[]> {
     .where(and(eq(proposals.status, ProposalStatus.Pending), isNull(proposals.archivedAt)));
 }
 
+/** Drop a SUBSET of a proposal's changes (by index) WITHOUT applying them — the
+ *  revert path for immediate per-change review: a rejected change is simply removed
+ *  from the change-set, so it stops appearing in the diff and never touches the plan.
+ *  When the last change is dropped the proposal flips to `rejected` (nothing of it
+ *  ever landed). Returns the updated proposal, or undefined if it doesn't exist. */
+export async function dropProposalChanges(
+  id: number,
+  indices: number[],
+): Promise<Proposal | undefined> {
+  const proposal = await getProposal(id);
+  if (!proposal) return undefined;
+  const drop = new Set(indices.filter((i) => i >= 0 && i < proposal.changes.length));
+  if (drop.size === 0) return proposal;
+  const remaining = proposal.changes.filter((_, i) => !drop.has(i));
+  // Empty via drop with nothing ever applied → rejected; otherwise keep the status.
+  const status =
+    remaining.length === 0 && proposal.appliedAt == null
+      ? ProposalStatus.Rejected
+      : proposal.status;
+  const [row] = await db
+    .update(proposals)
+    .set({ changes: remaining, status, updatedAt: new Date() })
+    .where(eq(proposals.id, id))
+    .returning();
+  return row;
+}
+
 /** Record a decision. A proposal can only be approved/rejected while pending — a
  *  terminal state (applied/rejected) or a missing row returns undefined. */
 export async function decideProposal(

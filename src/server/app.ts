@@ -5,7 +5,7 @@ import { getTableColumns, getTableName } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 import { P, match } from "ts-pattern";
 import { OverrideSource, ProposalStatus, SessionState } from "../shared/types.ts";
-import { applyProposal } from "./apply.ts";
+import { applyProposal, applyProposalChanges } from "./apply.ts";
 import { cancelTask, completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
 import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
 import { pg } from "./db.ts";
@@ -21,6 +21,7 @@ import {
   type CreateProposalInput,
   createProposal,
   decideProposal,
+  dropProposalChanges,
   getProposal,
   listPending,
   listProposals,
@@ -300,7 +301,27 @@ const proposalsGroup = new Elysia({ prefix: "/proposals" })
     const result = await applyProposal(Number(params.id));
     if (!result.ok) set.status = "conflicts" in result && result.conflicts ? 409 : 400;
     return result;
-  });
+  })
+  // Immediate per-change review: apply a subset of the change-set (consuming those
+  // changes) or drop a subset (rejecting them) — the gutter accept (+) / revert (↺).
+  .post(
+    "/:id/apply-changes",
+    async ({ params, body, set }) => {
+      const result = await applyProposalChanges(Number(params.id), body.indices);
+      if (!result.ok) set.status = 400;
+      return result;
+    },
+    { body: t.Object({ indices: t.Array(t.Number()) }) },
+  )
+  .post(
+    "/:id/drop-changes",
+    async ({ params, body, set }) => {
+      const row = await dropProposalChanges(Number(params.id), body.indices);
+      if (!row) set.status = 404;
+      return row ?? { error: "not found" };
+    },
+    { body: t.Object({ indices: t.Array(t.Number()) }) },
+  );
 
 export const app = new Elysia()
   .get("/health", () => ({ ok: true }))
