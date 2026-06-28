@@ -107,9 +107,13 @@ export async function fetchCloudPrs(): Promise<CloudPr[] | null> {
   return prs;
 }
 
-// The marker that makes the worker's status comment "sticky" — github-watch finds
-// the one comment carrying it and rewrites of it stay one comment. The skill tells
-// the worker to keep a single comment with this marker current on its PR.
+// The marker on a worker's status comment. Cloud workers can't edit comments — the
+// cloud environment has no comment-edit tool, only "post a new comment" — so the
+// status channel is append-only: the worker POSTs a FRESH comment carrying this marker
+// on each update, and github-watch reads the newest marked comment as the current
+// status (older marked comments are superseded and ignored). The pile-up of stale
+// status comments is fine; the marker + newest-wins is the whole contract. The skill
+// tells the worker this.
 export const STATUS_MARKER = "<!-- pm:status -->";
 
 // The recognised status words — the AgentState enum is the single source of truth.

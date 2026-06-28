@@ -109,8 +109,8 @@ export const MergeableState = {
 export type MergeableState = ValueOf<typeof MergeableState>;
 
 /**
- * A cloud worker's self-reported lifecycle state, parsed from the sticky
- * `<!-- pm:status -->` comment it keeps on its PR. UNLIKE the enums above this is
+ * A cloud worker's self-reported lifecycle state, parsed from the newest
+ * `<!-- pm:status -->`-marked comment it posts on its PR. UNLIKE the enums above this is
  * NOT GitHub's own vocabulary — it's authored as free text by the remote worker —
  * so the parser (github-watch.parseStatusComment) is the validation seam: a status
  * word outside this set resolves to null rather than a typed state. Keep these in
