@@ -235,8 +235,12 @@ export async function postPrComment(number: number, c: PostCommentBody): Promise
 
 export type ReviewDraftComment = {
   path: string;
+  /** The (end) line the comment anchors to. */
   line: number;
   side: "LEFT" | "RIGHT";
+  /** First line of a multi-line comment (omit for a single-line comment). */
+  startLine?: number;
+  startSide?: "LEFT" | "RIGHT";
   body: string;
 };
 
@@ -273,7 +277,17 @@ export async function submitReview(number: number, r: SubmitReviewBody): Promise
     commit_id: r.commitId || undefined,
     body: r.body || undefined,
     event: r.event,
-    comments: r.comments.map((c) => ({ path: c.path, line: c.line, side: c.side, body: c.body })),
+    comments: r.comments.map((c) => ({
+      path: c.path,
+      line: c.line,
+      side: c.side,
+      // A multi-line comment carries start_line/start_side (GitHub anchors the
+      // comment at `line`, the end). Omit for a single line.
+      ...(c.startLine != null && c.startLine !== c.line
+        ? { start_line: c.startLine, start_side: c.startSide ?? c.side }
+        : {}),
+      body: c.body,
+    })),
   });
   const path = `repos/${repo.owner}/${repo.name}/pulls/${number}/reviews`;
   const res = await gh(["api", "--method", "POST", path, "--input", "-"], payload);

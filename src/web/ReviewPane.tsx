@@ -56,8 +56,11 @@ function mapGitStatus(status: string): GitStatus {
 type DraftComment = {
   id: number;
   path: string;
+  /** The (end) line the comment anchors to. */
   line: number;
   side: "LEFT" | "RIGHT";
+  /** First line of a multi-line comment (omit for single-line). */
+  startLine?: number;
   body: string;
 };
 
@@ -211,15 +214,22 @@ function Composer({
   onCancel,
   posting,
   submitLabel = "Add to review",
+  hint,
 }: {
   onSubmit: (body: string) => void | Promise<void>;
   onCancel: () => void;
   posting: boolean;
   submitLabel?: string;
+  hint?: string;
 }) {
   const [draft, setDraft] = useState("");
   return (
     <Box px="md" py={6} style={{ background: "#1c1d20" }}>
+      {hint && (
+        <Text size="xs" c="dimmed" mb={4}>
+          {hint}
+        </Text>
+      )}
       <Textarea
         autosize
         minRows={2}
@@ -295,6 +305,7 @@ function FilePatch({ file }: { file: ReviewFile }) {
     draftByKey,
     removeDraft,
     composeKey,
+    composeStartLine,
     onAdd,
     onCancelCompose,
     onSubmitCompose,
@@ -349,14 +360,22 @@ function FilePatch({ file }: { file: ReviewFile }) {
           <PendingCard key={d.id} draft={d} onRemove={() => removeDraft(d.id)} />
         ))}
         {composeKey === k && (
-          <Composer onSubmit={onSubmitCompose} onCancel={onCancelCompose} posting={posting} />
+          <Composer
+            onSubmit={onSubmitCompose}
+            onCancel={onCancelCompose}
+            posting={posting}
+            hint={
+              composeStartLine != null && composeStartLine !== line
+                ? `Commenting on lines ${Math.min(composeStartLine, line)}–${Math.max(composeStartLine, line)}`
+                : undefined
+            }
+          />
         )}
       </Box>
     );
   };
 
-  // Open the composer for a line. Both affordances route here: the gutter "+" (hover)
-  // and clicking the line number — whichever the operator reaches for.
+  // Open the composer for a line. The gutter "+" and line-number click route here.
   const addAt = (side: ASide | undefined, line: number) =>
     onAdd(file.filename, { side: fromASide(side ?? "additions"), line });
 
@@ -370,12 +389,28 @@ function FilePatch({ file }: { file: ReviewFile }) {
         themeType: "dark",
         disableFileHeader: true,
         enableGutterUtility: true,
+        enableLineSelection: true,
         // The hover "+" in the gutter — passes the clicked line/side directly.
         onGutterUtilityClick: (range: { start: number; side?: ASide }) =>
           addAt(range.side, range.start),
         // Clicking a line number also starts a comment (reliable, GitHub-like).
         onLineNumberClick: (props: { lineNumber: number; annotationSide?: ASide }) =>
           addAt(props.annotationSide, props.lineNumber),
+        // Drag-selecting lines → comment on the whole range (GitHub anchors at the
+        // end line; we pass the start as start_line). A single-line selection is
+        // just a normal line comment.
+        onLineSelectionEnd: (
+          range: { start: number; end: number; side?: ASide; endSide?: ASide } | null,
+        ) => {
+          if (!range) return;
+          const endLine = Math.max(range.start, range.end);
+          const startLine = Math.min(range.start, range.end);
+          onAdd(
+            file.filename,
+            { side: fromASide(range.endSide ?? range.side ?? "additions"), line: endLine },
+            startLine !== endLine ? startLine : undefined,
+          );
+        },
       }}
       lineAnnotations={annotations}
       renderAnnotation={renderAnnotation}
@@ -493,7 +528,10 @@ type ReviewCtxValue = {
   draftByKey: Map<string, DraftComment[]>;
   removeDraft: (id: number) => void;
   composeKey: string | null;
-  onAdd: (path: string, a: LineAnchor) => void;
+  /** First line of the in-progress comment when it spans a range (else null). */
+  composeStartLine: number | null;
+  /** Open the composer for a line, or a [startLine, a.line] range when startLine set. */
+  onAdd: (path: string, a: LineAnchor, startLine?: number) => void;
   onCancelCompose: () => void;
   onSubmitCompose: (body: string) => void;
   onReply: (inReplyTo: number, body: string) => Promise<void>;
@@ -710,9 +748,12 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
   const [posting, setPosting] = useState(false);
   // The line currently being commented on: `${path}::${side}::${line}`, plus the
   // resolved anchor so we know what to draft.
-  const [compose, setCompose] = useState<{ key: string; path: string; anchor: LineAnchor } | null>(
-    null,
-  );
+  const [compose, setCompose] = useState<{
+    key: string;
+    path: string;
+    anchor: LineAnchor;
+    startLine?: number;
+  } | null>(null);
   // The pending review: drafted inline comments + an overall summary, held locally
   // and sent as ONE GitHub review on submit (one event, not one-per-comment).
   const [draft, setDraft] = useState<DraftComment[]>([]);
@@ -777,11 +818,11 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
     return m;
   }, [draft]);
 
-  const addDraft = (body: string, anchor: LineAnchor, path: string) => {
+  const addDraft = (body: string, anchor: LineAnchor, path: string, startLine?: number) => {
     if (!body.trim()) return;
     setDraft((d) => [
       ...d,
-      { id: nextId.current++, path, line: anchor.line, side: anchor.side, body },
+      { id: nextId.current++, path, line: anchor.line, side: anchor.side, startLine, body },
     ]);
     setCompose(null);
   };
@@ -821,7 +862,13 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
         event,
         body: summary,
         commitId: review.headSha,
-        comments: draft.map(({ path, line, side, body }) => ({ path, line, side, body })),
+        comments: draft.map(({ path, line, side, startLine, body }) => ({
+          path,
+          line,
+          side,
+          ...(startLine != null ? { startLine, startSide: side } : {}),
+          body,
+        })),
       });
       if (error) {
         setError(String((error.value as { error?: string })?.error ?? error.status));
@@ -844,10 +891,12 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
         draftByKey,
         removeDraft,
         composeKey: compose?.key ?? null,
-        onAdd: (path, anchor) => setCompose({ key: keyOf(path, anchor), path, anchor }),
+        composeStartLine: compose?.startLine ?? null,
+        onAdd: (path, anchor, startLine) =>
+          setCompose({ key: keyOf(path, anchor), path, anchor, startLine }),
         onCancelCompose: () => setCompose(null),
         onSubmitCompose: (body) => {
-          if (compose) addDraft(body, compose.anchor, compose.path);
+          if (compose) addDraft(body, compose.anchor, compose.path, compose.startLine);
         },
         onReply: (inReplyTo, body) => {
           // A reply re-uses the parent's anchor only for the (unused) line/side; the

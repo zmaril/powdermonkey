@@ -277,6 +277,8 @@ export const app = new Elysia()
             path: t.String(),
             line: t.Number(),
             side: t.Union([t.Literal("LEFT"), t.Literal("RIGHT")]),
+            startLine: t.Optional(t.Number()),
+            startSide: t.Optional(t.Union([t.Literal("LEFT"), t.Literal("RIGHT")])),
             body: t.String(),
           }),
         ),
