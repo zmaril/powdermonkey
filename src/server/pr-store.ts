@@ -27,8 +27,9 @@ function rowToCloudPr(r: PullRequestRow): CloudPr {
   };
 }
 
-/** Every persisted PR, newest-written first — backs GET /cloud-prs so the UI shows
- *  last-known PR state immediately on boot, before the first poll lands. */
+/** Every persisted PR (unordered) — backs GET /cloud-prs so the UI shows last-known
+ *  PR state immediately on boot, before the first poll lands. The UI keys by task
+ *  and picks the right PR per task itself, so order here doesn't matter. */
 export async function listPrs(): Promise<CloudPr[]> {
   const rows = await db.select().from(pullRequests);
   return rows.map(rowToCloudPr);

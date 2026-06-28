@@ -196,20 +196,28 @@ export function diffCloudPrs(prev: Map<number, CloudPr>, next: CloudPr[]): Cloud
 // computed"), so we track which PRs we've already pinged and decide from the
 // transition, not the raw state.
 
-/** Pure: given a PR's current `mergeable` and whether we've already asked it to
- *  rebase this episode, decide what to do.
- *   • CONFLICTING + not yet asked → "ask" (and remember it)
- *   • CONFLICTING + already asked  → "skip" (don't re-spam the same conflict)
- *   • MERGEABLE                    → "clear" (episode over; a *future* conflict re-asks)
- *   • UNKNOWN / null               → "skip" (transient; leave memory as-is)
+/** Pure: decide what to do about a PR's merge state, given whether we've already
+ *  asked it to rebase this episode and whether this is a startup-catch-up (`initial`)
+ *  event. Folding `initial` in here keeps the whole decision testable.
+ *   • MERGEABLE                         → "clear" (episode over; a *future* conflict
+ *       re-asks). Runs even on `initial`, so a conflict resolved while we were down
+ *       reconciles the ledger on boot — otherwise a stale "asked" flag would suppress
+ *       the *next* real conflict.
+ *   • CONFLICTING + already asked        → "skip" (don't re-spam the same conflict)
+ *   • CONFLICTING + initial              → "skip" (don't re-ask pre-boot conflicts on
+ *       a restart, nor flood on the first-ever catch-up)
+ *   • CONFLICTING + fresh, live          → "ask"
+ *   • UNKNOWN / null                     → "skip" (transient; leave the ledger as-is)
  *  Exported for tests. */
-export function rebaseDecision(
+export function rebaseAction(
   mergeable: string | null,
   alreadyAsked: boolean,
+  initial: boolean,
 ): "ask" | "clear" | "skip" {
-  if (mergeable === "CONFLICTING") return alreadyAsked ? "skip" : "ask";
   if (mergeable === "MERGEABLE") return "clear";
-  return "skip";
+  if (mergeable !== "CONFLICTING") return "skip";
+  if (alreadyAsked || initial) return "skip";
+  return "ask";
 }
 
 const REBASE_MESSAGE =
@@ -219,11 +227,11 @@ const REBASE_MESSAGE =
 // Idempotency now lives in the pull_requests table (rebaseAskedAt), not memory, so
 // the "we already asked" fact survives a restart — closing a real re-spam window:
 // after a restart an in-memory set was empty, so any sig change while a PR stayed
-// CONFLICTING would ask again. We still skip `initial` events, so the startup
-// catch-up replay never fires a fresh ask on its own.
+// CONFLICTING would ask again. Because the ledger is durable, the `initial` skip is
+// scoped to the *ask* alone (in rebaseAction); a MERGEABLE seen during catch-up
+// still clears, so a conflict resolved during downtime can't leave a stale flag.
 async function maybeAskRebase(pr: CloudPr, meta: CloudEventMeta): Promise<void> {
-  if (meta.initial) return; // don't re-ask pre-boot conflicts on a restart
-  const action = rebaseDecision(pr.mergeable, await isRebaseAsked(pr.number));
+  const action = rebaseAction(pr.mergeable, await isRebaseAsked(pr.number), meta.initial);
   if (action === "clear") {
     await clearRebaseAsked(pr.number);
     return;

@@ -8,7 +8,7 @@ import { join } from "node:path";
 // Importing the module still transitively opens db.ts (subscribers use the task
 // repo), so isolate it to a throwaway data dir to avoid the writer lock.
 process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
-const { diffCloudPrs, parseTrailerIds, rebaseDecision } = await import(
+const { diffCloudPrs, parseTrailerIds, rebaseAction } = await import(
   "../src/server/github-watch.ts"
 );
 type CloudPr = import("../src/server/events.ts").CloudPr;
@@ -84,21 +84,33 @@ test("parseTrailerIds returns empties when there are no trailers", () => {
   expect(parseTrailerIds("just a normal commit message")).toEqual({ taskIds: [], phaseIds: [] });
 });
 
-test("rebaseDecision: first CONFLICTING sighting asks, a repeat skips (no re-spam)", () => {
-  expect(rebaseDecision("CONFLICTING", false)).toBe("ask");
-  expect(rebaseDecision("CONFLICTING", true)).toBe("skip");
+test("rebaseAction: a fresh live CONFLICTING asks, a repeat skips (no re-spam)", () => {
+  expect(rebaseAction("CONFLICTING", false, false)).toBe("ask");
+  expect(rebaseAction("CONFLICTING", true, false)).toBe("skip");
 });
 
-test("rebaseDecision: going MERGEABLE clears the episode so a later conflict re-asks", () => {
-  expect(rebaseDecision("MERGEABLE", true)).toBe("clear");
-  expect(rebaseDecision("MERGEABLE", false)).toBe("clear");
+test("rebaseAction: going MERGEABLE clears the episode so a later conflict re-asks", () => {
+  expect(rebaseAction("MERGEABLE", true, false)).toBe("clear");
+  expect(rebaseAction("MERGEABLE", false, false)).toBe("clear");
 });
 
-test("rebaseDecision: UNKNOWN/null is transient — never asks, never clears", () => {
-  expect(rebaseDecision("UNKNOWN", false)).toBe("skip");
-  expect(rebaseDecision("UNKNOWN", true)).toBe("skip");
-  expect(rebaseDecision(null, false)).toBe("skip");
-  expect(rebaseDecision(null, true)).toBe("skip");
+test("rebaseAction: an `initial` (catch-up) CONFLICTING never asks — no boot flood/re-spam", () => {
+  expect(rebaseAction("CONFLICTING", false, true)).toBe("skip");
+  expect(rebaseAction("CONFLICTING", true, true)).toBe("skip");
+});
+
+// The regression durable persistence could introduce: a conflict resolved while we
+// were down must still clear the ledger on the boot catch-up, or a stale "asked"
+// flag would suppress the *next* real conflict. Clearing must beat the initial skip.
+test("rebaseAction: MERGEABLE clears even on an `initial` event (no stale flag after restart)", () => {
+  expect(rebaseAction("MERGEABLE", true, true)).toBe("clear");
+});
+
+test("rebaseAction: UNKNOWN/null is transient — never asks, never clears", () => {
+  expect(rebaseAction("UNKNOWN", false, false)).toBe("skip");
+  expect(rebaseAction("UNKNOWN", true, true)).toBe("skip");
+  expect(rebaseAction(null, false, false)).toBe("skip");
+  expect(rebaseAction(null, true, true)).toBe("skip");
 });
 
 test("only the changed PR among many emits", () => {
