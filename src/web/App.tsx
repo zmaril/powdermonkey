@@ -294,7 +294,7 @@ function buildDefaultLayout(api: DockviewApi) {
     id: "shell-0",
     component: "shell",
     params: { cwd: "", session: null },
-    title: "supervisor",
+    title: "supervisor", // lint-allow-string: shell panel title, not the decision source
     position: { direction: "below", referencePanel: "scratch" },
   });
   // Show Active first (adding Backlog "within" would otherwise leave it focused).

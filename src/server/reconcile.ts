@@ -1,6 +1,12 @@
 import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import { match } from "ts-pattern";
-import { PhaseStatus, SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
+import {
+  DecisionSource,
+  PhaseStatus,
+  SessionKind,
+  SessionState,
+  TaskStatus,
+} from "../shared/types.ts";
 import { db } from "./db.ts";
 import { commitBodies } from "./git.ts";
 import { phases, sessionTasks, sessions, tasks } from "./schema.ts";
@@ -114,9 +120,15 @@ export async function reconcile(): Promise<ReconcileResult> {
 
   let phasesMarked = 0;
   if (phaseIds.size > 0) {
+    // Mark todo phases done, stamping `reconciled` as the provenance — these
+    // earned the truth off `main`. Only todo→done counts as "marked".
     const marked = await db
       .update(phases)
-      .set({ status: PhaseStatus.Done, updatedAt: new Date() })
+      .set({
+        status: PhaseStatus.Done,
+        decisionSource: DecisionSource.Reconciled,
+        updatedAt: new Date(),
+      })
       .where(
         and(
           inArray(phases.id, [...phaseIds]),
@@ -126,6 +138,21 @@ export async function reconcile(): Promise<ReconcileResult> {
       )
       .returning({ id: phases.id });
     phasesMarked = marked.length;
+
+    // Upgrade any phase an override (operator/supervisor) had asserted done that now
+    // has a real trailer on `main`: truth supersedes assertion. Not a new completion,
+    // so it doesn't count toward phasesMarked; it just relabels the provenance.
+    await db
+      .update(phases)
+      .set({ decisionSource: DecisionSource.Reconciled, updatedAt: new Date() })
+      .where(
+        and(
+          inArray(phases.id, [...phaseIds]),
+          isNull(phases.archivedAt),
+          eq(phases.status, PhaseStatus.Done),
+          ne(phases.decisionSource, DecisionSource.Reconciled),
+        ),
+      );
   }
 
   // Tasks worth re-checking: those explicitly trailered, plus owners of any phase
@@ -150,10 +177,28 @@ export async function reconcile(): Promise<ReconcileResult> {
     if (allDone || taskTrailers.has(taskId)) {
       const done = await db
         .update(tasks)
-        .set({ status: TaskStatus.Merged, updatedAt: new Date() })
+        .set({
+          status: TaskStatus.Merged,
+          decisionSource: DecisionSource.Reconciled,
+          updatedAt: new Date(),
+        })
         .where(and(eq(tasks.id, taskId), ne(tasks.status, TaskStatus.Merged)))
         .returning({ id: tasks.id });
       tasksCompleted += done.length;
+
+      // Same upgrade as for phases: a task an override closed that now has its work
+      // landed on `main` gets relabelled `reconciled` (truth wins). Already merged,
+      // so it's not a new completion — only the provenance changes.
+      await db
+        .update(tasks)
+        .set({ decisionSource: DecisionSource.Reconciled, updatedAt: new Date() })
+        .where(
+          and(
+            eq(tasks.id, taskId),
+            eq(tasks.status, TaskStatus.Merged),
+            ne(tasks.decisionSource, DecisionSource.Reconciled),
+          ),
+        );
     }
   }
 

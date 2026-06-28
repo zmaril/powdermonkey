@@ -1,4 +1,5 @@
 import type { Session, Task } from "../server/schema.ts";
+import { TaskStatus } from "../shared/types.ts";
 
 // The in-app, glanceable layer (distinct from OS notifications): when something
 // happens in a pane you're not currently looking at, its dockview TAB lights up so
@@ -46,9 +47,9 @@ export function paneActivity(prev: ActivitySnapshot, next: ActivitySnapshot): Se
     const id = Number(idStr);
     const before = prev.taskStatus[id];
     if (before === undefined || before === status) continue;
-    if (status === "merged") panes.add(PANE_ARCHIVE);
-    else if (status === "dispatched") panes.add(PANE_ACTIVE);
-    else if (status === "pending") panes.add(PANE_BACKLOG);
+    if (status === TaskStatus.Merged) panes.add(PANE_ARCHIVE);
+    else if (status === TaskStatus.Dispatched) panes.add(PANE_ACTIVE);
+    else if (status === TaskStatus.Pending) panes.add(PANE_BACKLOG);
   }
 
   return panes;
