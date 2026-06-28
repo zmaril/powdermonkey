@@ -7,8 +7,24 @@ import { useEffect, useRef } from "react";
 // xterm.js wired to the /pty WebSocket. Server sends binary PTY output; we send
 // JSON input/resize frames back. Pass `session` to attach to a local session's
 // long-lived agent PTY; otherwise `cwd` opens a fresh shell at that path.
-export function ShellTerminal({ cwd, session }: { cwd?: string; session?: number }) {
+//
+// `onEnded` fires when the server signals the attached session is gone for good
+// (landed/stopped/merged, or its agent exited) — a text "session-ended" control
+// frame, distinct from binary PTY output. The caller swaps in an end-state pane;
+// here we also print a clear line so a bare terminal never just goes silent.
+export function ShellTerminal({
+  cwd,
+  session,
+  onEnded,
+}: {
+  cwd?: string;
+  session?: number;
+  onEnded?: () => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
+  // Keep the latest onEnded without re-running the socket effect on every render.
+  const onEndedRef = useRef(onEnded);
+  onEndedRef.current = onEnded;
 
   useEffect(() => {
     const el = ref.current;
@@ -50,10 +66,27 @@ export function ShellTerminal({ cwd, session }: { cwd?: string; session?: number
       sendResize();
       term.focus();
     };
+    // The session ended for good — once we've seen this, the close that follows is
+    // expected, not a dropped connection, so suppress the "[session closed]" line.
+    let ended = false;
     ws.onmessage = (e) => {
-      if (e.data instanceof ArrayBuffer) term.write(new Uint8Array(e.data));
+      if (e.data instanceof ArrayBuffer) {
+        term.write(new Uint8Array(e.data));
+        return;
+      }
+      // Text frame = a control message (not PTY output).
+      try {
+        const msg = JSON.parse(String(e.data)) as { type?: string };
+        if (msg.type === "session-ended") {
+          ended = true;
+          term.write("\r\n\x1b[2m[this session has ended]\x1b[0m\r\n");
+          onEndedRef.current?.();
+        }
+      } catch {}
     };
-    ws.onclose = () => term.write("\r\n\x1b[2m[session closed]\x1b[0m\r\n");
+    ws.onclose = () => {
+      if (!ended) term.write("\r\n\x1b[2m[session closed]\x1b[0m\r\n");
+    };
 
     const onData = term.onData((d) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "input", data: d }));
