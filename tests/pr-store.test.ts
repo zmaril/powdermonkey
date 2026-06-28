@@ -26,6 +26,7 @@ function pr(over: Partial<CloudPr> & { number: number }): CloudPr {
     mergeable: "CONFLICTING",
     headRefName: "pm/task-10-slug",
     updatedAt: "2026-06-28T00:00:00Z",
+    agent: null,
     ...over,
   };
 }
@@ -61,4 +62,35 @@ test("a later upsert (poll churn) never clobbers the rebase-ask ledger", async (
 
 test("isRebaseAsked is false for an unknown PR", async () => {
   expect(await isRebaseAsked(99999)).toBe(false);
+});
+
+test("agent status round-trips through the agent_* columns", async () => {
+  const agent = {
+    state: "blocked" as const,
+    summary: "Need a decision.",
+    next: "Waiting on the operator.",
+    body: "status: blocked\nsummary: Need a decision.",
+    updatedAt: "2026-06-28T01:00:00Z",
+  };
+  await upsertPrState(pr({ number: 4, agent }));
+  const got = (await listPrs()).find((p) => p.number === 4);
+  expect(got?.agent).toEqual(agent);
+});
+
+test("a later upsert with no status comment clears the persisted agent", async () => {
+  await upsertPrState(
+    pr({
+      number: 5,
+      agent: {
+        state: "working",
+        summary: null,
+        next: null,
+        body: "status: working",
+        updatedAt: "t",
+      },
+    }),
+  );
+  await upsertPrState(pr({ number: 5, agent: null }));
+  const got = (await listPrs()).find((p) => p.number === 5);
+  expect(got?.agent).toBeNull();
 });

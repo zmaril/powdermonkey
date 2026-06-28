@@ -8,13 +8,14 @@ import { join } from "node:path";
 // Importing the module still transitively opens db.ts (subscribers use the task
 // repo), so isolate it to a throwaway data dir to avoid the writer lock.
 process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
-const { diffCloudPrs, parseTrailerIds, rebaseAction } = await import(
+const { diffCloudPrs, parseTrailerIds, parseStatusComment, rebaseAction } = await import(
   "../src/server/github-watch.ts"
 );
 type CloudPr = import("../src/server/events.ts").CloudPr;
 
 function pr(over: Partial<CloudPr> & { number: number; taskId: number }): CloudPr {
   return {
+    title: `PR ${over.number}`,
     url: `https://github.com/o/r/pull/${over.number}`,
     state: "OPEN",
     isDraft: false,
@@ -23,6 +24,7 @@ function pr(over: Partial<CloudPr> & { number: number; taskId: number }): CloudP
     mergeable: null,
     headRefName: `pm/task-${over.taskId}-slug`,
     updatedAt: "2026-06-27T00:00:00Z",
+    agent: null,
     ...over,
   };
 }
@@ -82,6 +84,67 @@ test("parseTrailerIds pulls PM-Task and PM-Phase ids (the branch-name fallback)"
 
 test("parseTrailerIds returns empties when there are no trailers", () => {
   expect(parseTrailerIds("just a normal commit message")).toEqual({ taskIds: [], phaseIds: [] });
+});
+
+test("parseStatusComment pulls the structured block out of the sticky comment", () => {
+  const body = [
+    "<!-- pm:status -->",
+    "status: working",
+    "summary: Wiring up the sticky status parser.",
+    "next: Surface it on the Active panel.",
+  ].join("\n");
+  expect(parseStatusComment(body)).toEqual({
+    state: "working",
+    summary: "Wiring up the sticky status parser.",
+    next: "Surface it on the Active panel.",
+    body: [
+      "status: working",
+      "summary: Wiring up the sticky status parser.",
+      "next: Surface it on the Active panel.",
+    ].join("\n"),
+  });
+});
+
+test("parseStatusComment tolerates markdown formatting (bold / list markers)", () => {
+  const body = [
+    "<!-- pm:status -->",
+    "- **status:** blocked",
+    "- **summary:** Need a decision.",
+  ].join("\n");
+  const parsed = parseStatusComment(body);
+  expect(parsed?.state).toBe("blocked");
+  expect(parsed?.summary).toBe("Need a decision.");
+  expect(parsed?.next).toBeNull();
+});
+
+test("parseStatusComment normalises a known state and nulls an unrecognised one", () => {
+  // The parser is the validation seam: a known word (any case) → typed AgentState…
+  expect(parseStatusComment("<!-- pm:status -->\nstatus: Starting")?.state).toBe("starting");
+  // …a word outside AgentState → null (the raw text still rides in `body`).
+  const odd = parseStatusComment("<!-- pm:status -->\nstatus: pondering");
+  expect(odd?.state).toBeNull();
+  expect(odd?.body).toContain("status: pondering");
+});
+
+test("parseStatusComment returns null for a comment without the marker", () => {
+  expect(parseStatusComment("just a normal review comment\nstatus: working")).toBeNull();
+});
+
+test("a sticky-comment rewrite (agent.updatedAt bump) emits pr.updated so it persists", () => {
+  const base = { number: 1, taskId: 10 };
+  const prev = index([
+    pr({
+      ...base,
+      agent: { state: "working", summary: "a", next: null, body: "x", updatedAt: "t1" },
+    }),
+  ]);
+  const next = [
+    pr({
+      ...base,
+      agent: { state: "blocked", summary: "b", next: null, body: "y", updatedAt: "t2" },
+    }),
+  ];
+  expect(diffCloudPrs(prev, next).map((e) => e.type)).toEqual(["pr.updated"]);
 });
 
 test("rebaseAction: a fresh live CONFLICTING asks, a repeat skips (no re-spam)", () => {

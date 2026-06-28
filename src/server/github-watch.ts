@@ -1,7 +1,8 @@
 import { inArray } from "drizzle-orm";
+import { AgentState } from "../shared/types.ts";
 import { taskRepo } from "./crud.ts";
 import { db } from "./db.ts";
-import { type CloudEventMeta, type CloudPr, bus } from "./events.ts";
+import { type AgentStatus, type CloudEventMeta, type CloudPr, bus } from "./events.ts";
 import { askClaude, gh } from "./gh.ts";
 import { pullMain } from "./git.ts";
 import {
@@ -44,6 +45,7 @@ const GQL = `query($owner:String!,$name:String!){
         number title url state isDraft merged mergeable updatedAt headRefName
         checks: commits(last:1){nodes{commit{statusCheckRollup{state}}}}
         history: commits(first:100){nodes{commit{messageBody}}}
+        comments(last:30){nodes{body updatedAt}}
       }
     }
   }
@@ -113,9 +115,61 @@ export async function fetchCloudPrs(): Promise<CloudPr[] | null> {
       mergeable: n.mergeable ?? null,
       headRefName: n.headRefName,
       updatedAt: n.updatedAt,
+      agent: statusFromComments(n.comments?.nodes ?? []),
     });
   }
   return prs;
+}
+
+// The marker that makes the worker's status comment "sticky" — github-watch finds
+// the one comment carrying it and rewrites of it stay one comment. The skill tells
+// the worker to keep a single comment with this marker current on its PR.
+export const STATUS_MARKER = "<!-- pm:status -->";
+
+// The recognised status words — the AgentState enum is the single source of truth.
+const AGENT_STATES = new Set<string>(Object.values(AgentState));
+
+/** Parse a worker's sticky status comment into the structured block the UI reads.
+ *  Returns null when the comment isn't a status comment (no marker). The body is a
+ *  light `key: value` block under the marker — tolerant of markdown noise (`**bold**`,
+ *  `- ` list markers) so the worker can format it for humans without breaking the
+ *  parse. This is the validation seam between the worker's free text and the typed
+ *  domain: a `status:` word outside AgentState resolves to `state: null` (the raw
+ *  text still rides in `body`). `updatedAt` is filled in by the caller from the
+ *  comment's GitHub timestamp. Pure — exported for tests. */
+export function parseStatusComment(body: string): Omit<AgentStatus, "updatedAt"> | null {
+  if (!body || !body.includes(STATUS_MARKER)) return null;
+  const fields: Record<string, string> = {};
+  for (const raw of body.split(/\r?\n/)) {
+    // Strip emphasis/code/quote chars and a leading list marker so `**status:**`,
+    // `- status:` and `> status:` all reduce to a plain `key: value`.
+    const line = raw
+      .replace(/[*_`>]/g, "")
+      .replace(/^\s*[-+]\s*/, "")
+      .trim();
+    const m = line.match(/^(status|summary|next)\s*:\s*(.*)$/i);
+    if (m) fields[m[1].toLowerCase()] = m[2].trim();
+  }
+  const word = (fields.status ?? "").toLowerCase();
+  return {
+    state: AGENT_STATES.has(word) ? (word as AgentState) : null,
+    summary: fields.summary || null,
+    next: fields.next || null,
+    // The marker line stripped, the rest kept verbatim for the human-readable glance.
+    body: body.replace(STATUS_MARKER, "").trim(),
+  };
+}
+
+/** Pick the worker's status out of a PR's comments: the most recent one carrying the
+ *  marker (the sticky comment is rewritten in place, but if duplicates ever exist the
+ *  newest wins). Returns null when no comment carries the marker. */
+function statusFromComments(comments: { body?: string; updatedAt?: string }[]): AgentStatus | null {
+  let agent: AgentStatus | null = null;
+  for (const c of comments) {
+    const parsed = parseStatusComment(c.body ?? "");
+    if (parsed) agent = { ...parsed, updatedAt: c.updatedAt ?? null };
+  }
+  return agent;
 }
 
 /** Pull `PM-Task:` / `PM-Phase:` ids out of commit-trailer text (the same trailers
@@ -158,9 +212,13 @@ async function resolveTaskId(headRefName: string, commitText: string): Promise<n
 }
 
 /** Signature of the fields whose change we care about — drives "did this PR
- *  actually change?" so we don't re-emit on irrelevant churn (e.g. updatedAt). */
+ *  actually change?" so we don't re-emit on irrelevant churn (e.g. the PR's own
+ *  updatedAt). The sticky status comment's own edit time (`agent.updatedAt`) is
+ *  included so a status rewrite counts as a change — that's what makes the new
+ *  status persist (the upsert runs on changed PRs) and reach the UI — without
+ *  reacting to unrelated PR churn. */
 function sig(pr: CloudPr): string {
-  return `${pr.state}|${pr.merged}|${pr.isDraft}|${pr.checks}|${pr.mergeable}|${pr.url}`;
+  return `${pr.state}|${pr.merged}|${pr.isDraft}|${pr.checks}|${pr.mergeable}|${pr.url}|${pr.agent?.updatedAt ?? ""}`;
 }
 
 export type CloudEventType = "pr.opened" | "pr.updated" | "pr.merged" | "pr.closed";

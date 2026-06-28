@@ -25,6 +25,18 @@ function rowToCloudPr(r: PullRequestRow): CloudPr {
     mergeable: r.mergeable,
     headRefName: r.headRefName,
     updatedAt: r.ghUpdatedAt,
+    // `agentBody` is written for every status comment (even a bare one), so its
+    // presence is the "has a status comment" signal — null means no comment yet.
+    agent:
+      r.agentBody == null
+        ? null
+        : {
+            state: r.agentState,
+            summary: r.agentSummary,
+            next: r.agentNext,
+            body: r.agentBody,
+            updatedAt: r.agentUpdatedAt,
+          },
   };
 }
 
@@ -51,6 +63,13 @@ export async function upsertPrState(pr: CloudPr): Promise<void> {
     mergeable: pr.mergeable,
     headRefName: pr.headRefName,
     ghUpdatedAt: pr.updatedAt,
+    // Agent status: cache columns like the rest, written from the parsed sticky
+    // comment (null across the board when the PR has no status comment).
+    agentState: pr.agent?.state ?? null,
+    agentSummary: pr.agent?.summary ?? null,
+    agentNext: pr.agent?.next ?? null,
+    agentBody: pr.agent?.body ?? null,
+    agentUpdatedAt: pr.agent?.updatedAt ?? null,
     updatedAt: new Date(),
   };
   await db
