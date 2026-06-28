@@ -3,8 +3,7 @@
   "version": "0.0.0",
   "type": "module",
   "bin": {
-    "powdermonkey": "bin/pm.ts",
-    "pm": "bin/pm.ts"
+    "powdermonkey": "bin/powdermonkey.ts"
   },
   "files": [
     "bin",
@@ -17,9 +16,10 @@
   ],
   "scripts": {
     "dev": "bun run --watch src/server/index.ts",
-    "serve": "bun run bin/pm.ts serve",
-    "attach": "bun run bin/pm.ts attach",
+    "serve": "bun run bin/powdermonkey.ts serve",
+    "attach": "bun run bin/powdermonkey.ts attach",
     "build:web": "bun build src/web/main.tsx --outdir public/assets --target browser",
+    "build:compile": "bun run build:web && rm -rf dist && mkdir -p dist && bun build --compile bin/powdermonkey.ts --outfile dist/powdermonkey && cp -r public drizzle dist/ && cp node_modules/@electric-sql/pglite/dist/postgres.wasm node_modules/@electric-sql/pglite/dist/postgres.data dist/",
     "db:generate": "drizzle-kit generate",
     "check": "biome check src",
     "size": "git ls-files 'src/**/*.ts' 'src/**/*.tsx' | xargs wc -l | tail -1",

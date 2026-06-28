@@ -4,3 +4,4 @@ public/assets/
 .playwright-mcp/
 *.log
 .DS_Store
+dist/

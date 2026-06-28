@@ -30,19 +30,19 @@ freely** without disturbing whatever tmux sessions you're running for yourself.
 | `pm-session-0`     | The **supervisor's own `claude`** (reserved id 0 — never a real task). |
 | `pm-session-<id>`  | A per-task worker agent, one per local session (`<id>` = the session id). |
 
-## The `pm attach` shortcut
+## The `powdermonkey attach` shortcut
 
-Knowing the socket flag and session names is the price of raw `tmux`. The helper
-hides both — run it from the repo and it drops you onto the socket:
+Knowing the socket flag and session names is the price of raw `tmux`. The CLI
+hides both — run it and it drops you onto the socket:
 
 ```sh
-pm attach              # the dashboard: one pane per live session + the server
-pm attach pm-session-7 # …or attach straight to one named session
-bun run attach         # same, without the bin/pm wrapper on your PATH
+powdermonkey attach              # the dashboard: one pane per live session + the server
+powdermonkey attach pm-session-7 # …or attach straight to one named session
+bun run attach                   # same, from a checkout (no install needed)
 ```
 
-Bare `pm attach` builds a **dashboard** — a single tmux window that tiles one
-pane per thing PowderMonkey is running (the `pm-server` console first, then each
+Bare `powdermonkey attach` builds a **dashboard** — a single tmux window that tiles
+one pane per thing PowderMonkey is running (the `pm-server` console first, then each
 `pm-session-<id>` agent), so you see the whole machine at once instead of one
 console at a time. Each pane is a nested client attached to that session, so it's
 the same live screen the browser shell shows; type into a pane to drive that
@@ -51,10 +51,10 @@ time you run it, so it always matches what's currently live — run it again aft
 starting or landing a session to re-tile. Pass a session name to skip the
 dashboard and attach to just that one.
 
-`pm` is PowderMonkey's CLI — `npm install -g powdermonkey` puts it on your PATH (in
-a checkout, `bun run attach` runs the same thing). It's a thin wrapper over the
-`tmux -L powdermonkey attach` commands below — reach for those directly whenever you
-want a specific target or flag.
+`powdermonkey` is the CLI — `npm install -g powdermonkey` puts it on your PATH (in a
+checkout, `bun run attach` runs the same thing); `powdermonkey alias` adds a short
+`pm` if you want one. It's a thin wrapper over the `tmux -L powdermonkey attach`
+commands below — reach for those directly whenever you want a specific target or flag.
 
 ## Key commands
 
