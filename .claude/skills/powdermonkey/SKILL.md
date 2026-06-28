@@ -36,6 +36,41 @@ Validation is strict (TypeBox); a malformed plan returns 422. Don't include ids 
 
 **Run & land.** `POST $PM_URL/tasks/:id/start-local` cuts a worktree + session and returns the prompt + phase trailers. `POST $PM_URL/tasks/:id/dispatch` is the remote equivalent. `POST $PM_URL/sessions/:id/land` tears down a worktree. `POST $PM_URL/reconcile` scans `main` now (it also runs on a loop).
 
+**The plan as markdown (review & edit as text).** The whole plan tree round-trips through markdown, so reviewing and editing a plan is reviewing and editing text:
+
+```
+GET  $PM_URL/plan/markdown     # → the live plan as markdown (headings + a phase checklist)
+POST $PM_URL/plan/markdown     # { "markdown": "..." } → reconcile the edited text back into the plan
+```
+
+Each node carries a trailing id chip so the round-trip is lossless:
+
+```markdown
+# Ship auth `g1`
+> let users log in
+
+## Tokens `m1`
+
+### JWT issuing `t1`
+- [ ] write tests `p1`
+- [x] implement `p2`
+```
+
+On `POST`, a node that keeps its `` `g1` ``/`` `m1` ``/`` `t1` ``/`` `p1` `` chip is **updated**; a node with **no** chip is **created**; a live node whose id is **dropped** from the text is **archived**; document order is its position; a checked box (`- [x]`) marks a phase done. So you can hand the operator the markdown, take their edits, and `POST` it straight back. (Phase done-state is normally reconciliation's job; prefer editing structure/titles here and let `main` drive completion.)
+
+**Suggest vs. just-do-it (proposals as markdown).** When the operator *tells* you to change the plan, edit directly (CRUD or the markdown round-trip). When you're *suggesting* a change yourself, author a **proposal** instead — a pending change-set the operator reviews and approves/rejects:
+
+```
+POST $PM_URL/proposals               # { title, summary, changes:[ {op,kind,...} ] }  (op = create|update|archive|reorder)
+GET  $PM_URL/proposals/pending       # the decision queue
+GET  $PM_URL/proposals/:id/markdown  # the proposal projected onto the plan, as markdown — review/diff it as text
+POST $PM_URL/proposals/:id/approve   # then
+POST $PM_URL/proposals/:id/apply     # apply the approved change-set atomically (409 if the plan moved under it)
+POST $PM_URL/proposals/:id/reject
+```
+
+`GET /proposals/:id/markdown` renders the proposal's *resulting* plan as markdown (created nodes appear chip-less), so it diffs cleanly against `GET /plan/markdown` — that diff is what the operator reviews.
+
 **Don't fake progress.** Phase/task completion is owned by reconciliation (trailers on `main`). Never `PATCH` a phase to `status: "done"` to "finish" work — it'll be wrong and reconciliation is the source of truth.
 
 **Closing non-reconcilable work (the override path).** Some work genuinely finishes but never lands a trailer (a squash dropped it, out-of-band work, a phase-less task), and some tasks are won't-do. When the operator asks you to close such a thing, use the dedicated override endpoints — **always with `{ "source": "supervisor" }`** so the call is honestly attributed to you, not disguised as a `main` reconciliation (that's the difference from faking progress: it's recorded as `decision_source = supervisor`, never `reconciled`). This is NOT for work that *should* land a trailer — prefer a real PR + trailer whenever the work can produce one.
