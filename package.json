@@ -1,16 +1,30 @@
 {
   "name": "powdermonkey",
   "version": "0.0.0",
-  "private": true,
   "type": "module",
+  "bin": {
+    "powdermonkey": "bin/powdermonkey.ts"
+  },
+  "files": [
+    "bin",
+    "src",
+    "public",
+    "drizzle",
+    "docs",
+    "design.md",
+    "tsconfig.json"
+  ],
   "scripts": {
     "dev": "bun run --watch src/server/index.ts",
-    "serve": "bun run src/server/supervise.ts",
+    "serve": "bun run bin/powdermonkey.ts serve",
+    "attach": "bun run bin/powdermonkey.ts attach",
     "build:web": "bun build src/web/main.tsx --outdir public/assets --target browser",
+    "build:compile": "bun run build:web && rm -rf dist && mkdir -p dist && bun build --compile bin/powdermonkey.ts --outfile dist/powdermonkey && cp -r public drizzle dist/ && cp node_modules/@electric-sql/pglite/dist/postgres.wasm node_modules/@electric-sql/pglite/dist/postgres.data dist/",
     "db:generate": "drizzle-kit generate",
     "check": "biome check src",
     "size": "git ls-files 'src/**/*.ts' 'src/**/*.tsx' | xargs wc -l | tail -1",
-    "test": "for f in tests/*.test.ts; do echo \"# $f\"; bun test \"$f\" || exit 1; done"
+    "test": "for f in tests/*.test.ts; do echo \"# $f\"; bun test \"$f\" || exit 1; done",
+    "prepublishOnly": "bun run build:web"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.17",

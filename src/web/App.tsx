@@ -1,4 +1,4 @@
-import { Button, Group, Stack, Text, Title } from "@mantine/core";
+import { Button, Code, CopyButton, Group, Popover, Stack, Text, Title } from "@mantine/core";
 import "dockview-core/dist/styles/dockview.css";
 import {
   type DockviewApi,
@@ -292,6 +292,57 @@ function NotifyButton() {
   );
 }
 
+// One command + a copy button. The shell can't reach into the operator's terminal
+// to attach for them — all the UI can do is hand over the exact line to paste.
+function CommandRow({ cmd, hint }: { cmd: string; hint: string }) {
+  return (
+    <div>
+      <Group gap={6} wrap="nowrap" justify="space-between">
+        <Code style={{ fontSize: 12 }}>{cmd}</Code>
+        <CopyButton value={cmd}>
+          {({ copied, copy }) => (
+            <Button
+              size="compact-xs"
+              variant={copied ? "light" : "default"}
+              color={copied ? "teal" : undefined}
+              onClick={copy}
+            >
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          )}
+        </CopyButton>
+      </Group>
+      <Text size="xs" c="dimmed">
+        {hint}
+      </Text>
+    </div>
+  );
+}
+
+// "Attach" → a popover with the terminal command that opens the tmux dashboard
+// (one pane per session + the server). The browser shell shows one agent at a
+// time; this is how you watch the whole machine from your own terminal.
+function AttachButton() {
+  return (
+    <Popover width={300} position="bottom-end" withArrow shadow="md">
+      <Popover.Target>
+        <Button size="compact-xs" variant="default">
+          Attach
+        </Button>
+      </Popover.Target>
+      <Popover.Dropdown>
+        <Stack gap={8}>
+          <Text size="xs" c="dimmed">
+            Open the tmux dashboard in your terminal — one pane per live session, plus the server:
+          </Text>
+          <CommandRow cmd="powdermonkey attach" hint="installed globally (npm i -g powdermonkey)" />
+          <CommandRow cmd="bun run attach" hint="from a checkout" />
+        </Stack>
+      </Popover.Dropdown>
+    </Popover>
+  );
+}
+
 // Slim global toolbar: the app title, the cross-cutting actions (Shell / Scratch /
 // Reconcile), and the error banner. Lives above the dockview so it's always visible
 // regardless of which panel is focused.
@@ -318,6 +369,7 @@ function TopBar() {
           <Button size="compact-xs" variant="default" onClick={() => openTerminal("")}>
             Shell
           </Button>
+          <AttachButton />
           <Button size="compact-xs" variant="default" onClick={openNotes}>
             Scratch
           </Button>

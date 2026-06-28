@@ -8,6 +8,7 @@ import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
 import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
 import { models } from "./models.ts";
+import { PUBLIC_DIR } from "./paths.ts";
 import { loadPlan, planSchema } from "./plan.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { addRealtimeClient, removeRealtimeClient } from "./realtime.ts";
@@ -336,8 +337,10 @@ export const app = new Elysia()
   .use(resource("phases", phaseRepo, models.phases))
   .use(sessionsGroup)
   .use(resource("notes", noteRepo, models.notes))
-  // Static: bundled web app, SPA fallback to index.html.
-  .get("/assets/*", ({ params }) => Bun.file(`public/assets/${params["*"]}`))
-  .get("/*", () => Bun.file("public/index.html"));
+  // Static: bundled web app, SPA fallback to index.html. Served from the package's
+  // public/ (resolved via PUBLIC_DIR), not the cwd — a global install runs from the
+  // operator's project dir, which has no bundle of its own.
+  .get("/assets/*", ({ params }) => Bun.file(join(PUBLIC_DIR, "assets", params["*"])))
+  .get("/*", () => Bun.file(join(PUBLIC_DIR, "index.html")));
 
 export type App = typeof app;

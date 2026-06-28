@@ -14,6 +14,47 @@ One might reasonably suggest Linear or Jira or any other project management soft
 
 In short, there are many new and exciting software factories out there, but this one is mine. It is not meant to solve enterprise problems, just the problems of an enterprising young man. I've open sourced it because I think others might enjoy using it and have new ideas to add that would make it even better to use. PowderMonkey has solved a lot of my agent coordination isuses and I hope it can do the same for you!
 
+## Install
+
+```bash
+npm install -g powdermonkey   # puts `powdermonkey` on PATH
+```
+
+Then, from inside any project you want to drive:
+
+```bash
+powdermonkey serve     # launch the supervisor (web app + API) in tmux for THIS project
+powdermonkey attach    # watch it all: one tmux pane per live session + the server
+```
+
+`powdermonkey` operates on the **current directory** — the project's plan store
+lives in its `data/` — while the code is served from wherever it was installed, so
+one install drives any number of projects.
+
+Prefer the short name? `powdermonkey alias` symlinks a `pm` next to it (opt-in, so
+it never silently squats `pm` on your PATH); after that `pm serve` / `pm attach`
+work too.
+
+**Runtime dependencies.** macOS/Linux, with **tmux** and **git** on PATH (git is
+how the supervisor cuts worktrees and reads progress off `main`). The npm install
+also needs **bun** (it runs the TypeScript directly). If you'd rather not install
+bun, grab the **standalone binary** — a single self-contained executable; tmux and
+git are then the only things it needs:
+
+```bash
+bun run build:compile                 # → dist/ : the binary + its sidecar data files
+mv dist ~/.local/powdermonkey         # keep the binary together with its data files
+ln -s ~/.local/powdermonkey/powdermonkey ~/.local/bin/powdermonkey   # put it on PATH
+```
+
+`build:compile` bundles bun's runtime, the web UI, the DB migrations, and PGlite's
+WASM. The binary finds its sidecar files (`public/`, `drizzle/`, `postgres.*`) next
+to itself, so keep `dist/`'s contents together — a symlink on PATH is fine (it
+resolves back to the real location). Cross-platform prebuilt binaries are the
+planned distribution.
+
+To hack on PowderMonkey itself, run from a checkout instead (below).
+
 ## Run (dev)
 
 ```bash
@@ -28,8 +69,14 @@ terminal and auto-restarts (with backoff) if it crashes:
 
 ```bash
 bun run serve                              # launch (idempotent); prints attach cmd
-tmux -L powdermonkey attach -t pm-server   # watch the server console
+bun run attach                             # watch it all: one tmux pane per session
 ```
+
+`bun run serve` / `bun run attach` are the in-checkout equivalents of
+`powdermonkey serve` / `powdermonkey attach` (they run the same `bin/powdermonkey.ts`).
+Either way, attach opens a tmux dashboard with one pane per live session plus the
+server console — the operator's view onto everything PowderMonkey is running. The web
+UI surfaces the same command behind its **Attach** button.
 
 Load the seed plan (PowderMonkey's own roadmap) so the tree has something to show:
 
@@ -99,8 +146,9 @@ your work. When the UI stops responding, a shell hangs, or an agent gets stuck,
 drop to a terminal and talk to that socket directly:
 
 ```bash
+powdermonkey attach                        # dashboard: one pane per session + server
 tmux -L powdermonkey ls                    # list every PM-managed session
-tmux -L powdermonkey attach -t pm-server   # watch the server console
+tmux -L powdermonkey attach -t pm-server   # watch just the server console
 ```
 
 See the **[tmux cheatsheet](docs/tmux.md)** for the full set of inspect-and-recover
