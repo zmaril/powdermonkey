@@ -12,6 +12,7 @@ import { ActivePane } from "./ActivePane.tsx";
 import { ArchivePane } from "./ArchivePane.tsx";
 import { BacklogPane } from "./BacklogPane.tsx";
 import { ShellTerminal } from "./ShellTerminal.tsx";
+import { useNotificationPermission } from "./notifications.ts";
 import { useStore } from "./store.ts";
 
 // The single pane of glass. The plan is split into three panels — a live ACTIVE
@@ -185,6 +186,33 @@ function buildDefaultLayout(api: DockviewApi) {
   active.api.setActive();
 }
 
+// Opt into OS web notifications. Browsers only grant permission on a user gesture,
+// so this is an explicit button; once granted/denied it reflects the standing
+// state (and there's nothing more to do — the choice is the browser's to keep).
+function NotifyButton() {
+  const { permission, request } = useNotificationPermission();
+  if (permission === "unsupported") return null;
+  const label =
+    permission === "granted" ? "🔔 On" : permission === "denied" ? "🔕 Blocked" : "🔔 Notify";
+  return (
+    <Button
+      size="compact-xs"
+      variant="default"
+      onClick={request}
+      disabled={permission !== "default"}
+      title={
+        permission === "granted"
+          ? "Desktop notifications are on — you'll be pinged when a session needs you"
+          : permission === "denied"
+            ? "Notifications are blocked in your browser settings"
+            : "Enable desktop notifications when a session needs you"
+      }
+    >
+      {label}
+    </Button>
+  );
+}
+
 // Slim global toolbar: the app title, the cross-cutting actions (Shell / Scratch /
 // Reconcile), and the error banner. Lives above the dockview so it's always visible
 // regardless of which panel is focused.
@@ -207,6 +235,7 @@ function TopBar() {
           )}
         </Group>
         <Group gap={6} wrap="nowrap">
+          <NotifyButton />
           <Button size="compact-xs" variant="default" onClick={() => openTerminal("")}>
             Shell
           </Button>
