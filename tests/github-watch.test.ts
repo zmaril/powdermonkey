@@ -8,9 +8,8 @@ import { join } from "node:path";
 // Importing the module still transitively opens db.ts (subscribers use the task
 // repo), so isolate it to a throwaway data dir to avoid the writer lock.
 process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
-const { diffCloudPrs, parseTrailerIds, parseStatusComment, rebaseAction } = await import(
-  "../src/server/github-watch.ts"
-);
+const { diffCloudPrs, parseTrailerIds, parseStatusComment, statusFromComments, rebaseAction } =
+  await import("../src/server/github-watch.ts");
 type CloudPr = import("../src/server/events.ts").CloudPr;
 
 function pr(over: Partial<CloudPr> & { number: number; taskId: number }): CloudPr {
@@ -144,7 +143,27 @@ test("parseStatusComment returns null for a comment without the marker", () => {
   expect(parseStatusComment("just a normal review comment\nstatus: working")).toBeNull();
 });
 
-test("a sticky-comment rewrite (agent.updatedAt bump) emits pr.updated so it persists", () => {
+test("statusFromComments takes the newest marked comment (append-only, newest-wins)", () => {
+  // Comments arrive oldest→newest. Workers can't edit, so each update is a fresh
+  // marked comment; the latest one is the live status and earlier ones are superseded.
+  const comments = [
+    { body: "<!-- pm:status -->\nstatus: starting\nsummary: booting", updatedAt: "t1" },
+    { body: "just a human review comment", updatedAt: "t2" },
+    { body: "<!-- pm:status -->\nstatus: working\nsummary: midway", updatedAt: "t3" },
+    { body: "<!-- pm:status -->\nstatus: done\nsummary: ready for review", updatedAt: "t4" },
+  ];
+  const agent = statusFromComments(comments);
+  expect(agent?.state).toBe("done");
+  expect(agent?.summary).toBe("ready for review");
+  expect(agent?.updatedAt).toBe("t4");
+});
+
+test("statusFromComments returns null when no comment carries the marker", () => {
+  expect(statusFromComments([{ body: "lgtm", updatedAt: "t1" }])).toBeNull();
+  expect(statusFromComments([])).toBeNull();
+});
+
+test("a fresh status comment (agent.updatedAt bump) emits pr.updated so it persists", () => {
   const base = { number: 1, taskId: 10 };
   const prev = index([
     pr({
