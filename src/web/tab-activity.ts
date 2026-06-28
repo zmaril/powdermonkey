@@ -10,7 +10,7 @@ import { TaskStatus } from "../shared/types.ts";
 // Pane ids — these match the dockview panel ids built in App's default layout.
 export const PANE_ACTIVE = "active";
 export const PANE_BACKLOG = "backlog";
-export const PANE_ARCHIVE = "archive";
+export const PANE_ARCHIVE = "archive"; // lint-allow-string: dockview pane id, not an enum value
 
 /** The slice of state the indicators react to, reduced to plain maps so two
  *  snapshots can be diffed cheaply. */

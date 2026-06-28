@@ -4,17 +4,28 @@ import type { TSchema } from "@sinclair/typebox";
 import { getTableColumns, getTableName } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 import { P, match } from "ts-pattern";
-import { OverrideSource, SessionState } from "../shared/types.ts";
+import { OverrideSource, ProposalStatus, SessionState } from "../shared/types.ts";
+import { applyProposal } from "./apply.ts";
 import { cancelTask, completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
 import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
 import { pg } from "./db.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
 import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
+import { applyPlanMarkdown, planMarkdown, proposalMarkdown } from "./markdown.ts";
 import { models } from "./models.ts";
 import { PUBLIC_DIR } from "./paths.ts";
 import { loadPlan, planSchema } from "./plan.ts";
 import { getFileContents, getPrReview, postPrComment, submitReview } from "./pr-review.ts";
+import {
+  type CreateProposalInput,
+  createProposal,
+  decideProposal,
+  getProposal,
+  listPending,
+  listProposals,
+  proposalCreateBody,
+} from "./proposals.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { reconcile } from "./reconcile.ts";
 import {
@@ -247,8 +258,59 @@ const sessionsGroup = resource("sessions", sessionRepo, models.sessions)
     return result;
   });
 
+// Proposals: a pending change-set the operator decides on. Authored when the
+// supervisor is SUGGESTING a change; reviewed as markdown (GET /:id/markdown renders
+// the proposal's projected plan) and approved/rejected/applied. The decision +
+// apply logic lives in proposals.ts / apply.ts.
+const proposalsGroup = new Elysia({ prefix: "/proposals" })
+  // List pending — the operator's decision queue. Before "/:id" so it wins the route.
+  .get("/pending", () => listPending())
+  .get("/", ({ query }) => listProposals({ status: query.status }), {
+    query: t.Object({ status: t.Optional(t.String()) }),
+  })
+  .get("/:id", async ({ params, set }) => {
+    const row = await getProposal(Number(params.id));
+    if (!row) set.status = 404;
+    return row ?? { error: "not found" };
+  })
+  // The proposal rendered as markdown — its change-set projected onto the current
+  // plan — for review/diff against the plan markdown.
+  .get("/:id/markdown", async ({ params, set }) => {
+    const row = await getProposal(Number(params.id));
+    if (!row) {
+      set.status = 404;
+      return "";
+    }
+    return proposalMarkdown(row.changes);
+  })
+  .post("/", ({ body }) => createProposal(body as CreateProposalInput), {
+    body: proposalCreateBody,
+  })
+  .post("/:id/approve", async ({ params, set }) => {
+    const row = await decideProposal(Number(params.id), ProposalStatus.Approved);
+    if (!row) set.status = 400;
+    return row ?? { error: "proposal not found or not pending" };
+  })
+  .post("/:id/reject", async ({ params, set }) => {
+    const row = await decideProposal(Number(params.id), ProposalStatus.Rejected);
+    if (!row) set.status = 400;
+    return row ?? { error: "proposal not found or not pending" };
+  })
+  .post("/:id/apply", async ({ params, set }) => {
+    const result = await applyProposal(Number(params.id));
+    if (!result.ok) set.status = "conflicts" in result && result.conflicts ? 409 : 400;
+    return result;
+  });
+
 export const app = new Elysia()
   .get("/health", () => ({ ok: true }))
+  // The plan as markdown — the review-and-edit surface. GET renders the live plan
+  // tree; POST reconciles an edited markdown back into the plan (create untagged
+  // nodes, update tagged ones, archive dropped ones) — "edit the plan" == "edit text".
+  .get("/plan/markdown", () => planMarkdown())
+  .post("/plan/markdown", ({ body }) => applyPlanMarkdown(body.markdown), {
+    body: t.Object({ markdown: t.String() }),
+  })
   // Nested, id-less plan loader — Elysia validates the body against the TypeBox
   // plan schema before the handler runs.
   .post("/plan", ({ body }) => loadPlan(body), { body: planSchema })
@@ -574,6 +636,7 @@ export const app = new Elysia()
   .use(phasesGroup)
   .use(sessionsGroup)
   .use(resource("notes", noteRepo, models.notes))
+  .use(proposalsGroup)
   // Static: bundled web app, SPA fallback to index.html. Served from the package's
   // public/ (resolved via PUBLIC_DIR), not the cwd — a global install runs from the
   // operator's project dir, which has no bundle of its own.

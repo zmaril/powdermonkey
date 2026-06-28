@@ -126,3 +126,61 @@ export const AgentState = {
   Done: "done",
 } as const;
 export type AgentState = ValueOf<typeof AgentState>;
+
+/**
+ * Lifecycle of a plan proposal — a pending change-set the operator decides on.
+ * `Pending` awaits a decision; `Approved` was accepted but not yet applied;
+ * `Rejected` was declined; `Applied` has been folded into the live plan (terminal,
+ * makes re-apply a no-op).
+ */
+export const ProposalStatus = {
+  Pending: "pending",
+  Approved: "approved",
+  Rejected: "rejected",
+  Applied: "applied",
+} as const;
+export type ProposalStatus = ValueOf<typeof ProposalStatus>;
+
+/** The vocab entities a proposal can mutate. */
+export const VocabKind = {
+  Goal: "goal",
+  Milestone: "milestone",
+  Task: "task",
+  Phase: "phase",
+} as const;
+export type VocabKind = ValueOf<typeof VocabKind>;
+
+/** The four kinds of mutation a change-set carries. */
+export const ProposalOp = {
+  Create: "create",
+  Update: "update",
+  Archive: "archive",
+  Reorder: "reorder",
+} as const;
+export type ProposalOp = ValueOf<typeof ProposalOp>;
+
+/**
+ * One typed mutation in a proposal's change-set. Four ops across the four vocab
+ * kinds:
+ *   - create   a new row. May parent to an existing row (`parentId`) or to a
+ *              sibling create in the same proposal (`parentRef`), so a whole new
+ *              subtree can be proposed at once. `ref` is the temp handle other
+ *              creates point at.
+ *   - update   patch fields on an existing row by `id`.
+ *   - archive  soft-delete an existing row by `id`.
+ *   - reorder  move an existing row: a new `position`, and optionally reparent it
+ *              (`parentId` = new goal/milestone/task it hangs under).
+ */
+export type ProposalChange =
+  | {
+      op: "create";
+      kind: VocabKind;
+      ref?: string;
+      parentId?: number;
+      parentRef?: string;
+      fields: Record<string, unknown>;
+      position?: number;
+    }
+  | { op: "update"; kind: VocabKind; id: number; fields: Record<string, unknown> }
+  | { op: "archive"; kind: VocabKind; id: number }
+  | { op: "reorder"; kind: VocabKind; id: number; position?: number; parentId?: number };
