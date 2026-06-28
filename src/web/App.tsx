@@ -14,8 +14,11 @@ import { BacklogPane } from "./BacklogPane.tsx";
 import { ShellTerminal } from "./ShellTerminal.tsx";
 import {
   type NotifyPermission,
+  needsInputMap,
   notifyPermission,
   requestNotifyPermission,
+  risingNeedsInput,
+  sessionLabel,
 } from "./notifications.ts";
 import { useStore } from "./store.ts";
 
@@ -317,6 +320,44 @@ function AttachButton() {
   );
 }
 
+// Post a browser notification each time a session newly needs the operator
+// (needsInput false → true). Seeds its baseline on the very first observed tick so
+// sessions already parked when the page loads don't fire a backlog of alerts; from
+// then on, only true edges notify, and only while permission is granted. Driven off
+// the same store the poll keeps fresh, so it sees every transition the UI does.
+function useNeedsInputNotifications() {
+  const sessions = useStore((s) => s.sessions);
+  const sessionTasks = useStore((s) => s.sessionTasks);
+  const tasks = useStore((s) => s.tasks);
+  // null until the first tick: distinguishes "no baseline yet" (seed, don't fire)
+  // from "baseline says everything was idle" (any true is a fresh edge).
+  const prev = useRef<Map<number, boolean> | null>(null);
+
+  useEffect(() => {
+    const baseline = prev.current;
+    prev.current = needsInputMap(sessions);
+    if (baseline === null) return; // first tick: just establish the baseline
+    if (notifyPermission() !== "granted") return;
+    for (const id of risingNeedsInput(baseline, sessions)) {
+      const session = sessions.find((s) => s.id === id);
+      const label = sessionLabel(id, sessionTasks, tasks, session);
+      try {
+        // tag dedupes repeat alerts for the same session into a single OS toast.
+        const n = new Notification("A session needs you", {
+          body: label,
+          tag: `pm-needs-input-${id}`,
+        });
+        n.onclick = () => {
+          window.focus();
+          n.close();
+        };
+      } catch {
+        // Construction can throw if permission was revoked mid-session; ignore.
+      }
+    }
+  }, [sessions, sessionTasks, tasks]);
+}
+
 // Toolbar control for the Notification API permission. Reflects the
 // current permission and, from the undecided "default" state, prompts for it on
 // click. Hidden where the API is unsupported; shown disabled once blocked, since
@@ -534,6 +575,7 @@ export function App() {
   }, [notesReq]);
 
   const disconnected = useConnectionWatch();
+  useNeedsInputNotifications();
 
   return (
     <div style={{ height: "100vh", width: "100vw", display: "flex", flexDirection: "column" }}>
