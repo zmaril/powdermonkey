@@ -17,7 +17,7 @@ import {
 import { models } from "./models.ts";
 import { PUBLIC_DIR } from "./paths.ts";
 import { loadPlan, planSchema } from "./plan.ts";
-import { getPrReview, postPrComment } from "./pr-review.ts";
+import { getPrReview, postPrComment, submitReview } from "./pr-review.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { reconcile } from "./reconcile.ts";
 import {
@@ -250,6 +250,36 @@ export const app = new Elysia()
         line: t.Number(),
         side: t.Union([t.Literal("LEFT"), t.Literal("RIGHT")]),
         inReplyTo: t.Optional(t.Number()),
+      }),
+    },
+  )
+  // Submit a whole review at once — all draft comments + a verdict (Approve /
+  // Request changes / Comment) — as ONE GitHub review, so a watching session sees a
+  // single event instead of one per comment.
+  .post(
+    "/prs/:number/review-submit",
+    async ({ params, body, set }) => {
+      const result = await submitReview(Number(params.number), body);
+      if (!result.ok) {
+        set.status = result.status;
+        return { error: result.error };
+      }
+      return { ok: true };
+    },
+    {
+      params: t.Object({ number: t.String() }),
+      body: t.Object({
+        event: t.Union([t.Literal("APPROVE"), t.Literal("REQUEST_CHANGES"), t.Literal("COMMENT")]),
+        body: t.String(),
+        commitId: t.String(),
+        comments: t.Array(
+          t.Object({
+            path: t.String(),
+            line: t.Number(),
+            side: t.Union([t.Literal("LEFT"), t.Literal("RIGHT")]),
+            body: t.String(),
+          }),
+        ),
       }),
     },
   )

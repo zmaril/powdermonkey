@@ -47,11 +47,33 @@ library, matching the rest of the app's hand-rolled Mantine panes.
   threads and the open composer, so a comment lands back under the exact line it was
   written on.
 - **Threads.** Top-level comments render under their line; replies
-  (`in_reply_to_id`) nest beneath their root, with a `↳ reply` composer that POSTs
-  with `inReplyTo` set.
-- **Composer.** Hovering a line reveals a `+`; clicking it opens an inline textarea
-  that POSTs `{ body, commitId: headSha, path, line, side }`, then refetches so the
-  new comment threads in with its real id.
+  (`in_reply_to_id`) nest beneath their root, with a `↳ reply` composer.
+- **Composer.** Hovering a line reveals a `+`; clicking it opens an inline textarea.
+  New line comments are **added to a draft** (see below), not posted one-by-one.
+
+## Batched review: approve / request changes / one event
+
+New comments don't post immediately. Hitting **Add to review** appends them to a
+**local draft** — each renders as an amber `pending` card under its line with a
+`remove` link, and nothing has hit GitHub yet. The footer **Finish review** bar then
+submits the whole pass at once: a summary plus a verdict — **Approve**, **Request
+changes**, or **Comment** — via `POST /prs/:n/review-submit` →
+`POST /repos/:o/:r/pulls/:n/reviews` with the full `comments[]` array and an
+`event`.
+
+Why: it answers "can I approve/deny in-app?" (the verdict) and "can I batch comments
+to avoid churn?" (the draft) with the same mechanism. A standalone comment per line
+is one webhook *per comment* — which wakes a watching session each time; one review
+is **one event** for the whole pass. `gh` can't express a nested `comments[]` via
+`-f` flags, so the JSON body is fed on stdin (`gh api … --input -`, see `gh.ts`).
+
+Validation mirrors GitHub: Request changes needs a summary; a Comment review needs
+either a summary or at least one inline comment; Approve may be empty.
+
+The one thing still posted immediately is a **reply** to an existing thread — the
+reviews API has no way to express a reply, so it goes through
+`POST /prs/:n/comments` with `inReplyTo`. Replies mid-review are rare, so this is a
+deliberate small exception to the batch model.
 
 ## Side-by-side (split) layout
 

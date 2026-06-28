@@ -206,3 +206,61 @@ export async function postPrComment(number: number, c: PostCommentBody): Promise
     return { ok: false, status: 502, error: "comment posted but response was unparseable" };
   }
 }
+
+// ---- batched review (approve / request changes / comment) ------------------
+// Instead of posting each comment immediately (one webhook per comment = churn for
+// a watching session), the pane accumulates a draft and submits it as ONE review
+// via POST /pulls/:n/reviews — one event for the whole pass, plus a verdict.
+
+export type ReviewDraftComment = {
+  path: string;
+  line: number;
+  side: "LEFT" | "RIGHT";
+  body: string;
+};
+
+/** APPROVE / REQUEST_CHANGES / COMMENT — the GitHub review `event`s we expose. */
+export type ReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
+
+export type SubmitReviewBody = {
+  event: ReviewEvent;
+  /** Overall review summary. GitHub requires one for REQUEST_CHANGES; we also
+   *  require it for a COMMENT review with no inline comments (else there's nothing
+   *  to say). APPROVE may have an empty body. */
+  body: string;
+  /** Head sha to anchor the review to (from the review payload). */
+  commitId: string;
+  comments: ReviewDraftComment[];
+};
+
+export type SubmitResult = { ok: true } | { ok: false; error: string; status: number };
+
+/** Submit a whole review in one call: all draft comments + a verdict. */
+export async function submitReview(number: number, r: SubmitReviewBody): Promise<SubmitResult> {
+  if (fixtureDir())
+    return { ok: false, status: 400, error: "fixture mode is read-only (PM_PR_FIXTURE_DIR set)" };
+  if (r.event === "REQUEST_CHANGES" && !r.body.trim())
+    return { ok: false, status: 400, error: "Request changes needs a summary" };
+  if (r.event === "COMMENT" && !r.body.trim() && r.comments.length === 0)
+    return { ok: false, status: 400, error: "a Comment review needs a summary or inline comments" };
+  const repo = await resolveRepo();
+  if (!repo) return { ok: false, status: 502, error: "no GitHub repo configured" };
+
+  // gh can't express a nested comments[] array via -f flags, so POST the JSON body
+  // on stdin with `--input -`.
+  const payload = JSON.stringify({
+    commit_id: r.commitId || undefined,
+    body: r.body || undefined,
+    event: r.event,
+    comments: r.comments.map((c) => ({ path: c.path, line: c.line, side: c.side, body: c.body })),
+  });
+  const path = `repos/${repo.owner}/${repo.name}/pulls/${number}/reviews`;
+  const res = await gh(["api", "--method", "POST", path, "--input", "-"], payload);
+  if (!res.ok)
+    return {
+      ok: false,
+      status: 502,
+      error: res.stderr.trim().slice(0, 300) || "gh review submit failed",
+    };
+  return { ok: true };
+}

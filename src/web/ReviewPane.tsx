@@ -9,16 +9,30 @@ import {
   Text,
   Textarea,
 } from "@mantine/core";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DiffLine, Hunk } from "../server/diff.ts";
-import type { PrReview, ReviewComment, ReviewFile } from "../server/pr-review.ts";
+import type { PrReview, ReviewComment, ReviewEvent, ReviewFile } from "../server/pr-review.ts";
 import { api } from "./client.ts";
 
+// A drafted (not-yet-submitted) inline comment, accumulated locally and sent as part
+// of one batched review (see submit()). `id` is a client-only key for removal.
+type DraftComment = {
+  id: number;
+  path: string;
+  line: number;
+  side: "LEFT" | "RIGHT";
+  body: string;
+};
+
 // The in-app PR review pane: a PR's diff with inline review comments threaded under
-// the lines they anchor to, and a composer to post new ones — so a review happens
-// here, in the single pane of glass, instead of bouncing out to github.com. The
-// server (pr-review.ts) does the GitHub I/O via `gh`; this is pure rendering off
-// the /prs/:n/review payload plus a POST per comment.
+// the lines they anchor to — so a review happens here, in the single pane of glass,
+// instead of bouncing out to github.com. The server (pr-review.ts) does the GitHub
+// I/O via `gh`; this is rendering off the /prs/:n/review payload.
+//
+// New comments accumulate into a local DRAFT and are submitted as ONE GitHub review
+// (Approve / Request changes / Comment) via the footer bar — one webhook event for
+// the whole pass instead of one per comment. (Replies to an existing thread still
+// post immediately, since the reviews API can't express a reply.)
 //
 // Two layouts, toggled: Unified (one column, +/- interleaved) and Split (old left,
 // new right). Comments anchor the same way in both — RIGHT/new-line for added or
@@ -163,15 +177,19 @@ function Thread({
   );
 }
 
-/** The new-comment composer shown when a line's "+" is clicked. */
+/** The new-comment composer shown when a line's "+" is clicked. `submitLabel` is
+ *  "Add to review" for a fresh line comment (batched) and "Reply" for a thread
+ *  reply (posted immediately). */
 function Composer({
   onSubmit,
   onCancel,
   posting,
+  submitLabel = "Add to review",
 }: {
-  onSubmit: (body: string) => Promise<void>;
+  onSubmit: (body: string) => void | Promise<void>;
   onCancel: () => void;
   posting: boolean;
+  submitLabel?: string;
 }) {
   const [draft, setDraft] = useState("");
   return (
@@ -192,12 +210,38 @@ function Composer({
           disabled={!draft.trim()}
           onClick={() => onSubmit(draft)}
         >
-          Comment
+          {submitLabel}
         </Button>
         <Button size="compact-xs" variant="subtle" color="gray" onClick={onCancel}>
           Cancel
         </Button>
       </Group>
+    </Box>
+  );
+}
+
+/** A drafted comment shown under its line before the review is submitted — a dashed
+ *  amber card with a remove affordance, visually distinct from posted comments. */
+function PendingCard({ draft, onRemove }: { draft: DraftComment; onRemove: () => void }) {
+  return (
+    <Box px="md" py={6} style={{ background: "#1c1d20" }}>
+      <Box
+        px="sm"
+        py={6}
+        style={{ border: "1px dashed #b8893a", background: "#221d16", borderRadius: 4 }}
+      >
+        <Group justify="space-between" mb={2} wrap="nowrap">
+          <Badge size="xs" variant="light" color="yellow">
+            pending
+          </Badge>
+          <Anchor component="button" size="xs" c="dimmed" onClick={onRemove}>
+            remove
+          </Anchor>
+        </Group>
+        <Text size="xs" style={{ whiteSpace: "pre-wrap" }}>
+          {draft.body}
+        </Text>
+      </Box>
     </Box>
   );
 }
@@ -311,6 +355,8 @@ function LineContent({
 function FileView({
   file,
   comments,
+  draftByKey,
+  onRemoveDraft,
   view,
   onAdd,
   onReply,
@@ -321,25 +367,28 @@ function FileView({
 }: {
   file: ReviewFile;
   comments: ReviewComment[];
+  draftByKey: Map<string, DraftComment[]>;
+  onRemoveDraft: (id: number) => void;
   view: "unified" | "split";
   onAdd: (path: string, a: LineAnchor) => void;
   onReply: (inReplyTo: number, body: string) => Promise<void>;
   composerKey: string | null;
   onCancelCompose: () => void;
-  onSubmitCompose: (body: string) => Promise<void>;
+  onSubmitCompose: (body: string) => void;
   posting: boolean;
 }) {
   const [open, setOpen] = useState(true);
   const { topByAnchor, repliesByParent } = indexComments(comments, file.filename);
 
-  // The comment thread + composer + add-button affordance for a given line, shared
-  // by both layouts. Returns the row plus any attachments stacked beneath it.
+  // The posted thread, drafted (pending) comments, and the open composer for a given
+  // line — shared by both layouts. Returns the attachments stacked beneath the row.
   const attachments = (line: DiffLine | null) => {
     if (!line) return null;
     const a = anchorOf(line);
     if (!a) return null;
     const k = keyOf(file.filename, a);
     const roots = topByAnchor.get(k);
+    const drafts = draftByKey.get(k);
     const composing = composerKey === k;
     return (
       <>
@@ -351,6 +400,9 @@ function FileView({
             posting={posting}
           />
         )}
+        {drafts?.map((d) => (
+          <PendingCard key={d.id} draft={d} onRemove={() => onRemoveDraft(d.id)} />
+        ))}
         {composing && (
           <Composer onSubmit={onSubmitCompose} onCancel={onCancelCompose} posting={posting} />
         )}
@@ -467,10 +519,16 @@ export function ReviewPane({ number }: { number: number }) {
   const [view, setView] = useState<"unified" | "split">("unified");
   const [posting, setPosting] = useState(false);
   // The line currently being commented on: `${path}::${side}::${line}`, plus the
-  // resolved anchor so we know what to POST.
+  // resolved anchor so we know what to draft.
   const [compose, setCompose] = useState<{ key: string; path: string; anchor: LineAnchor } | null>(
     null,
   );
+  // The pending review: drafted inline comments + an overall summary, held locally
+  // and sent as ONE GitHub review on submit (one event, not one-per-comment).
+  const [draft, setDraft] = useState<DraftComment[]>([]);
+  const [summary, setSummary] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const nextId = useRef(1);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -485,7 +543,31 @@ export function ReviewPane({ number }: { number: number }) {
     load();
   }, [load]);
 
-  const post = async (body: string, anchor: LineAnchor, path: string, inReplyTo?: number) => {
+  // Index drafts by line anchor so each line can show its pending comments.
+  const draftByKey = useMemo(() => {
+    const m = new Map<string, DraftComment[]>();
+    for (const d of draft) {
+      const k = keyOf(d.path, { side: d.side, line: d.line });
+      const list = m.get(k) ?? [];
+      list.push(d);
+      m.set(k, list);
+    }
+    return m;
+  }, [draft]);
+
+  const addDraft = (body: string, anchor: LineAnchor, path: string) => {
+    if (!body.trim()) return;
+    setDraft((d) => [
+      ...d,
+      { id: nextId.current++, path, line: anchor.line, side: anchor.side, body },
+    ]);
+    setCompose(null);
+  };
+  const removeDraft = (id: number) => setDraft((d) => d.filter((x) => x.id !== id));
+
+  // A reply to an existing thread posts immediately (the reviews API can't express
+  // replies); fresh line comments are batched into the pending review instead.
+  const reply = async (body: string, anchor: LineAnchor, path: string, inReplyTo: number) => {
     if (!review) return;
     setPosting(true);
     try {
@@ -495,16 +577,39 @@ export function ReviewPane({ number }: { number: number }) {
         path,
         line: anchor.line,
         side: anchor.side,
-        ...(inReplyTo != null ? { inReplyTo } : {}),
+        inReplyTo,
       });
       if (error) {
         setError(String((error.value as { error?: string })?.error ?? error.status));
         return;
       }
-      setCompose(null);
-      await load(); // refetch so the new comment threads in with correct ids
+      await load();
     } finally {
       setPosting(false);
+    }
+  };
+
+  // Submit the whole pending review in one call: every draft comment + the verdict.
+  const submit = async (event: ReviewEvent) => {
+    if (!review) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const { error } = await api.prs({ number })["review-submit"].post({
+        event,
+        body: summary,
+        commitId: review.headSha,
+        comments: draft.map(({ path, line, side, body }) => ({ path, line, side, body })),
+      });
+      if (error) {
+        setError(String((error.value as { error?: string })?.error ?? error.status));
+        return;
+      }
+      setDraft([]);
+      setSummary("");
+      await load(); // the submitted comments now come back as posted threads
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -569,13 +674,15 @@ export function ReviewPane({ number }: { number: number }) {
                 key={file.filename}
                 file={file}
                 comments={review.comments}
+                draftByKey={draftByKey}
+                onRemoveDraft={removeDraft}
                 view={view}
                 composerKey={compose?.key ?? null}
                 onAdd={(path, anchor) => setCompose({ key: keyOf(path, anchor), path, anchor })}
                 onCancelCompose={() => setCompose(null)}
-                onSubmitCompose={(body) =>
-                  compose ? post(body, compose.anchor, compose.path) : Promise.resolve()
-                }
+                onSubmitCompose={(body) => {
+                  if (compose) addDraft(body, compose.anchor, compose.path);
+                }}
                 onReply={(inReplyTo, body) => {
                   // A reply re-uses the parent's anchor only for the (unused on the
                   // reply path) line/side; the server ignores them when in_reply_to is set.
@@ -584,7 +691,7 @@ export function ReviewPane({ number }: { number: number }) {
                     side: parent?.side ?? "RIGHT",
                     line: parent?.line ?? 1,
                   };
-                  return post(body, anchor, parent?.path ?? file.filename, inReplyTo);
+                  return reply(body, anchor, parent?.path ?? file.filename, inReplyTo);
                 }}
                 posting={posting}
               />
@@ -592,6 +699,88 @@ export function ReviewPane({ number }: { number: number }) {
           </Stack>
         )}
       </Box>
+
+      {review && (
+        <ReviewBar
+          draft={draft}
+          summary={summary}
+          setSummary={setSummary}
+          submit={submit}
+          submitting={submitting}
+        />
+      )}
+    </Box>
+  );
+}
+
+/** The sticky footer that submits the whole pending review at once — a summary plus
+ *  Approve / Request changes / Comment. One GitHub review, so a watching session
+ *  sees a single event instead of one per comment. */
+function ReviewBar({
+  draft,
+  summary,
+  setSummary,
+  submit,
+  submitting,
+}: {
+  draft: DraftComment[];
+  summary: string;
+  setSummary: (s: string) => void;
+  submit: (event: ReviewEvent) => Promise<void>;
+  submitting: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const n = draft.length;
+  return (
+    <Box style={{ flex: "0 0 auto", borderTop: "1px solid #2c2e33", background: "#202225" }}>
+      <Group justify="space-between" px="md" py={6} wrap="nowrap">
+        <Text size="xs" c="dimmed">
+          {n === 0 ? "No pending comments" : `${n} pending comment${n === 1 ? "" : "s"}`}
+        </Text>
+        <Button size="compact-xs" variant="subtle" color="gray" onClick={() => setOpen((o) => !o)}>
+          {open ? "Hide" : "Finish review"}
+        </Button>
+      </Group>
+      {open && (
+        <Box px="md" pb={8}>
+          <Textarea
+            autosize
+            minRows={2}
+            size="xs"
+            placeholder="Review summary (required to request changes)…"
+            value={summary}
+            onChange={(e) => setSummary(e.currentTarget.value)}
+          />
+          <Group gap={6} mt={6}>
+            <Button
+              size="compact-xs"
+              color="green"
+              loading={submitting}
+              onClick={() => submit("APPROVE")}
+            >
+              Approve
+            </Button>
+            <Button
+              size="compact-xs"
+              color="red"
+              variant="light"
+              loading={submitting}
+              onClick={() => submit("REQUEST_CHANGES")}
+            >
+              Request changes
+            </Button>
+            <Button
+              size="compact-xs"
+              variant="light"
+              color="blue"
+              loading={submitting}
+              onClick={() => submit("COMMENT")}
+            >
+              Comment
+            </Button>
+          </Group>
+        </Box>
+      )}
     </Box>
   );
 }

@@ -13,10 +13,15 @@ export type GhResult = { ok: boolean; stdout: string; stderr: string };
 
 /** Run `gh <args>` and capture stdout/stderr. Never throws — a missing `gh`, no
  *  auth, or a non-zero exit all come back as `{ ok: false }` for the caller to
- *  handle (the watcher keeps last-known state; the review routes 502). */
-export async function gh(args: string[]): Promise<GhResult> {
+ *  handle (the watcher keeps last-known state; the review routes 502). Pass `stdin`
+ *  to feed a request body (e.g. `gh api … --input -` for a JSON review payload). */
+export async function gh(args: string[], stdin?: string): Promise<GhResult> {
   try {
-    const proc = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "pipe" });
+    const proc = Bun.spawn(["gh", ...args], {
+      stdin: stdin != null ? new Blob([stdin]) : undefined,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
