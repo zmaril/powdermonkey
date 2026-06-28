@@ -1,0 +1,1 @@
+ALTER TABLE "pull_requests" ADD COLUMN "agent_session_url" text;

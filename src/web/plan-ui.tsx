@@ -10,9 +10,11 @@ import {
   ThemeIcon,
   UnstyledButton,
 } from "@mantine/core";
-import type { CloudPr } from "../server/events.ts";
+import { useState } from "react";
+import type { AgentStatus, CloudPr } from "../server/events.ts";
 import type { Phase, Session, Task } from "../server/schema.ts";
 import {
+  AgentState,
   CheckRollupState,
   MergeableState,
   PhaseStatus,
@@ -314,36 +316,145 @@ function prDot(pr: CloudPr): { color: string; title: string } {
   return { color: "gray", title: "no status yet" };
 }
 
+// The worker's self-reported state → a compact chip colour. Typed Record<AgentState,…>
+// so adding a state is a compile error here until it has a colour — the same
+// total-coverage guarantee KIND_ICON / SESSION_BADGE rely on. An unrecognised status
+// word is parsed to state:null upstream (no chip), so there's no open-string case here.
+const AGENT_BADGE: Record<AgentState, { color: string }> = {
+  [AgentState.Starting]: { color: "blue" },
+  [AgentState.Working]: { color: "blue" },
+  [AgentState.Blocked]: { color: "red" },
+  [AgentState.Done]: { color: "green" },
+};
+
+/** The agent-authored state chip, plus the needs-you flag. `blocked` is the needs-you
+ *  signal — a loud filled chip plus an explicit "needs you" badge so a blocked worker
+ *  can't be missed. Renders nothing until the worker has posted a known status. */
+function AgentStateBadge({ agent }: { agent: AgentStatus }) {
+  if (!agent.state) return null;
+  const blocked = agent.state === AgentState.Blocked;
+  const color = AGENT_BADGE[agent.state].color;
+  return (
+    <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
+      <Badge
+        size="xs"
+        variant={blocked ? "filled" : "light"}
+        color={color}
+        title={agent.summary ?? `agent: ${agent.state}`}
+      >
+        {agent.state}
+      </Badge>
+      {blocked && (
+        <Badge
+          size="xs"
+          variant="filled"
+          color="orange"
+          title={agent.summary ?? "The worker is blocked and needs you."}
+        >
+          needs you
+        </Badge>
+      )}
+    </Group>
+  );
+}
+
+/** The agent's own narrative: the one-line summary (and `next`) always, with the full
+ *  sticky-comment body one click away — the human-readable glance at what the agent
+ *  thinks is happening, not just the parsed fields. Renders nothing until the worker
+ *  has posted something. */
+function AgentNarrative({ agent }: { agent: AgentStatus }) {
+  const [open, setOpen] = useState(false);
+  if (!agent.summary && !agent.next && !agent.body) return null;
+  const hasBody = agent.body.trim().length > 0;
+  return (
+    <Box pl={16}>
+      <Group gap={6} wrap="nowrap" align="baseline">
+        <Box style={{ flex: 1, minWidth: 0 }}>
+          {agent.summary && (
+            <Text size="xs" c="dimmed" title={agent.summary} truncate={!open}>
+              {agent.summary}
+            </Text>
+          )}
+          {agent.next && (
+            <Text size="xs" c="dimmed" title={agent.next} truncate={!open}>
+              → next: {agent.next}
+            </Text>
+          )}
+        </Box>
+        {agent.sessionUrl && (
+          <Anchor
+            href={agent.sessionUrl}
+            target="_blank"
+            size="xs"
+            fw={500}
+            style={{ flex: "0 0 auto" }}
+            title="The cloud session that authored this status"
+          >
+            session ↗
+          </Anchor>
+        )}
+        {hasBody && (
+          <UnstyledButton onClick={() => setOpen((o) => !o)} style={{ flex: "0 0 auto" }}>
+            <Text size="xs" c="blue.4">
+              {open ? "hide" : "details"}
+            </Text>
+          </UnstyledButton>
+        )}
+      </Group>
+      {open && hasBody && (
+        <Box
+          mt={4}
+          p={8}
+          style={{ border: "1px solid #2c2e33", borderRadius: 4, background: "#141517" }}
+        >
+          <Text
+            size="xs"
+            c="dimmed"
+            style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "monospace" }}
+          >
+            {agent.body}
+          </Text>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
 /** One PR row in a worker card: a status dot (CI + conflicts, GitHub-style) · the
- *  #number (link) · the title. Full-width so the title is readable. */
+ *  #number (link) · the title · the worker's agent-state chip. The agent's narrative
+ *  (summary / next, with the full sticky comment on expand) sits below the row. */
 export function PrRow({ pr }: { pr: CloudPr }) {
   const dot = prDot(pr);
   return (
-    <Group gap="xs" wrap="nowrap">
-      <Box
-        w={8}
-        h={8}
-        title={dot.title}
-        style={{
-          borderRadius: "50%",
-          background: `var(--mantine-color-${dot.color}-6)`,
-          flexShrink: 0,
-        }}
-      />
-      <Anchor
-        href={pr.url}
-        target="_blank"
-        size="sm"
-        fw={600}
-        ff="monospace"
-        style={{ flexShrink: 0 }}
-      >
-        #{pr.number}
-      </Anchor>
-      <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
-        {pr.title}
-      </Text>
-    </Group>
+    <Box>
+      <Group gap="xs" wrap="nowrap">
+        <Box
+          w={8}
+          h={8}
+          title={dot.title}
+          style={{
+            borderRadius: "50%",
+            background: `var(--mantine-color-${dot.color}-6)`,
+            flexShrink: 0,
+          }}
+        />
+        <Anchor
+          href={pr.url}
+          target="_blank"
+          size="sm"
+          fw={600}
+          ff="monospace"
+          style={{ flexShrink: 0 }}
+        >
+          #{pr.number}
+        </Anchor>
+        <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
+          {pr.title}
+        </Text>
+        {pr.agent && <AgentStateBadge agent={pr.agent} />}
+      </Group>
+      {pr.agent && <AgentNarrative agent={pr.agent} />}
+    </Box>
   );
 }
 
