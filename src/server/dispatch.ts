@@ -88,6 +88,10 @@ export function buildTaskPrompt(briefs: TaskBrief[]): { prompt: string; trailers
     "Follow the `powdermonkey` skill. As you finish each phase, add its trailer to",
     "the commit that completes it (this is how progress — and this PR — is tied back",
     "to the task, so don't skip them; they're read off the commits once they land on main).",
+    "",
+    "Ask any questions you have, at any time — if something's ambiguous or you hit a",
+    "decision worth the operator's call, post your question on the PR thread rather than",
+    "guessing. The operator watches the thread and will reply there.",
   ].join("\n");
   return { prompt, trailers };
 }
