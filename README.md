@@ -28,8 +28,12 @@ terminal and auto-restarts (with backoff) if it crashes:
 
 ```bash
 bun run serve                              # launch (idempotent); prints attach cmd
-tmux -L powdermonkey attach -t pm-server   # watch the server console
+pm attach                                  # watch it all: one tmux pane per session
 ```
+
+`pm attach` (or `bun run attach`) opens a tmux dashboard with one pane per live
+session plus the server console — the operator's view onto everything PowderMonkey
+is running. The web UI surfaces the same command behind its **Attach** button.
 
 Load the seed plan (PowderMonkey's own roadmap) so the tree has something to show:
 
@@ -99,8 +103,9 @@ your work. When the UI stops responding, a shell hangs, or an agent gets stuck,
 drop to a terminal and talk to that socket directly:
 
 ```bash
+pm attach                                  # dashboard: one pane per session + server
 tmux -L powdermonkey ls                    # list every PM-managed session
-tmux -L powdermonkey attach -t pm-server   # watch the server console
+tmux -L powdermonkey attach -t pm-server   # watch just the server console
 ```
 
 See the **[tmux cheatsheet](docs/tmux.md)** for the full set of inspect-and-recover
