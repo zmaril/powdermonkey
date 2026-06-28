@@ -16,6 +16,7 @@ import { ArchivePane } from "./ArchivePane.tsx";
 import { BacklogPane } from "./BacklogPane.tsx";
 import { BrowserPane } from "./BrowserPane.tsx";
 import { HelpPane } from "./HelpPane.tsx";
+import { PlanReviewPane } from "./PlanReviewPane.tsx";
 import { ReviewPane } from "./ReviewPane.tsx";
 import { SettingsPane } from "./SettingsPane.tsx";
 import { ShellTerminal } from "./ShellTerminal.tsx";
@@ -247,6 +248,10 @@ function HelpPanel() {
   return <HelpPane />;
 }
 
+function PlanReviewPanel() {
+  return <PlanReviewPane />;
+}
+
 const dockComponents = {
   shell: ShellPanel,
   active: ActivePanel,
@@ -257,6 +262,7 @@ const dockComponents = {
   settings: SettingsPanel,
   about: AboutPanel,
   help: HelpPanel,
+  planreview: PlanReviewPanel,
 };
 
 // Tab titles for the singleton panes opened by the top-bar launchers (openPane →
@@ -269,6 +275,7 @@ const PANE_TITLES: Record<string, string> = {
   settings: "Settings",
   about: "About",
   help: "Help",
+  planreview: "Plan",
 };
 
 // Reviewing a PR is a focused, take-over activity, not another tab competing for the
@@ -329,6 +336,12 @@ function buildDefaultLayout(api: DockviewApi) {
     position: { direction: "within", referencePanel: "active" },
   });
   api.addPanel({
+    id: "planreview",
+    component: "planreview",
+    title: "Plan Review",
+    position: { direction: "within", referencePanel: "active" },
+  });
+  api.addPanel({
     id: "scratch",
     component: "scratch",
     title: "Scratch",
@@ -386,6 +399,7 @@ function TopBar() {
           <PaneButton label="Active" onClick={() => openPane("active")} />
           <PaneButton label="Backlog" onClick={() => openPane("backlog")} />
           <PaneButton label="Archive" onClick={() => openPane("archive")} />
+          <PaneButton label="Plan" onClick={() => openPane("planreview")} />
           <Divider orientation="vertical" />
           <PaneButton label="Shell" onClick={() => openTerminal("")} />
           <PaneButton label="Browser" onClick={() => openBrowser()} />
