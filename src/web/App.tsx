@@ -12,6 +12,11 @@ import { ActivePane } from "./ActivePane.tsx";
 import { ArchivePane } from "./ArchivePane.tsx";
 import { BacklogPane } from "./BacklogPane.tsx";
 import { ShellTerminal } from "./ShellTerminal.tsx";
+import {
+  type NotifyPermission,
+  notifyPermission,
+  requestNotifyPermission,
+} from "./notifications.ts";
 import { useStore } from "./store.ts";
 
 // The single pane of glass. The plan is split into three panels — a live ACTIVE
@@ -312,6 +317,44 @@ function AttachButton() {
   );
 }
 
+// Toolbar control for the Notification API permission. Reflects the
+// current permission and, from the undecided "default" state, prompts for it on
+// click. Hidden where the API is unsupported; shown disabled once blocked, since
+// browsers won't let us re-prompt — the user has to unblock it in site settings.
+function NotifyButton() {
+  const [perm, setPerm] = useState<NotifyPermission>(() => notifyPermission());
+  if (perm === "unsupported") return null;
+  if (perm === "granted") {
+    return (
+      <Button size="compact-xs" variant="light" color="green" disabled title="Notifications on">
+        Notify ✓
+      </Button>
+    );
+  }
+  if (perm === "denied") {
+    return (
+      <Button
+        size="compact-xs"
+        variant="default"
+        disabled
+        title="Notifications blocked — re-enable them in your browser's site settings"
+      >
+        Notify ✕
+      </Button>
+    );
+  }
+  return (
+    <Button
+      size="compact-xs"
+      variant="default"
+      title="Get a browser notification when a session needs you"
+      onClick={() => requestNotifyPermission().then(setPerm)}
+    >
+      Notify
+    </Button>
+  );
+}
+
 // Slim global toolbar: the app title, the cross-cutting actions (Shell / Scratch /
 // Reconcile), and the error banner. Lives above the dockview so it's always visible
 // regardless of which panel is focused.
@@ -341,6 +384,7 @@ function TopBar() {
           <Button size="compact-xs" variant="default" onClick={openNotes}>
             Scratch
           </Button>
+          <NotifyButton />
           <Button size="compact-xs" variant="default" onClick={reconcile}>
             Reconcile
           </Button>
