@@ -158,8 +158,9 @@ export function TaskBadges({
  *  several, so teleport pulls down the one the operator clicked from (its whole
  *  batch follows). */
 export function SessionActions({ session, taskId }: { session: Session; taskId: number }) {
-  const { land, stop, teleport, openSessionTerminal, openEditor } = useStore();
+  const { land, stop, teleport, openSessionTerminal, openEditor, pending } = useStore();
   const isRemote = session.kind === "remote";
+  const teleporting = pending[`teleport:${taskId}`] ?? false;
   return (
     <Group gap="xs" wrap="nowrap">
       <Badge variant="dot" color="teal" title={session.kind}>
@@ -177,6 +178,8 @@ export function SessionActions({ session, taskId }: { session: Session; taskId: 
             variant="light"
             color="grape"
             title="Pull this cloud session down to a local worktree (claude --teleport)"
+            loading={teleporting}
+            disabled={teleporting}
             onClick={() => teleport(taskId)}
           >
             Teleport
@@ -230,13 +233,31 @@ export function SessionActions({ session, taskId }: { session: Session; taskId: 
 
 /** Launch actions for a backlog task (no live session yet). */
 export function LaunchActions({ taskId }: { taskId: number }) {
-  const { startLocal, dispatch } = useStore();
+  const { startLocal, dispatch, pending } = useStore();
+  const startingLocal = pending[`start-local:${taskId}`] ?? false;
+  const dispatching = pending[`dispatch:${taskId}`] ?? false;
+  // Disable both while either is in flight so a task can't be launched twice; the one
+  // that was clicked carries the spinner so it's clear which action is working.
+  const busy = startingLocal || dispatching;
   return (
     <Group gap="xs" wrap="nowrap">
-      <Button size="compact-xs" variant="light" onClick={() => startLocal(taskId)}>
+      <Button
+        size="compact-xs"
+        variant="light"
+        loading={startingLocal}
+        disabled={busy}
+        onClick={() => startLocal(taskId)}
+      >
         Start local
       </Button>
-      <Button size="compact-xs" variant="subtle" color="gray" onClick={() => dispatch(taskId)}>
+      <Button
+        size="compact-xs"
+        variant="subtle"
+        color="gray"
+        loading={dispatching}
+        disabled={busy}
+        onClick={() => dispatch(taskId)}
+      >
         Dispatch remote
       </Button>
     </Group>
