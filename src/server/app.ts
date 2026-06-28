@@ -1,21 +1,30 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { TSchema } from "@sinclair/typebox";
+import { getTableColumns, getTableName } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 import { P, match } from "ts-pattern";
 import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
 import { pg } from "./db.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
-import type { CloudPr } from "./events.ts";
 import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
 import { models } from "./models.ts";
 import { PUBLIC_DIR } from "./paths.ts";
 import { loadPlan, planSchema } from "./plan.ts";
-import { upsertPrState } from "./pr-store.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { addRealtimeClient, removeRealtimeClient } from "./realtime.ts";
 import { reconcile } from "./reconcile.ts";
+import {
+  goals as goalsTable,
+  milestones as milestonesTable,
+  notes as notesTable,
+  phases as phasesTable,
+  pullRequests as pullRequestsTable,
+  sessionTasks as sessionTasksTable,
+  sessions as sessionsTable,
+  tasks as tasksTable,
+} from "./schema.ts";
 import {
   SUPERVISOR_ID,
   attachSessionPty,
@@ -46,9 +55,35 @@ type PtyHandle =
   { kind: "fresh"; proc: any } | { kind: "attach"; sessionId: number; detach: () => void };
 const ptys = new Map<object, PtyHandle>();
 
-// Per-socket teardown for the /sync/pull-requests spike: each connection owns one
-// PGlite live.changes subscription, dropped when the socket closes.
-const prSyncs = new Map<object, () => void>();
+// Per-socket teardown for /sync: each connection owns one PGlite live.changes
+// subscription, dropped when the socket closes.
+const syncSubs = new Map<object, () => void>();
+
+// The tables the browser mirrors as TanStack DB collections. The live SELECT and the
+// primary-key column are derived from the Drizzle schema — adding a table here is the
+// only per-table server code. Tables with a soft-delete column stream only LIVE rows
+// (archiving a row leaves the result set, which live.changes reports as a delete).
+const SYNC_TABLES: Record<string, { sql: string; key: string }> = Object.fromEntries(
+  [
+    goalsTable,
+    milestonesTable,
+    tasksTable,
+    phasesTable,
+    sessionsTable,
+    sessionTasksTable,
+    notesTable,
+    pullRequestsTable,
+    // biome-ignore lint/suspicious/noExplicitAny: heterogeneous pgTable objects, introspected generically.
+  ].map((tbl: any) => {
+    const name = getTableName(tbl);
+    const cols = getTableColumns(tbl);
+    const pk =
+      (Object.values(cols) as Array<{ name: string; primary: boolean }>).find((c) => c.primary)
+        ?.name ?? "id";
+    const live = "archivedAt" in cols ? " WHERE archived_at IS NULL" : "";
+    return [name, { sql: `SELECT * FROM "${name}"${live}`, key: pk }];
+  }),
+);
 
 /** A CRUD route group: list / get / create / update / archive(DELETE) / restore. */
 function resource(name: string, repo: Repo, body: { create: TSchema; update: TSchema }) {
@@ -156,21 +191,6 @@ export const app = new Elysia()
   .post("/plan", ({ body }) => loadPlan(body), { body: planSchema })
   // Reconcile progress from PM trailers on main. Also runs on a poll loop.
   .post("/reconcile", () => reconcile())
-  // SPIKE-ONLY (gated by PM_SPIKE_DEBUG): inject a pull_requests upsert so the
-  // live.changes → TanStack DB pipeline can be exercised without a real GitHub poll.
-  // Returns 404 in normal runs — never a write path the UI relies on.
-  .post(
-    "/debug/pr",
-    async ({ body, set }) => {
-      if (!process.env.PM_SPIKE_DEBUG) {
-        set.status = 404;
-        return { error: "not found" };
-      }
-      await upsertPrState(body as CloudPr);
-      return { ok: true };
-    },
-    { body: t.Any() },
-  )
   // Poll GitHub for pm/task-* PRs now (set prUrl, wake reconcile on merge). The
   // github-watch loop does this every 10s; this triggers a pass on demand.
   .post("/github-sync", () => syncCloudPrs())
@@ -352,17 +372,22 @@ export const app = new Elysia()
       removeRealtimeClient(ws.raw);
     },
   })
-  // ── Spike: stream pull_requests row-deltas to a TanStack DB collection ───────
-  // Where /events says only "something changed, refetch", this streams the actual
-  // row deltas (insert/update/delete) straight from PGlite's `live.changes`. Each
-  // connection opens its OWN subscription, so its initial snapshot and the live
-  // stream are atomic — a reconnecting client just gets a fresh snapshot, no
-  // offset/catch-up bookkeeping. The browser half (src/web/pr-collection.ts) feeds
-  // these into a custom TanStack DB collection via begin/write/commit. Read-only:
-  // the github-watch loop is the only writer of this table, so there's no write path
-  // to build — reads are reactive, any writes would still go through the REST routes.
-  .ws("/sync/pull-requests", {
+  // Realtime row-delta sync for the browser's TanStack DB collections. Where /events
+  // says only "something changed, refetch", this streams the actual row deltas
+  // (insert/update/delete) straight from PGlite's `live.changes`, one socket per
+  // table (?table=tasks). Each connection opens its OWN subscription, so its initial
+  // snapshot and the live stream are atomic — a reconnecting client just gets a fresh
+  // snapshot, no offset/catch-up bookkeeping. The browser half (src/web/collections.ts)
+  // applies these via begin/write/commit. Reads are reactive; writes still go through
+  // the REST routes and stream back here.
+  .ws("/sync", {
+    query: t.Object({ table: t.String() }),
     async open(ws) {
+      const spec = SYNC_TABLES[ws.data.query.table];
+      if (!spec) {
+        ws.close();
+        return;
+      }
       const send = (changes: unknown) => {
         try {
           ws.send(JSON.stringify({ changes }));
@@ -370,21 +395,15 @@ export const app = new Elysia()
       };
       // Partial update mode: an UPDATE delta carries only the changed columns (the
       // rest come back null), so the client merges by __changed_columns__.
-      const lc = await pg.live.changes(
-        `SELECT number, task_id AS "taskId", title, url, state,
-                is_draft AS "isDraft", merged, checks, mergeable
-         FROM pull_requests`,
-        [],
-        "number",
-      );
+      const lc = await pg.live.changes(spec.sql, [], spec.key);
       send(lc.initialChanges); // snapshot first (may be empty → client still readies)
       const onChange = (changes: unknown) => send(changes);
       lc.subscribe(onChange);
-      prSyncs.set(ws.raw, () => lc.unsubscribe(onChange));
+      syncSubs.set(ws.raw, () => lc.unsubscribe(onChange));
     },
     close(ws) {
-      const off = prSyncs.get(ws.raw);
-      prSyncs.delete(ws.raw);
+      const off = syncSubs.get(ws.raw);
+      syncSubs.delete(ws.raw);
       off?.();
     },
   })
