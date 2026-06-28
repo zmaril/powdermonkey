@@ -11,10 +11,52 @@ type ValueOf<T> = T[keyof T];
 export const PhaseStatus = { Todo: "todo", Done: "done" } as const;
 export type PhaseStatus = ValueOf<typeof PhaseStatus>;
 
+/**
+ * Who made the latest *major decision* on a task/phase — the provenance behind a
+ * terminal call (completed, cancelled, reopened), kept apart from the `status`
+ * axis that says *what* the decision was. `status` is the what; `decision_source`
+ * is the who.
+ *
+ * - `Reconciled` — the call came from `main`: the reconciler saw a
+ *   `PM-Phase:`/`PM-Task:` trailer land (work earned the truth). Written only by
+ *   the reconciler; never set by hand.
+ * - `Operator` — you made the call by hand in the UI (mark done, close as
+ *   won't-do, reopen) for work that never produced a trailer.
+ * - `Supervisor` — you delegated the call to the supervisor agent and it acted
+ *   through the API on your behalf.
+ *
+ * `null` on a row that hasn't had a major decision recorded yet. The split keeps
+ * an asserted call first-class but visibly distinct from one that landed on
+ * `main`, and distinguishes a by-hand call from a delegated one — see
+ * docs/completion-model.md.
+ */
+export const DecisionSource = {
+  Reconciled: "reconciled",
+  Operator: "operator",
+  Supervisor: "supervisor",
+} as const;
+export type DecisionSource = ValueOf<typeof DecisionSource>;
+
+/** The two human-driven decision sources (everything except `reconciled`, which
+ *  is reserved for the reconciler). This is the set the complete/cancel/reopen
+ *  endpoints accept as an explicit `source`. */
+export const OverrideSource = {
+  Operator: DecisionSource.Operator,
+  Supervisor: DecisionSource.Supervisor,
+} as const;
+export type OverrideSource = ValueOf<typeof OverrideSource>;
+
+/**
+ * A task's lifecycle. `Pending`/`Dispatched`/`Merged` are the happy path;
+ * `Cancelled` is the won't-do terminal state — the task is closed without being
+ * finished, so it never counts as done in a rollup. Who closed it (operator vs
+ * supervisor) is recorded separately in `decision_source`.
+ */
 export const TaskStatus = {
   Pending: "pending",
   Dispatched: "dispatched",
   Merged: "merged",
+  Cancelled: "cancelled",
 } as const;
 export type TaskStatus = ValueOf<typeof TaskStatus>;
 

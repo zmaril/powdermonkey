@@ -38,6 +38,18 @@ Validation is strict (TypeBox); a malformed plan returns 422. Don't include ids 
 
 **Don't fake progress.** Phase/task completion is owned by reconciliation (trailers on `main`). Never `PATCH` a phase to `status: "done"` to "finish" work — it'll be wrong and reconciliation is the source of truth.
 
+**Closing non-reconcilable work (the override path).** Some work genuinely finishes but never lands a trailer (a squash dropped it, out-of-band work, a phase-less task), and some tasks are won't-do. When the operator asks you to close such a thing, use the dedicated override endpoints — **always with `{ "source": "supervisor" }`** so the call is honestly attributed to you, not disguised as a `main` reconciliation (that's the difference from faking progress: it's recorded as `decision_source = supervisor`, never `reconciled`). This is NOT for work that *should* land a trailer — prefer a real PR + trailer whenever the work can produce one.
+
+- `POST $PM_URL/phases/:id/complete` — mark one phase done (rolls its task up when that finishes it).
+- `POST $PM_URL/tasks/:id/complete` — mark a whole task done (closes its remaining phases too).
+- `POST $PM_URL/tasks/:id/cancel` — close a task as **won't-do**: a terminal `cancelled` status (archived, never counted as done).
+- `POST $PM_URL/{phases|tasks}/:id/reopen` — walk an override call back (refused on reconciled rows — those belong to `main`).
+
+```sh
+curl -s -X POST $PM_URL/tasks/42/cancel   -H 'content-type: application/json' -d '{"source":"supervisor"}'
+curl -s -X POST $PM_URL/phases/137/complete -H 'content-type: application/json' -d '{"source":"supervisor"}'
+```
+
 **Operator notes (`@notes`).** The operator keeps a free-form notepad — scratch thoughts, reminders, context — in a `notes` table, edited from the Notes panel in the UI. It's outside the goal hierarchy and never affects progress. When the operator references **`@notes`** (e.g. "check @notes", "what's in @notes", "per @notes…"), read the current notes with:
 
 ```
