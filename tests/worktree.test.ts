@@ -134,3 +134,24 @@ test("stop aborts a session without a clean worktree and re-pends the task", asy
   // task rolled back to pending so it can be re-run
   expect((await taskRepo.get(task.id))?.status).toBe("pending");
 });
+
+test("stop does NOT un-merge an already-merged task on a multi-task session", async () => {
+  // One session spanning two tasks; the first finishes and merges while the
+  // second is still in flight. Aborting the shared session must re-pend only the
+  // unfinished task — the merged one is done regardless of the session ending.
+  const all = (await taskRepo.list()).sort((a, b) => a.id - b.id);
+  const [merged, unfinished] = all;
+
+  const started = await startLocalSession([merged.id, unfinished.id]);
+  if (!started.ok) throw new Error(started.error);
+
+  // The first task merged mid-session (reconcile read its trailer off main).
+  await taskRepo.update(merged.id, { status: "merged" });
+
+  const result = await stopSession(started.session.id);
+  if (!result.ok) throw new Error(`${result.error}: ${result.output ?? ""}`);
+
+  // Merged work survives the abort; only the in-flight task rolls back to pending.
+  expect((await taskRepo.get(merged.id))?.status).toBe("merged");
+  expect((await taskRepo.get(unfinished.id))?.status).toBe("pending");
+});
