@@ -55,7 +55,10 @@ function taskSection(task: Task, taskPhases: Phase[]): string {
  *  it just finished. `trailers` is the flat list across every task (the union of
  *  all phases), in task-then-phase order. We don't dictate a branch name — the
  *  PR↔task link comes from the PM-Phase trailers, not the branch. */
-export function buildTaskPrompt(briefs: TaskBrief[]): { prompt: string; trailers: string[] } {
+export function buildTaskPrompt(
+  briefs: TaskBrief[],
+  comment?: string,
+): { prompt: string; trailers: string[] } {
   if (briefs.length === 0) return { prompt: "", trailers: [] };
 
   const trailers = briefs.flatMap(({ phases: ps }) =>
@@ -73,7 +76,7 @@ export function buildTaskPrompt(briefs: TaskBrief[]): { prompt: string; trailers
       ]
     : [];
 
-  const prompt = [
+  const lines = [
     ...header,
     sections.join("\n\n"),
     "",
@@ -92,7 +95,12 @@ export function buildTaskPrompt(briefs: TaskBrief[]): { prompt: string; trailers
     "Ask any questions you have, at any time — if something's ambiguous or you hit a",
     "decision worth the operator's call, post your question on the PR thread rather than",
     "guessing. The operator watches the thread and will reply there.",
-  ].join("\n");
+  ];
+  // Optional operator note typed at launch — extra context for THIS run, appended last
+  // so it's the freshest instruction the worker sees.
+  const note = comment?.trim();
+  if (note) lines.push("", "Operator note for this run:", note);
+  const prompt = lines.join("\n");
   return { prompt, trailers };
 }
 
@@ -104,6 +112,7 @@ export function buildTaskPrompt(briefs: TaskBrief[]): { prompt: string; trailers
  *  `GET /tasks/:id/prompt` route all go through here. */
 export async function loadTaskPrompt(
   taskIds: number | number[],
+  comment?: string,
 ): Promise<{ prompt: string; trailers: string[]; tasks: Task[] } | null> {
   const ids = Array.isArray(taskIds) ? taskIds : [taskIds];
   if (ids.length === 0) return null;
@@ -120,7 +129,7 @@ export async function loadTaskPrompt(
     briefs.push({ task, phases: taskPhases });
   }
 
-  return { ...buildTaskPrompt(briefs), tasks: briefs.map((b) => b.task) };
+  return { ...buildTaskPrompt(briefs, comment), tasks: briefs.map((b) => b.task) };
 }
 
 /** The dispatch command, with the prompt sourced from a file so a multi-line
@@ -174,8 +183,11 @@ export type DispatchResult =
  *  All selected tasks share the one cloud run (the combined brief lists each), and
  *  each surfaces that session. The first task is the "primary" — it names the
  *  prompt file and the dry-run URL. */
-export async function dispatchTask(taskIds: number | number[]): Promise<DispatchResult> {
-  const built = await loadTaskPrompt(taskIds);
+export async function dispatchTask(
+  taskIds: number | number[],
+  comment?: string,
+): Promise<DispatchResult> {
+  const built = await loadTaskPrompt(taskIds, comment);
   if (!built) return { ok: false, error: `unknown task "${[taskIds].flat().join(", ")}"` };
   const ids = built.tasks.map((t) => t.id);
   const primary = ids[0];

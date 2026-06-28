@@ -6,9 +6,11 @@ import {
   Code,
   CopyButton,
   Group,
+  Popover,
   SegmentedControl,
   Stack,
   Text,
+  Textarea,
   Title,
   UnstyledButton,
 } from "@mantine/core";
@@ -57,22 +59,100 @@ function Caret({
   );
 }
 
+/** A launch button (💻▶ / ☁️▶) that opens a popover to attach an optional note for
+ *  this run before launching — the note rides into the worker's prompt. Just hit the
+ *  confirm (or ⌘/Ctrl+Enter) to launch with no note. [prototype] */
+function LaunchButton({
+  icon,
+  label,
+  color,
+  loading,
+  disabled,
+  onRun,
+}: {
+  icon: string;
+  label: string;
+  color?: string;
+  loading: boolean;
+  disabled: boolean;
+  onRun: (comment: string) => void;
+}) {
+  const [opened, setOpened] = useState(false);
+  const [note, setNote] = useState("");
+  const run = () => {
+    onRun(note);
+    setNote("");
+    setOpened(false);
+  };
+  return (
+    <Popover
+      opened={opened}
+      onChange={setOpened}
+      position="bottom-start"
+      width={280}
+      withArrow
+      shadow="md"
+      trapFocus
+    >
+      <Popover.Target>
+        <Button
+          size="compact-xs"
+          variant="light"
+          color={color}
+          title={label}
+          loading={loading}
+          disabled={disabled}
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpened((o) => !o);
+          }}
+        >
+          {icon}
+        </Button>
+      </Popover.Target>
+      <Popover.Dropdown onClick={(e) => e.stopPropagation()}>
+        <Stack gap="xs">
+          <Text size="xs" fw={600}>
+            {label}
+          </Text>
+          <Textarea
+            value={note}
+            onChange={(e) => setNote(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) run();
+            }}
+            placeholder="optional note for this run…"
+            autosize
+            minRows={2}
+            maxRows={6}
+            size="xs"
+            // biome-ignore lint/a11y/noAutofocus: deliberate — popover opens for this input.
+            autoFocus
+          />
+          <Button size="xs" color={color} onClick={run}>
+            {label}
+          </Button>
+        </Stack>
+      </Popover.Dropdown>
+    </Popover>
+  );
+}
+
 /** The shared action cluster for a backlog task (or a whole multi-selection): launch
- *  local 💻▶ / remote ☁️▶, or close it (DONE / WONTDO). Works on one or many ids — the
- *  solo card passes `[task.id]`, the batch bar passes the selection — so the buttons
- *  look and behave identically in both. `onDone` lets the batch bar clear the selection
- *  after an action. Clicks stop propagation so they don't shift-select the card. */
+ *  local 💻▶ / remote ☁️▶ (each with an optional run note), or close it (DONE / WONTDO).
+ *  Works on one or many ids — the solo card passes `[task.id]`, the batch bar passes the
+ *  selection. `onDone` lets the batch bar clear the selection after an action. */
 function TaskActions({ ids, onDone }: { ids: number[]; onDone?: () => void }) {
   const { startLocalMany, dispatchMany, completeTask, cancelTask } = useStore();
   const [running, setRunning] = useState<SessionKind | null>(null);
   const busy = running !== null;
 
-  const launch = async (kind: SessionKind) => {
+  const launch = async (kind: SessionKind, comment: string) => {
     if (busy || ids.length === 0) return;
     setRunning(kind);
     try {
-      if (kind === SessionKind.Local) await startLocalMany(ids);
-      else await dispatchMany(ids);
+      if (kind === SessionKind.Local) await startLocalMany(ids, comment);
+      else await dispatchMany(ids, comment);
       onDone?.();
     } finally {
       setRunning(null);
@@ -95,27 +175,21 @@ function TaskActions({ ids, onDone }: { ids: number[]; onDone?: () => void }) {
 
   return (
     <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-      <Button
-        size="compact-xs"
-        variant="light"
-        title="Start local"
+      <LaunchButton
+        icon="💻 ▶"
+        label="Start local"
         loading={running === SessionKind.Local}
         disabled={busy}
-        onClick={() => launch(SessionKind.Local)}
-      >
-        💻 ▶
-      </Button>
-      <Button
-        size="compact-xs"
-        variant="light"
+        onRun={(c) => launch(SessionKind.Local, c)}
+      />
+      <LaunchButton
+        icon="☁️ ▶"
+        label="Dispatch remote"
         color="cyan"
-        title="Dispatch remote"
         loading={running === SessionKind.Remote}
         disabled={busy}
-        onClick={() => launch(SessionKind.Remote)}
-      >
-        ☁️ ▶
-      </Button>
+        onRun={(c) => launch(SessionKind.Remote, c)}
+      />
       <Button
         size="compact-xs"
         variant="light"

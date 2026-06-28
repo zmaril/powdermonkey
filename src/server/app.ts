@@ -137,7 +137,9 @@ function resource(name: string, repo: Repo, body: { create: TSchema; update: TSc
 // Body for the launch routes: the path `:id` is the primary task; `taskIds` may
 // carry additional tasks to fold into the SAME session. We union them (primary
 // first) and dedupe, so the UI can pass the whole multi-selection either way.
-const launchBody = t.Optional(t.Object({ taskIds: t.Optional(t.Array(t.Number())) }));
+const launchBody = t.Optional(
+  t.Object({ taskIds: t.Optional(t.Array(t.Number())), comment: t.Optional(t.String()) }),
+);
 function launchIds(idParam: string, body?: { taskIds?: number[] } | null): number[] {
   return [...new Set([Number(idParam), ...(body?.taskIds ?? [])])];
 }
@@ -161,7 +163,7 @@ const tasksGroup = resource("tasks", taskRepo, models.tasks)
   .post(
     "/:id/dispatch",
     async ({ params, body, set }) => {
-      const result = await dispatchTask(launchIds(params.id, body));
+      const result = await dispatchTask(launchIds(params.id, body), body?.comment);
       if (!result.ok) set.status = 400;
       return result;
     },
@@ -172,7 +174,9 @@ const tasksGroup = resource("tasks", taskRepo, models.tasks)
   .post(
     "/:id/start-local",
     async ({ params, body, set }) => {
-      const result = await startLocalSession(launchIds(params.id, body));
+      const result = await startLocalSession(launchIds(params.id, body), {
+        comment: body?.comment,
+      });
       if (!result.ok) set.status = 400;
       return result;
     },

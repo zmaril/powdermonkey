@@ -56,6 +56,8 @@ export type StartLocalOpts = {
   fetchRemote?: boolean;
   // Startup command template (overrides PM_SESSION_CMD); `{prompt_file}` is replaced.
   startup?: string;
+  // Optional operator note for this run, appended to the worker's prompt.
+  comment?: string;
 };
 
 export type StartLocalResult =
@@ -73,7 +75,7 @@ export async function startLocalSession(
   taskIds: number | number[],
   opts: StartLocalOpts = {},
 ): Promise<StartLocalResult> {
-  const built = await loadTaskPrompt(taskIds);
+  const built = await loadTaskPrompt(taskIds, opts.comment);
   if (!built) return { ok: false, error: `unknown task "${[taskIds].flat().join(", ")}"` };
   const { prompt, trailers } = built;
   const ids = built.tasks.map((t) => t.id);

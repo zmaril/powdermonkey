@@ -79,8 +79,8 @@ type State = {
   dispatch: (taskId: number) => Promise<void>;
   // Launch several backlog tasks together: ONE session works the whole batch. The
   // first id is the primary (it names the worktree/branch); the rest ride along.
-  startLocalMany: (taskIds: number[]) => Promise<void>;
-  dispatchMany: (taskIds: number[]) => Promise<void>;
+  startLocalMany: (taskIds: number[], comment?: string) => Promise<void>;
+  dispatchMany: (taskIds: number[], comment?: string) => Promise<void>;
   teleport: (taskId: number) => Promise<void>;
   // Operator decisions (the non-reconciled path): mark a phase/task done by hand,
   // close a task as won't-do (cancel), or walk either back (reopen). The UI is the
@@ -253,12 +253,12 @@ export const useStore = create<State>()(
           const { error } = await api.tasks({ id: taskId }).dispatch.post();
           if (error) set({ error: errMsg(error) });
         }),
-      startLocalMany: async (taskIds) => {
+      startLocalMany: async (taskIds, comment) => {
         if (taskIds.length === 0) return;
         const [primary, ...rest] = taskIds;
         const { data, error } = await api
           .tasks({ id: primary })
-          ["start-local"].post({ taskIds: rest });
+          ["start-local"].post({ taskIds: rest, comment });
         if (error) return void set({ error: errMsg(error) });
         if (data && "ok" in data && data.ok) {
           set({
@@ -272,10 +272,12 @@ export const useStore = create<State>()(
           });
         }
       },
-      dispatchMany: async (taskIds) => {
+      dispatchMany: async (taskIds, comment) => {
         if (taskIds.length === 0) return;
         const [primary, ...rest] = taskIds;
-        const { error } = await api.tasks({ id: primary }).dispatch.post({ taskIds: rest });
+        const { error } = await api
+          .tasks({ id: primary })
+          .dispatch.post({ taskIds: rest, comment });
         if (error) set({ error: errMsg(error) });
       },
       teleport: (taskId) =>
