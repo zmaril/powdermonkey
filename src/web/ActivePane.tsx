@@ -1,18 +1,26 @@
-import { Anchor, Badge, Box, Group, SegmentedControl, Stack, Text, Title } from "@mantine/core";
+import { Badge, Box, Card, Group, SegmentedControl, Stack, Text, Title } from "@mantine/core";
 import { useState } from "react";
+import type { CloudPr } from "../server/events.ts";
 import type { Goal, Milestone, Session, Task } from "../server/schema.ts";
 import { partitionTasks } from "./active.ts";
 import { type Indexes, starFirst, usePlanData } from "./plan-data.ts";
-import { IdTag, KIND_ICON, PrStatus, SessionActions, StarToggle, TaskBadges } from "./plan-ui.tsx";
+import {
+  IdTag,
+  KIND_ICON,
+  PrRow,
+  SessionActions,
+  SessionStateBadge,
+  StarToggle,
+} from "./plan-ui.tsx";
 
-// The Active pane is the live monitor — every task with a session running right
-// now (the derived-active set; see active.ts). The unit here is the SESSION, not
-// the task: one worker can be dispatched for several tasks at once (the
-// session_tasks join), so those tasks are grouped under their shared session and
-// the session's controls (Shell · VS Code · Land · Stop) appear once for the whole
-// group. Two views, toggled:
-//   • Flat   — session groups in one dense list, htop-style.
-//   • Grouped — the same groups nested under goal → milestone.
+// now (the derived-active set; see active.ts). The unit here is the WORKER, not
+// the task: each live session renders as one card, because a single worker can be
+// dispatched for several tasks at once (the session_tasks join). The card header
+// carries everything session-level — kind, state (once), session link, Teleport,
+// Stop — and the task(s) nest below showing only what's per-task (star, id, title,
+// their own PR/CI status). Two views, toggled:
+//   • Flat   — worker cards in one list.
+//   • Grouped — the same cards nested under goal → milestone.
 // It re-renders off the same WebSocket change feed as the rest of the app, so
 // session state (running / Try Again / needs you) stays current without a refresh.
 
@@ -41,20 +49,17 @@ function groupBySession(tasks: Task[], idx: Indexes): SessionGrouping[] {
   return order.map((id) => groups.get(id) as SessionGrouping);
 }
 
-/** One task line inside a session group: star · id · title · (context) · badges ·
- *  PR. No session controls here — those belong to the group, not the task. */
-function TaskLine({
-  task,
-  session,
-  idx,
-  context,
-}: {
-  task: Task;
-  session: Session;
-  idx: Indexes;
-  context?: string;
-}) {
-  const pr = idx.prByTask.get(task.id);
+/** The goal › milestone trail a task hangs under. */
+function contextOf(task: Task, idx: Indexes): string {
+  const m = idx.milestoneById.get(task.milestoneId);
+  const g = m ? idx.goalById.get(m.goalId) : undefined;
+  return [g?.title, m?.title].filter(Boolean).join(" › ");
+}
+
+/** One task line inside a worker card's Tasks column: star · id · title · (context).
+ *  Nothing session-level (kind/state/controls live in the header) and no PR — PRs
+ *  get their own column on the right. */
+function TaskLine({ task, context }: { task: Task; context?: string }) {
   return (
     <Group gap="sm" wrap="nowrap" align="flex-start">
       <StarToggle task={task} />
@@ -71,23 +76,41 @@ function TaskLine({
           </Text>
         )}
       </Box>
-      <TaskBadges task={task} session={session} showStatus={false} />
-      {task.prUrl && (
-        <Anchor href={task.prUrl} target="_blank" size="sm" fw={500}>
-          PR ↗
-        </Anchor>
-      )}
-      {pr && <PrStatus pr={pr} />}
     </Group>
   );
 }
 
-/** One session group: the task(s) the worker is running, then a single action
- *  cluster (branch · Shell · VS Code · Teleport · Land · Stop) for the session.
- *  A multi-task group gets a left accent + a "N tasks · one worker" caption so it
- *  reads as a single unit. `showContext` adds the goal › milestone trail to each
- *  task line (on in the flat view, off under grouped headings where it's redundant). */
-function SessionGroup({
+/** A tiny uppercase column label (Tasks / PRs) for the worker card body. */
+function ColumnLabel({ children }: { children: string }) {
+  return (
+    <Text size="xs" c="dimmed" fw={700} tt="uppercase" style={{ letterSpacing: 0.5 }}>
+      {children}
+    </Text>
+  );
+}
+
+/** The PRs a worker's tasks have opened, de-duped by PR number (a multi-task worker
+ *  can land one PR for several tasks). */
+function workerPrs(tasks: Task[], idx: Indexes): CloudPr[] {
+  const out: CloudPr[] = [];
+  const seen = new Set<number>();
+  for (const t of tasks) {
+    const pr = idx.prByTask.get(t.id);
+    if (pr && !seen.has(pr.number)) {
+      seen.add(pr.number);
+      out.push(pr);
+    }
+  }
+  return out;
+}
+
+/** One worker = one card. The header holds everything session-level (kind · state ·
+ *  shared context · session link · Teleport · Stop); the task(s) the worker is
+ *  running nest below. Single- and multi-task workers render the same way, so the
+ *  pane is visually consistent. `showContext` puts the shared goal › milestone trail
+ *  in the header (flat view); under grouped headings it's redundant, so it's off —
+ *  and if a worker spans milestones, each task line carries its own context. */
+function WorkerCard({
   session,
   tasks,
   idx,
@@ -98,49 +121,61 @@ function SessionGroup({
   idx: Indexes;
   showContext: boolean;
 }) {
-  const multi = tasks.length > 1;
+  const contexts = showContext ? [...new Set(tasks.map((t) => contextOf(t, idx)))] : [];
+  const sharedContext = contexts.length === 1 ? contexts[0] : undefined;
+  const perTaskContext = contexts.length > 1;
+  const prs = workerPrs(tasks, idx);
   return (
-    <Box
-      px="sm"
-      py={8}
-      style={{
-        borderBottom: "1px solid #2c2e33",
-        borderLeft: multi ? "2px solid #4c5568" : undefined,
-      }}
-    >
-      <Stack gap={6}>
-        {tasks.map((t) => {
-          const m = idx.milestoneById.get(t.milestoneId);
-          const g = m ? idx.goalById.get(m.goalId) : undefined;
-          const context = showContext
-            ? [g?.title, m?.title].filter(Boolean).join(" › ")
-            : undefined;
-          return <TaskLine key={t.id} task={t} session={session} idx={idx} context={context} />;
-        })}
-      </Stack>
-      <Group gap="xs" wrap="wrap" justify="space-between" align="center" mt={8}>
-        <Text size="xs" c="dimmed">
-          {KIND_ICON[session.kind]}
-          {multi ? ` ${tasks.length} tasks · one worker` : ""}
-        </Text>
+    <Card withBorder radius="md" padding="sm" bg="#1f2023">
+      {/* Top: session status + controls, full width. */}
+      <Group justify="space-between" wrap="nowrap" align="flex-start" mb={10}>
+        <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+          <Text size="sm" title={session.kind}>
+            {KIND_ICON[session.kind]}
+          </Text>
+          <SessionStateBadge session={session} />
+          {sharedContext && (
+            <Text size="xs" c="dimmed" truncate>
+              {sharedContext}
+            </Text>
+          )}
+        </Group>
         <SessionActions session={session} taskId={tasks[0].id} />
       </Group>
-    </Box>
+
+      {/* Bottom: tasks, then their PRs below — single column so titles are readable. */}
+      <Stack gap={10}>
+        <Stack gap={6}>
+          <ColumnLabel>Tasks</ColumnLabel>
+          {tasks.map((t) => (
+            <TaskLine
+              key={t.id}
+              task={t}
+              context={perTaskContext ? contextOf(t, idx) : undefined}
+            />
+          ))}
+        </Stack>
+        <Stack gap={6}>
+          <ColumnLabel>PRs</ColumnLabel>
+          {prs.length === 0 ? (
+            <Text size="xs" c="dimmed">
+              none yet
+            </Text>
+          ) : (
+            prs.map((pr) => <PrRow key={pr.number} pr={pr} />)
+          )}
+        </Stack>
+      </Stack>
+    </Card>
   );
 }
 
 function FlatView({ tasks, idx }: { tasks: Task[]; idx: Indexes }) {
   const groups = groupBySession(starFirst(tasks), idx);
   return (
-    <Stack gap={0}>
+    <Stack gap="xs">
       {groups.map((g) => (
-        <SessionGroup
-          key={g.session.id}
-          session={g.session}
-          tasks={g.tasks}
-          idx={idx}
-          showContext
-        />
+        <WorkerCard key={g.session.id} session={g.session} tasks={g.tasks} idx={idx} showContext />
       ))}
     </Stack>
   );
@@ -168,13 +203,13 @@ function GroupedView({ activeIds, idx }: { activeIds: Set<number>; idx: Indexes 
               {goal.title}
             </Text>
           </Group>
-          <Group gap={8} wrap="nowrap" align="baseline" mb={4}>
+          <Group gap={8} wrap="nowrap" align="baseline" mb={6}>
             <IdTag prefix="m" id={milestone.id} />
             <Title order={5}>{milestone.title}</Title>
           </Group>
-          <Stack gap={0}>
+          <Stack gap="xs">
             {groups.map((g) => (
-              <SessionGroup
+              <WorkerCard
                 key={g.session.id}
                 session={g.session}
                 tasks={g.tasks}
@@ -220,9 +255,9 @@ export function ActivePane() {
         />
       </Group>
 
-      <Box style={{ flex: 1, overflowY: "auto" }} px={view === "grouped" ? "md" : 0} py={4}>
+      <Box style={{ flex: 1, overflowY: "auto" }} px="md" py="xs">
         {active.length === 0 ? (
-          <Text c="dimmed" size="sm" px="md" py="lg">
+          <Text c="dimmed" size="sm" py="lg">
             Nothing active. Launch a task from the Backlog (Start local / Dispatch remote, or "/" →
             Start local on a new line) and it shows up here.
           </Text>

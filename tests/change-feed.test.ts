@@ -69,6 +69,7 @@ test("a pull_requests write pushes a ping and is served by currentCloudPrs", asy
     upsertPrState({
       number: 101,
       taskId: 1,
+      title: "Test PR",
       url: "https://example/pr/101",
       state: "OPEN",
       isDraft: false,

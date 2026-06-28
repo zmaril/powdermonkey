@@ -1,6 +1,7 @@
 import {
   Anchor,
   Badge,
+  Box,
   Button,
   Group,
   List,
@@ -170,22 +171,38 @@ export function TaskBadges({
   );
 }
 
+/** The live session's state, shown once in a worker card's header: a "needs you"
+ *  flag when it's parked for input, plus the running / Try Again / idle / stopped
+ *  badge. The state belongs to the worker, not each task, so it lives here. */
+export function SessionStateBadge({ session }: { session: Session }) {
+  return (
+    <Group gap={6} wrap="nowrap">
+      {session.needsInput && (
+        <Badge color="yellow" variant="filled">
+          needs you
+        </Badge>
+      )}
+      <Badge color={SESSION_BADGE[session.state].color} variant="filled">
+        {SESSION_BADGE[session.state].label}
+      </Badge>
+    </Group>
+  );
+}
+
 /** Actions for a task that currently HAS a live session. A local session runs in a
  *  worktree, so it gets Shell + VS Code; a remote (cloud) session has neither — it
  *  lives on claude.ai, so it gets a link out to the session plus Teleport to pull
- *  it down. Both get Land / Stop. `taskId` is the row's task — a session can cover
+ *  it down. Both get Stop. `taskId` is the row's task — a session can cover
  *  several, so teleport pulls down the one the operator clicked from (its whole
  *  batch follows). */
 export function SessionActions({ session, taskId }: { session: Session; taskId: number }) {
-  const { land, stop, teleport, openSessionTerminal, openEditor, pending } = useStore();
+  const { stop, teleport, openSessionTerminal, openEditor, pending } = useStore();
   const isRemote = session.kind === SessionKind.Remote;
   const teleporting = pending[`teleport:${taskId}`] ?? false;
+  // No kind/branch badge here — the worker card's header already shows the kind
+  // icon and running state, so repeating "☁ remote" next to it was pure noise.
   return (
     <Group gap="xs" wrap="nowrap">
-      <Badge variant="dot" color="teal" title={session.kind}>
-        <span aria-label={session.kind}>{KIND_ICON[session.kind]}</span>{" "}
-        {session.branch ?? "remote"}
-      </Badge>
       {isRemote ? (
         <>
           {session.url && (
@@ -228,9 +245,6 @@ export function SessionActions({ session, taskId }: { session: Session; taskId: 
           </Button>
         </>
       )}
-      <Button size="compact-xs" variant="light" color="teal" onClick={() => land(session.id)}>
-        Land
-      </Button>
       <Button
         size="compact-xs"
         variant="light"
@@ -284,39 +298,51 @@ export function LaunchActions({ taskId }: { taskId: number }) {
   );
 }
 
-// GitHub's statusCheckRollup states → a compact CI chip.
-const CHECK_BADGE: Record<CheckRollupState, { label: string; color: string }> = {
-  [CheckRollupState.Success]: { label: "CI ✓", color: "green" },
-  [CheckRollupState.Failure]: { label: "CI ✗", color: "red" },
-  [CheckRollupState.Error]: { label: "CI ✗", color: "red" },
-  [CheckRollupState.Pending]: { label: "CI …", color: "yellow" },
-  [CheckRollupState.Expected]: { label: "CI …", color: "yellow" },
-};
+/** One GitHub-style status dot folding CI + mergeability into a single glance:
+ *  conflicts / CI failure → red, CI running → yellow, passing or no-conflicts →
+ *  green, merged → violet, nothing-known-yet → gray. */
+function prDot(pr: CloudPr): { color: string; title: string } {
+  if (pr.merged) return { color: "violet", title: "merged" };
+  if (pr.mergeable === MergeableState.Conflicting)
+    return { color: "red", title: "merge conflicts" };
+  if (pr.checks === CheckRollupState.Failure || pr.checks === CheckRollupState.Error)
+    return { color: "red", title: "CI failing" };
+  if (pr.checks === CheckRollupState.Pending || pr.checks === CheckRollupState.Expected)
+    return { color: "yellow", title: "CI running" };
+  if (pr.checks === CheckRollupState.Success) return { color: "green", title: "CI passing" };
+  if (pr.mergeable === MergeableState.Mergeable) return { color: "green", title: "no conflicts" };
+  return { color: "gray", title: "no status yet" };
+}
 
-/** Live PR status chips for a task with a tracked PR — draft, merge conflicts, CI.
- *  Fed from github-watch (idx.prByTask), so it trails GitHub by at most the poll
- *  interval (~10s). Renders nothing when there's nothing noteworthy to show. */
-export function PrStatus({ pr }: { pr: CloudPr }) {
-  const ci = pr.checks ? CHECK_BADGE[pr.checks] : undefined;
-  const conflicting = pr.mergeable === MergeableState.Conflicting;
-  if (!pr.isDraft && !conflicting && !ci) return null;
+/** One PR row in a worker card: a status dot (CI + conflicts, GitHub-style) · the
+ *  #number (link) · the title. Full-width so the title is readable. */
+export function PrRow({ pr }: { pr: CloudPr }) {
+  const dot = prDot(pr);
   return (
-    <Group gap={4} wrap="nowrap">
-      {pr.isDraft && (
-        <Badge size="xs" variant="light" color="gray">
-          draft
-        </Badge>
-      )}
-      {conflicting && (
-        <Badge size="xs" variant="filled" color="red" title="Has merge conflicts with main">
-          conflicts
-        </Badge>
-      )}
-      {ci && (
-        <Badge size="xs" variant="light" color={ci.color} title={`CI: ${pr.checks}`}>
-          {ci.label}
-        </Badge>
-      )}
+    <Group gap="xs" wrap="nowrap">
+      <Box
+        w={8}
+        h={8}
+        title={dot.title}
+        style={{
+          borderRadius: "50%",
+          background: `var(--mantine-color-${dot.color}-6)`,
+          flexShrink: 0,
+        }}
+      />
+      <Anchor
+        href={pr.url}
+        target="_blank"
+        size="sm"
+        fw={600}
+        ff="monospace"
+        style={{ flexShrink: 0 }}
+      >
+        #{pr.number}
+      </Anchor>
+      <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
+        {pr.title}
+      </Text>
     </Group>
   );
 }

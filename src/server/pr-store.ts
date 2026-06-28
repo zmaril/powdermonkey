@@ -16,6 +16,7 @@ function rowToCloudPr(r: PullRequestRow): CloudPr {
   return {
     taskId: r.taskId ?? 0,
     number: r.number,
+    title: r.title,
     url: r.url,
     state: r.state,
     isDraft: r.isDraft,
@@ -41,6 +42,7 @@ export async function listPrs(): Promise<CloudPr[]> {
 export async function upsertPrState(pr: CloudPr): Promise<void> {
   const state = {
     taskId: pr.taskId,
+    title: pr.title,
     url: pr.url,
     state: pr.state,
     isDraft: pr.isDraft,

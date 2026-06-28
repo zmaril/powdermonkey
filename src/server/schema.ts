@@ -133,6 +133,7 @@ export const pullRequests = pgTable("pull_requests", {
   // 166 whether or not that task row exists locally, and persistence must not throw
   // on the mismatch.
   taskId: integer("task_id").notNull(),
+  title: text("title").notNull().default(""),
   url: text("url").notNull(),
   state: text("state").$type<PrState>().notNull(),
   isDraft: boolean("is_draft").notNull().default(false),
