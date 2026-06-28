@@ -78,9 +78,11 @@ Commit small and often — each landed `PM-Phase:` ticks a box on the operator's
 
 ### Status comment (cloud sessions): keep the operator looking over your shoulder
 
-A cloud session runs out of sight of the supervisor. Your link back is a **single sticky comment on your PR**, marked with `<!-- pm:status -->`, that you keep current. The supervisor's github-watch loop slurps that comment by its marker, parses the block below, persists it, and surfaces it live on the Active panel (state chip, summary, a `blocked` → *needs-you* flag, and the full comment body on expand). This is how a remote worker stops being a black box.
+A cloud session runs out of sight of the supervisor. Your link back is a **marked status comment on your PR**, carrying `<!-- pm:status -->`. The supervisor's github-watch loop finds the **newest** comment with that marker, parses the block below, persists it, and surfaces it live on the Active panel (state chip, summary, a `blocked` → *needs-you* flag, and the full comment body on expand). This is how a remote worker stops being a black box.
 
-**On startup, immediately** — before you start the real work — open your PR (draft is fine) and post the sticky comment *already carrying a live status*. The comment **existing with real content is itself the "it booted and is alive" signal**; don't post an empty placeholder. Go `status: starting`, then `status: working` once you're underway:
+**You can't edit comments — post a fresh one each update.** The cloud environment gives you no comment-edit tool; you can only POST new comments. So the contract is **append-only**: every status update is a **brand-new comment** carrying the marker. Don't try to find-and-rewrite a previous one — you can't, and you don't need to. The marker plus **newest-wins** is the whole contract: the watcher always reads the most recent marked comment, so the latest one you post is your live status. Older marked comments pile up and are simply superseded — that's fine, the operator doesn't care about the trail.
+
+**On startup, immediately** — before you start the real work — open your PR (draft is fine) and post your first marked status comment *already carrying a live status*. The comment **existing with real content is itself the "it booted and is alive" signal**; don't post an empty placeholder. Go `status: starting`, then post a new one at `status: working` once you're underway:
 
 ```
 <!-- pm:status -->
@@ -92,21 +94,20 @@ session: https://claude.ai/code/session_<your-session-id>
 
 - `status:` is one of `starting` | `working` | `blocked` | `done` (the canonical set is the `AgentState` enum in `src/shared/types.ts` — anything else is parsed as "no recognised status" and won't drive the panel). Use **`blocked`** when you need the operator — it lights up a *needs-you* flag on their panel. Use `done` when the PR is ready for review.
 - `summary:` / `next:` are one line each, written for a human glancing at the panel. The whole comment body is shown verbatim on expand, so you can add more narrative below the block if it helps — just keep the keys at the top.
-- `session:` is a link to **this cloud session** — the `https://claude.ai/code/…` URL for this run (the same one the harness gives you in the `Claude-Session:` commit trailer). It maps the status (and its PR) straight back to your session, and keeps things unambiguous if several agents ever post status comments on one PR. Stamp it once and leave it; omit the line only if you genuinely can't determine your session URL.
+- `session:` is a link to **this cloud session** — the `https://claude.ai/code/…` URL for this run (the same one the harness gives you in the `Claude-Session:` commit trailer). It maps the status (and its PR) straight back to your session, and keeps things unambiguous if several agents ever post status comments on one PR. Stamp it on every comment so each status traces back to you; omit the line only if you genuinely can't determine your session URL.
 
-**Sticky = one comment, rewritten.** At the **end of every turn**, update *the same* comment (find the one carrying `<!-- pm:status -->` and edit it — don't post a new one each turn). With `gh`:
+**Post a fresh marked comment at the end of every turn.** Don't look for a prior comment to edit — just POST a new one with the current status. With `gh`:
 
 ```sh
 PR=<your pr number>
-BODY=$'<!-- pm:status -->\nstatus: working\nsummary: …\nnext: …\nsession: https://claude.ai/code/session_<your-session-id>'
-# find the existing sticky comment id by its marker, edit it; else create it
-ID=$(gh api "repos/{owner}/{repo}/issues/$PR/comments" \
-       --jq '.[] | select(.body | contains("<!-- pm:status -->")) | .id' | head -1)
-if [ -n "$ID" ]; then
-  gh api -X PATCH "repos/{owner}/{repo}/issues/comments/$ID" -f body="$BODY" >/dev/null
-else
-  gh pr comment "$PR" --body "$BODY"
-fi
+gh pr comment "$PR" --body "$(cat <<'BODY'
+<!-- pm:status -->
+status: working
+summary: …
+next: …
+session: https://claude.ai/code/session_<your-session-id>
+BODY
+)"
 ```
 
 Also **keep the PR title and description current** as the work takes shape — they're the other always-visible signal the supervisor reads.
