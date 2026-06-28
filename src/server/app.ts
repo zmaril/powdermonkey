@@ -17,6 +17,7 @@ import {
 import { models } from "./models.ts";
 import { PUBLIC_DIR } from "./paths.ts";
 import { loadPlan, planSchema } from "./plan.ts";
+import { getFileContents, getPrReview, postPrComment, submitReview } from "./pr-review.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { reconcile } from "./reconcile.ts";
 import {
@@ -212,6 +213,103 @@ export const app = new Elysia()
       return { autoRebase: isAutoRebaseEnabled() };
     },
     { body: t.Object({ autoRebase: t.Boolean() }) },
+  )
+  // In-app PR review: a PR's diff (raw patch per file) + its inline review comments,
+  // so review happens here instead of bouncing to github.com. Backed by `gh api`
+  // (or PM_PR_FIXTURE_DIR for offline/demo). 502 when GitHub is unreachable.
+  .get(
+    "/prs/:number/review",
+    async ({ params, set }) => {
+      const result = await getPrReview(Number(params.number));
+      if (!result.ok) {
+        set.status = result.status;
+        return { error: result.error };
+      }
+      return result.review;
+    },
+    { params: t.Object({ number: t.String() }) },
+  )
+  // Full old+new contents of one file, fetched on demand so the diff can expand
+  // collapsed context (only when the operator asks — a large PR won't pull every blob).
+  .get(
+    "/prs/:number/file",
+    async ({ params, query, set }) => {
+      const result = await getFileContents(
+        Number(params.number),
+        query.path,
+        query.base ?? "",
+        query.head ?? "",
+      );
+      if (!result.ok) {
+        set.status = result.status;
+        return { error: result.error };
+      }
+      return { oldText: result.oldText, newText: result.newText };
+    },
+    {
+      params: t.Object({ number: t.String() }),
+      query: t.Object({
+        path: t.String(),
+        base: t.Optional(t.String()),
+        head: t.Optional(t.String()),
+      }),
+    },
+  )
+  // Post an inline review comment (or a threaded reply). Outward-facing write —
+  // the UI confirms before calling. Echoes the created comment back.
+  .post(
+    "/prs/:number/comments",
+    async ({ params, body, set }) => {
+      const result = await postPrComment(Number(params.number), body);
+      if (!result.ok) {
+        set.status = result.status;
+        return { error: result.error };
+      }
+      return result.comment;
+    },
+    {
+      params: t.Object({ number: t.String() }),
+      body: t.Object({
+        body: t.String(),
+        commitId: t.String(),
+        path: t.String(),
+        line: t.Number(),
+        side: t.Union([t.Literal("LEFT"), t.Literal("RIGHT")]),
+        inReplyTo: t.Optional(t.Number()),
+      }),
+    },
+  )
+  // Submit a whole review at once — all draft comments + a verdict (Approve /
+  // Request changes / Comment) — as ONE GitHub review, so a watching session sees a
+  // single event instead of one per comment.
+  .post(
+    "/prs/:number/review-submit",
+    async ({ params, body, set }) => {
+      const result = await submitReview(Number(params.number), body);
+      if (!result.ok) {
+        set.status = result.status;
+        return { error: result.error };
+      }
+      return { ok: true };
+    },
+    {
+      params: t.Object({ number: t.String() }),
+      body: t.Object({
+        event: t.Union([t.Literal("APPROVE"), t.Literal("REQUEST_CHANGES"), t.Literal("COMMENT")]),
+        body: t.String(),
+        commitId: t.String(),
+        comments: t.Array(
+          t.Object({
+            path: t.String(),
+            line: t.Number(),
+            side: t.Union([t.Literal("LEFT"), t.Literal("RIGHT")]),
+            startLine: t.Optional(t.Number()),
+            startSide: t.Optional(t.Union([t.Literal("LEFT"), t.Literal("RIGHT")])),
+            body: t.String(),
+          }),
+        ),
+      }),
+    },
   )
   // Every session↔task link. The browser intersects these with the sessions it
   // already holds to learn which tasks are active and which session each surfaces,

@@ -3,7 +3,7 @@ import { AgentState } from "../shared/types.ts";
 import { taskRepo } from "./crud.ts";
 import { db } from "./db.ts";
 import { type AgentStatus, type CloudEventMeta, type CloudPr, bus } from "./events.ts";
-import { askClaude, gh } from "./gh.ts";
+import { askClaude, gh, resolveRepo } from "./gh.ts";
 import { pullMain } from "./git.ts";
 import {
   clearRebaseAsked,
@@ -50,21 +50,6 @@ const GQL = `query($owner:String!,$name:String!){
     }
   }
 }`;
-
-let repoSlug: { owner: string; name: string } | null = null;
-/** owner/name from $PM_GITHUB_REPO, else `gh repo view`. Cached after first hit. */
-async function resolveRepo(): Promise<{ owner: string; name: string } | null> {
-  if (repoSlug) return repoSlug;
-  let slug = process.env.PM_GITHUB_REPO;
-  if (!slug) {
-    const r = await gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]);
-    if (r.ok) slug = r.stdout.trim();
-  }
-  if (!slug?.includes("/")) return null;
-  const [owner, name] = slug.split("/");
-  repoSlug = { owner, name };
-  return repoSlug;
-}
 
 /** Fetch the current state of every PR we can tie to a task — by branch name
  *  (`pm/task-<id>-…`) or, failing that, its commit trailers (see resolveTaskId).
