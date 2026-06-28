@@ -18,6 +18,8 @@ import {
   type IDockviewPanelProps,
   themeAbyss,
 } from "dockview-react";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
 import {
   type CSSProperties,
   createContext,
@@ -606,23 +608,62 @@ function useReviewCtx(): ReviewCtxValue {
   return c;
 }
 
+// Dark-theme styles for rendered markdown, injected once. Scoped to `.pm-md`.
+let mdStylesInjected = false;
+function ensureMdStyles() {
+  if (mdStylesInjected || typeof document === "undefined") return;
+  mdStylesInjected = true;
+  const style = document.createElement("style");
+  style.textContent = `
+.pm-md{color:#c1c2c5;font-size:13px;line-height:1.55;word-break:break-word;}
+.pm-md>*:first-child{margin-top:0;}
+.pm-md h1,.pm-md h2,.pm-md h3,.pm-md h4{color:#e9ecef;margin:14px 0 6px;line-height:1.3;}
+.pm-md h1{font-size:18px;} .pm-md h2{font-size:16px;} .pm-md h3{font-size:14px;} .pm-md h4{font-size:13px;}
+.pm-md p{margin:6px 0;} .pm-md a{color:#4dabf7;}
+.pm-md code{background:#2b2d31;padding:1px 4px;border-radius:3px;font-family:ui-monospace,Menlo,monospace;font-size:12px;}
+.pm-md pre{background:#16171a;border:1px solid #2c2e33;border-radius:6px;padding:10px;overflow:auto;}
+.pm-md pre code{background:none;padding:0;}
+.pm-md ul,.pm-md ol{margin:6px 0;padding-left:20px;} .pm-md li{margin:2px 0;}
+.pm-md blockquote{border-left:3px solid #3a3d44;margin:6px 0;padding:2px 10px;color:#a6a7ab;}
+.pm-md table{border-collapse:collapse;margin:6px 0;} .pm-md th,.pm-md td{border:1px solid #2c2e33;padding:4px 8px;}
+.pm-md img{max-width:100%;} .pm-md hr{border:none;border-top:1px solid #2c2e33;margin:12px 0;}
+.pm-md-inline,.pm-md-inline p{display:inline;margin:0;font-size:inherit;}
+`;
+  document.head.appendChild(style);
+}
+
+/** Render GitHub-flavoured markdown, sanitized (PR descriptions can come from
+ *  contributors). `inline` skips the block wrapper (for a one-line title). */
+function Markdown({ source, inline }: { source: string; inline?: boolean }) {
+  ensureMdStyles();
+  const html = useMemo(() => {
+    const raw = inline ? marked.parseInline(source) : marked.parse(source);
+    return DOMPurify.sanitize(typeof raw === "string" ? raw : "");
+  }, [source, inline]);
+  return (
+    <div
+      className={inline ? "pm-md pm-md-inline" : "pm-md"}
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: output is sanitized by DOMPurify above.
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
 /** Dockview panel: the PR title + description (the first column). */
 function DescriptionPanel(_props: IDockviewPanelProps) {
   const { review } = useReviewCtx();
   return (
     <Box style={{ height: "100%", overflowY: "auto", background: "#1a1b1e" }} px="md" py={10}>
-      <Text size="sm" fw={600}>
-        {review.title}
-      </Text>
-      <Text size="xs" c="dimmed" mt={2}>
+      <Box style={{ fontWeight: 600, fontSize: 15, color: "#e9ecef" }}>
+        <Markdown source={review.title} inline />
+      </Box>
+      <Text size="xs" c="dimmed" mt={2} mb={10}>
         #{review.number} · {review.state}
       </Text>
       {review.body ? (
-        <Text size="xs" mt={10} style={{ whiteSpace: "pre-wrap", color: "#a6a7ab" }}>
-          {review.body}
-        </Text>
+        <Markdown source={review.body} />
       ) : (
-        <Text size="xs" c="dimmed" mt={10} fs="italic">
+        <Text size="xs" c="dimmed" fs="italic">
           No description.
         </Text>
       )}
@@ -755,7 +796,7 @@ function buildReviewLayout(event: DockviewReadyEvent) {
   api.addPanel({
     id: "filesdiff",
     component: "filesdiff",
-    title: "Files",
+    title: "Diff",
     position: { direction: "right", referencePanel: "desc" },
   });
   const w = api.width || window.innerWidth;
@@ -1034,12 +1075,24 @@ function ReviewBar({
   const n = draft.length;
   return (
     <Box style={{ flex: "0 0 auto", borderTop: "1px solid #2c2e33", background: "#202225" }}>
-      <Group justify="space-between" px="md" py={6} wrap="nowrap">
+      <Group justify="space-between" px="md" py={8} wrap="nowrap">
         <Text size="xs" c="dimmed">
           {n === 0 ? "No pending comments" : `${n} pending comment${n === 1 ? "" : "s"}`}
         </Text>
-        <Button size="compact-xs" variant="subtle" color="gray" onClick={() => setOpen((o) => !o)}>
-          {open ? "Hide" : "Finish review"}
+        <Button
+          size="xs"
+          variant={open ? "light" : "filled"}
+          color="blue"
+          onClick={() => setOpen((o) => !o)}
+          rightSection={
+            n > 0 ? (
+              <Badge size="xs" circle variant="white" color="blue">
+                {n}
+              </Badge>
+            ) : undefined
+          }
+        >
+          {open ? "Hide review" : "Finish review"}
         </Button>
       </Group>
       {open && (

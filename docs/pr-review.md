@@ -46,7 +46,7 @@ re-tab the review surface itself:
 
 ```
 ┌ header: REVIEW #n title · [Unified|Split] · Refresh · ✕ Close ───────────┐
-├ Description (~1/3) ┬ Files (~2/3) ───────────────────────────────────────┤
+├ Description (~1/3) ┬ Diff (~2/3) ────────────────────────────────────────┤
 │ PR title           │ FILES  n/m viewed │  src/web/plan-ui.tsx [Viewed]    │
 │ #n · state         │ ▾ src/web         │  @@ hunk … lines … threads …     │
 │ description (md)   │   plan-ui.tsx  M  │  pending … composer              │
@@ -55,7 +55,7 @@ re-tab the review surface itself:
 ```
 
 The default layout (`buildReviewLayout`) puts **Description** on the left (~1/3) and
-**Files** — the tree + diff as one panel — on the right (~2/3). It's rebuilt fresh
+**Diff** — the tree + diff as one panel — on the right (~2/3). It's rebuilt fresh
 each open (the modal layout isn't persisted). Esc (when not typing) or **✕ Close**
 drops back to the workspace.
 
@@ -65,8 +65,11 @@ passed via a React **context** (`ReviewCtx`) wrapping `<DockviewReact>` —
 dockview-react renders panels through React portals, which preserve context from
 above, so each panel reads its slice live.
 
-- **Description panel.** PR title, number/state, and the markdown description body.
-- **Files panel — file tree + diff.** A file tree rendered with
+- **Description panel.** PR title, number/state, and the description — both the title
+  and body are rendered as **markdown** (`marked` → sanitized with `DOMPurify`, since
+  a PR description can come from a contributor; styled dark via an injected `.pm-md`
+  stylesheet).
+- **Diff panel — file tree + diff.** A file tree rendered with
   **[`@pierre/trees`](https://www.npmjs.com/package/@pierre/trees)**
   (`useFileTree` + `<FileTree>`) — virtualized, file-type icons, git-status colours
   (we map GitHub's per-file `status` → its `gitStatus`). It renders in a shadow root,
