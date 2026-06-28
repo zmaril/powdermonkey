@@ -17,7 +17,7 @@ import {
 import { models } from "./models.ts";
 import { PUBLIC_DIR } from "./paths.ts";
 import { loadPlan, planSchema } from "./plan.ts";
-import { getPrReview, postPrComment, submitReview } from "./pr-review.ts";
+import { getFileContents, getPrReview, postPrComment, submitReview } from "./pr-review.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { reconcile } from "./reconcile.ts";
 import {
@@ -228,6 +228,32 @@ export const app = new Elysia()
       return result.review;
     },
     { params: t.Object({ number: t.String() }) },
+  )
+  // Full old+new contents of one file, fetched on demand so the diff can expand
+  // collapsed context (only when the operator asks — a large PR won't pull every blob).
+  .get(
+    "/prs/:number/file",
+    async ({ params, query, set }) => {
+      const result = await getFileContents(
+        Number(params.number),
+        query.path,
+        query.base ?? "",
+        query.head ?? "",
+      );
+      if (!result.ok) {
+        set.status = result.status;
+        return { error: result.error };
+      }
+      return { oldText: result.oldText, newText: result.newText };
+    },
+    {
+      params: t.Object({ number: t.String() }),
+      query: t.Object({
+        path: t.String(),
+        base: t.Optional(t.String()),
+        head: t.Optional(t.String()),
+      }),
+    },
   )
   // Post an inline review comment (or a threaded reply). Outward-facing write —
   // the UI confirms before calling. Echoes the created comment back.

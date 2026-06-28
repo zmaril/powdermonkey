@@ -12,7 +12,7 @@ import {
   Textarea,
 } from "@mantine/core";
 import type { DiffLineAnnotation } from "@pierre/diffs/react";
-import { PatchDiff } from "@pierre/diffs/react";
+import { MultiFileDiff, PatchDiff } from "@pierre/diffs/react";
 import type { GitStatus } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import {
@@ -298,7 +298,13 @@ function parseKey(key: string): AnnMeta | null {
  *  split/unified, virtualized) from the raw GitHub patch. Inline comment threads,
  *  pending drafts, and the composer are injected via its annotation framework; the
  *  gutter "+" opens the composer for a line. */
-function FilePatch({ file }: { file: ReviewFile }) {
+function FilePatch({
+  file,
+  contents,
+}: {
+  file: ReviewFile;
+  contents?: { oldText: string; newText: string } | null;
+}) {
   const {
     review,
     view,
@@ -379,42 +385,52 @@ function FilePatch({ file }: { file: ReviewFile }) {
   const addAt = (side: ASide | undefined, line: number) =>
     onAdd(file.filename, { side: fromASide(side ?? "additions"), line });
 
-  return (
-    <PatchDiff<AnnMeta>
-      patch={file.patch}
-      disableWorkerPool
-      options={{
-        diffStyle: view === "split" ? "split" : "unified",
-        theme: DIFF_THEME,
-        themeType: "dark",
-        disableFileHeader: true,
-        enableGutterUtility: true,
-        enableLineSelection: true,
-        // The hover "+" in the gutter — passes the clicked line/side directly.
-        onGutterUtilityClick: (range: { start: number; side?: ASide }) =>
-          addAt(range.side, range.start),
-        // Clicking a line number also starts a comment (reliable, GitHub-like).
-        onLineNumberClick: (props: { lineNumber: number; annotationSide?: ASide }) =>
-          addAt(props.annotationSide, props.lineNumber),
-        // Drag-selecting lines → comment on the whole range (GitHub anchors at the
-        // end line; we pass the start as start_line). A single-line selection is
-        // just a normal line comment.
-        onLineSelectionEnd: (
-          range: { start: number; end: number; side?: ASide; endSide?: ASide } | null,
-        ) => {
-          if (!range) return;
-          const endLine = Math.max(range.start, range.end);
-          const startLine = Math.min(range.start, range.end);
-          onAdd(
-            file.filename,
-            { side: fromASide(range.endSide ?? range.side ?? "additions"), line: endLine },
-            startLine !== endLine ? startLine : undefined,
-          );
-        },
-      }}
-      lineAnnotations={annotations}
-      renderAnnotation={renderAnnotation}
+  // Shared across both renderers (both are DiffBasePropsReact). With full contents
+  // we render MultiFileDiff (which can expand collapsed context); otherwise the
+  // lighter PatchDiff off the raw patch.
+  const common = {
+    disableWorkerPool: true,
+    lineAnnotations: annotations,
+    renderAnnotation,
+    options: {
+      diffStyle: view === "split" ? "split" : "unified",
+      theme: DIFF_THEME,
+      themeType: "dark",
+      disableFileHeader: true,
+      enableGutterUtility: true,
+      enableLineSelection: true,
+      // The hover "+" in the gutter — passes the clicked line/side directly.
+      onGutterUtilityClick: (range: { start: number; side?: ASide }) =>
+        addAt(range.side, range.start),
+      // Clicking a line number also starts a comment (reliable, GitHub-like).
+      onLineNumberClick: (props: { lineNumber: number; annotationSide?: ASide }) =>
+        addAt(props.annotationSide, props.lineNumber),
+      // Drag-selecting lines → comment on the whole range (GitHub anchors at the end
+      // line; we pass the start as start_line). A single-line selection is a normal
+      // line comment.
+      onLineSelectionEnd: (
+        range: { start: number; end: number; side?: ASide; endSide?: ASide } | null,
+      ) => {
+        if (!range) return;
+        const endLine = Math.max(range.start, range.end);
+        const startLine = Math.min(range.start, range.end);
+        onAdd(
+          file.filename,
+          { side: fromASide(range.endSide ?? range.side ?? "additions"), line: endLine },
+          startLine !== endLine ? startLine : undefined,
+        );
+      },
+    },
+  };
+
+  return contents ? (
+    <MultiFileDiff<AnnMeta>
+      oldFile={{ name: file.filename, contents: contents.oldText }}
+      newFile={{ name: file.filename, contents: contents.newText }}
+      {...common}
     />
+  ) : (
+    <PatchDiff<AnnMeta> patch={file.patch} {...common} />
   );
 }
 
@@ -454,8 +470,29 @@ function estimateHeight(patch: string): number {
 /** One file in the diff list: our header (name · status · +/- · Viewed) over the
  *  PatchDiff. Marking it viewed collapses the diff (GitHub's mechanic). */
 function FileBlock({ file }: { file: ReviewFile }) {
-  const { viewed, toggleViewed } = useReviewCtx();
+  const { review, viewed, toggleViewed } = useReviewCtx();
   const isViewed = viewed.has(file.filename);
+  // Full-file contents for context expansion, fetched on demand (see #2). null =
+  // patch-only (light). Switching on pulls the blob and re-renders via MultiFileDiff.
+  const [contents, setContents] = useState<{ oldText: string; newText: string } | null>(null);
+  const [loadingContents, setLoadingContents] = useState(false);
+
+  const toggleExpand = async () => {
+    if (contents) {
+      setContents(null); // back to patch-only
+      return;
+    }
+    setLoadingContents(true);
+    try {
+      const { data, error } = await api.prs({ number: review.number }).file.get({
+        query: { path: file.filename, base: review.baseSha, head: review.headSha },
+      });
+      if (!error && data) setContents(data as { oldText: string; newText: string });
+    } finally {
+      setLoadingContents(false);
+    }
+  };
+
   return (
     <Box style={{ border: "1px solid #2c2e33", borderRadius: 6, overflow: "hidden" }}>
       <Group justify="space-between" px="sm" py={6} style={{ background: "#202225" }}>
@@ -475,6 +512,17 @@ function FileBlock({ file }: { file: ReviewFile }) {
           <Text size="xs" c="red">
             -{file.deletions}
           </Text>
+          {!isViewed && file.patch && (
+            <Anchor
+              component="button"
+              size="xs"
+              c="dimmed"
+              onClick={toggleExpand}
+              title="Fetch the full file to expand collapsed context"
+            >
+              {loadingContents ? "…" : contents ? "Patch only" : "Expand context"}
+            </Anchor>
+          )}
           <Checkbox
             size="xs"
             label="Viewed"
@@ -487,7 +535,7 @@ function FileBlock({ file }: { file: ReviewFile }) {
       {!isViewed &&
         (file.patch ? (
           <LazyMount estimate={estimateHeight(file.patch)}>
-            <FilePatch file={file} />
+            <FilePatch file={file} contents={contents} />
           </LazyMount>
         ) : (
           <Text size="xs" c="dimmed" px="md" py="sm">

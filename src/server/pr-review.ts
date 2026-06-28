@@ -47,6 +47,8 @@ export type PrReview = {
   state: string;
   /** Head commit sha — echoed back by the client when posting (commit_id). */
   headSha: string;
+  /** Base commit sha — old side for fetching full file contents (context expansion). */
+  baseSha: string;
   url: string;
   files: ReviewFile[];
   comments: ReviewComment[];
@@ -145,6 +147,7 @@ export async function getPrReview(number: number): Promise<ReviewResult> {
         body: fixturePr.body ?? "",
         state: fixturePr.state ?? "open",
         headSha: fixturePr.head?.sha ?? fixturePr.headSha ?? "",
+        baseSha: fixturePr.base?.sha ?? fixturePr.baseSha ?? "",
         url: fixturePr.html_url ?? fixturePr.url ?? "",
         files: mapFiles(files),
         comments: mapComments(comments),
@@ -170,6 +173,7 @@ export async function getPrReview(number: number): Promise<ReviewResult> {
       body: pr.body ?? "",
       state: pr.state ?? "open",
       headSha: pr.head?.sha ?? "",
+      baseSha: pr.base?.sha ?? "",
       url: pr.html_url ?? "",
       files: mapFiles(Array.isArray(files) ? files : []),
       comments: mapComments(Array.isArray(comments) ? comments : []),
@@ -298,4 +302,49 @@ export async function submitReview(number: number, r: SubmitReviewBody): Promise
       error: res.stderr.trim().slice(0, 300) || "gh review submit failed",
     };
   return { ok: true };
+}
+
+// ---- full file contents (for context expansion) ----------------------------
+// PatchDiff renders the patch alone (light); to let the operator expand collapsed
+// context the renderer needs the FULL old+new file, which we fetch on demand (only
+// when they ask to expand a given file) so a large PR doesn't pull every blob.
+
+export type FileContentsResult =
+  | { ok: true; oldText: string; newText: string }
+  | { ok: false; error: string; status: number };
+
+/** Decode a `gh api .../contents/<path>?ref=<sha>` response to text, or "" when the
+ *  path doesn't exist at that ref (added/removed files) or isn't decodable. */
+async function contentAtRef(repo: string, path: string, ref: string): Promise<string> {
+  if (!ref) return "";
+  const r = await ghApiJson(`repos/${repo}/contents/${encodeURIComponent(path)}?ref=${ref}`);
+  if (!r || typeof r.content !== "string") return "";
+  try {
+    return Buffer.from(r.content, r.encoding === "base64" ? "base64" : "utf8").toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
+/** Old + new full contents of one file, for context expansion. Reads fixtures
+ *  (`pr-<n>-contents.json`: `{ "<path>": { oldText, newText } }`) when offline. */
+export async function getFileContents(
+  number: number,
+  path: string,
+  base: string,
+  head: string,
+): Promise<FileContentsResult> {
+  const fixture = await readFixture(`pr-${number}-contents.json`);
+  if (fixture) {
+    const entry = fixture[path];
+    return { ok: true, oldText: entry?.oldText ?? "", newText: entry?.newText ?? "" };
+  }
+  const repo = await resolveRepo();
+  if (!repo) return { ok: false, status: 502, error: "no GitHub repo configured" };
+  const slug = `${repo.owner}/${repo.name}`;
+  const [oldText, newText] = await Promise.all([
+    contentAtRef(slug, path, base),
+    contentAtRef(slug, path, head),
+  ]);
+  return { ok: true, oldText, newText };
 }
