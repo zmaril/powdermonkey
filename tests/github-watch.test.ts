@@ -8,7 +8,9 @@ import { join } from "node:path";
 // Importing the module still transitively opens db.ts (subscribers use the task
 // repo), so isolate it to a throwaway data dir to avoid the writer lock.
 process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
-const { diffCloudPrs, parseTrailerIds } = await import("../src/server/github-watch.ts");
+const { diffCloudPrs, parseTrailerIds, rebaseDecision } = await import(
+  "../src/server/github-watch.ts"
+);
 type CloudPr = import("../src/server/events.ts").CloudPr;
 
 function pr(over: Partial<CloudPr> & { number: number; taskId: number }): CloudPr {
@@ -80,6 +82,23 @@ test("parseTrailerIds pulls PM-Task and PM-Phase ids (the branch-name fallback)"
 
 test("parseTrailerIds returns empties when there are no trailers", () => {
   expect(parseTrailerIds("just a normal commit message")).toEqual({ taskIds: [], phaseIds: [] });
+});
+
+test("rebaseDecision: first CONFLICTING sighting asks, a repeat skips (no re-spam)", () => {
+  expect(rebaseDecision("CONFLICTING", false)).toBe("ask");
+  expect(rebaseDecision("CONFLICTING", true)).toBe("skip");
+});
+
+test("rebaseDecision: going MERGEABLE clears the episode so a later conflict re-asks", () => {
+  expect(rebaseDecision("MERGEABLE", true)).toBe("clear");
+  expect(rebaseDecision("MERGEABLE", false)).toBe("clear");
+});
+
+test("rebaseDecision: UNKNOWN/null is transient — never asks, never clears", () => {
+  expect(rebaseDecision("UNKNOWN", false)).toBe("skip");
+  expect(rebaseDecision("UNKNOWN", true)).toBe("skip");
+  expect(rebaseDecision(null, false)).toBe("skip");
+  expect(rebaseDecision(null, true)).toBe("skip");
 });
 
 test("only the changed PR among many emits", () => {
