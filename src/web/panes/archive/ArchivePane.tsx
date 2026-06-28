@@ -1,5 +1,7 @@
 import { Badge, Box, Group, SegmentedControl, Stack, Text } from "@mantine/core";
+import type { DockviewPanelApi } from "dockview-react";
 import { useState } from "react";
+import { usePaneScroll } from "../../pane-scroll.ts";
 import { useArchiveData } from "../../plan-data.ts";
 import { FlatView } from "./FlatView.tsx";
 import { GroupedView } from "./GroupedView.tsx";
@@ -11,9 +13,10 @@ import { GroupedView } from "./GroupedView.tsx";
 
 type View = "flat" | "grouped";
 
-export function ArchivePane() {
+export function ArchivePane({ api }: { api?: DockviewPanelApi }) {
   const { idx, tasks } = useArchiveData();
   const [view, setView] = useState<View>("flat");
+  const scroll = usePaneScroll("archive", api); // lint-allow-string: pane scroll key, not an enum value
 
   return (
     <Box
@@ -39,7 +42,13 @@ export function ArchivePane() {
         />
       </Group>
 
-      <Box style={{ flex: 1, overflowY: "auto" }} px={view === "grouped" ? "md" : 0} py={4}>
+      <Box
+        ref={scroll.ref}
+        onScroll={scroll.onScroll}
+        style={{ flex: 1, overflowY: "auto" }}
+        px={view === "grouped" ? "md" : 0}
+        py={4}
+      >
         {tasks.length === 0 ? (
           <Text c="dimmed" size="sm" px="md" py="lg">
             Nothing here yet. Tasks land in the archive once they're merged (finished) or archived.

@@ -1,0 +1,28 @@
+import { Box, Stack, Text } from "@mantine/core";
+import { FileBlock } from "./FileBlock.tsx";
+import { useReviewCtx } from "./context.ts";
+
+/** The scrollable diff column (inside the Files panel): one FileBlock per file. */
+export function DiffColumn() {
+  const { review, registerFileEl } = useReviewCtx();
+  return (
+    <Box style={{ flex: 1, overflowY: "auto", minWidth: 0 }} px="sm" py={4}>
+      {review.files.length === 0 ? (
+        <Text c="dimmed" size="sm" px="sm" py="lg">
+          No files in this PR.
+        </Text>
+      ) : (
+        <Stack gap="sm">
+          {review.files.map((file) => (
+            <Box
+              key={file.filename}
+              ref={(el: HTMLDivElement | null) => registerFileEl(file.filename, el)}
+            >
+              <FileBlock file={file} />
+            </Box>
+          ))}
+        </Stack>
+      )}
+    </Box>
+  );
+}

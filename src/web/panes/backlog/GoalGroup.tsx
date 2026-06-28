@@ -1,13 +1,14 @@
 import { Group, Stack, Text, Title } from "@mantine/core";
+import { useState } from "react";
 import type { Goal } from "../../../server/schema.ts";
 import { type Indexes, starFirst } from "../../plan-data.ts";
 import { IdTag } from "../../plan-ui";
-import { BacklogCard } from "./BacklogCard.tsx";
+import { Caret } from "./Caret.tsx";
+import { MilestoneGroup } from "./MilestoneGroup.tsx";
 import type { Selection } from "./types.ts";
 
-/** A goal and its milestones, each milestone listing its backlog cards. Milestones
- *  with no backlog tasks are skipped; a goal with no remaining backlog renders
- *  nothing (its done work lives in the Archive pane). */
+/** A goal and its milestones. A caret collapses the whole goal. Milestones with no
+ *  backlog tasks are skipped; a goal with no remaining backlog renders nothing. */
 export function GoalGroup({
   goal,
   idx,
@@ -19,6 +20,7 @@ export function GoalGroup({
   backlog: Set<number>;
   selection: Selection;
 }) {
+  const [collapsed, setCollapsed] = useState(false);
   const milestones = (idx.milestonesByGoal.get(goal.id) ?? [])
     .map((m) => ({
       m,
@@ -31,35 +33,26 @@ export function GoalGroup({
   return (
     <Stack gap="md">
       <div>
-        <Group gap={8} wrap="nowrap" align="baseline">
+        <Group gap={8} wrap="nowrap" align="center">
+          <Caret
+            collapsed={collapsed}
+            onToggle={() => setCollapsed((c) => !c)}
+            label={collapsed ? "Expand goal" : "Collapse goal"}
+          />
           <IdTag prefix="g" id={goal.id} />
           <Title order={3}>{goal.title}</Title>
         </Group>
-        {goal.objective && (
-          <Text c="dimmed" size="sm" mt={4}>
+        {!collapsed && goal.objective && (
+          <Text c="dimmed" size="sm" mt={4} ml={26}>
             {goal.objective}
           </Text>
         )}
       </div>
 
-      {milestones.map(({ m, tasks }) => (
-        <Stack key={m.id} gap="xs">
-          <Group gap={8} wrap="nowrap" align="baseline">
-            <IdTag prefix="m" id={m.id} />
-            <Title order={5}>{m.title}</Title>
-          </Group>
-          <Stack gap="xs">
-            {tasks.map((t) => (
-              <BacklogCard
-                key={t.id}
-                task={t}
-                phases={idx.phasesByTask.get(t.id) ?? []}
-                selection={selection}
-              />
-            ))}
-          </Stack>
-        </Stack>
-      ))}
+      {!collapsed &&
+        milestones.map(({ m, tasks }) => (
+          <MilestoneGroup key={m.id} milestone={m} tasks={tasks} idx={idx} selection={selection} />
+        ))}
     </Stack>
   );
 }

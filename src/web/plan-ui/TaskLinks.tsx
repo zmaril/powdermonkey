@@ -1,5 +1,6 @@
 import { Anchor, Group } from "@mantine/core";
 import type { Task } from "../../server/schema.ts";
+import { ReviewLink } from "./ReviewLink.tsx";
 
 export function TaskLinks({ task }: { task: Task }) {
   return (
@@ -9,6 +10,7 @@ export function TaskLinks({ task }: { task: Task }) {
           session ↗
         </Anchor>
       )}
+      <ReviewLink task={task} />
       {task.prUrl && (
         <Anchor href={task.prUrl} target="_blank" size="sm">
           PR ↗

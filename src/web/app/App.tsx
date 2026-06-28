@@ -10,8 +10,9 @@ import { ActivityTab, useTabActivity } from "../TabActivity.tsx";
 import { useNeedsInputNotifications } from "../notifications.ts";
 import { useStore } from "../store.ts";
 import { DisconnectBanner } from "./DisconnectBanner.tsx";
+import { ReviewOverlay } from "./ReviewOverlay.tsx";
 import { TopBar } from "./TopBar.tsx";
-import { buildDefaultLayout, dockComponents } from "./layout.ts";
+import { PANE_TITLES, buildDefaultLayout, dockComponents } from "./layout.ts";
 import { useConnectionWatch } from "./useConnectionWatch.ts";
 
 // The single pane of glass. The plan is split into three panels — a live ACTIVE
@@ -22,15 +23,15 @@ import { useConnectionWatch } from "./useConnectionWatch.ts";
 //
 // The dock layout is store state (useStore.layout), persisted by the store's
 // `persist` middleware so the disconnect→reload recovery (and any plain browser
-// refresh) keeps your panes — rearrangements, opened shells, the lot — instead of
-// snapping back to the default. App mirrors that state onto the dockview api:
-// onReady restores it, and onDidLayoutChange writes every change back via setLayout.
+// refresh) keeps your panes. App mirrors that state onto the dockview api: onReady
+// restores it, and onDidLayoutChange writes every change back via setLayout.
 
 export function App() {
   const apiRef = useRef<DockviewApi | null>(null);
   const layoutSubRef = useRef<{ dispose: () => void } | null>(null);
   const shellReq = useStore((s) => s.shellReq);
-  const notesReq = useStore((s) => s.notesReq);
+  const browserReq = useStore((s) => s.browserReq);
+  const paneReq = useStore((s) => s.paneReq);
   const setLayout = useStore((s) => s.setLayout);
   const loadSettings = useStore((s) => s.loadSettings);
 
@@ -98,22 +99,42 @@ export function App() {
     });
   }, [shellReq]);
 
-  // Scratch button → focus the scratchpad (recreate it top-left if it was closed).
+  // Browser button → add a new browser pane (an iframe on a dev server / preview).
+  // Each request opens a distinct panel (keyed by `n`) so you can watch several
+  // previews at once; the loaded URL rides in the panel params so it persists with
+  // the layout. Added in the main group, alongside Active/Backlog/Archive.
   useEffect(() => {
     const api = apiRef.current;
-    if (!notesReq || !api) return;
-    const existing = api.getPanel("scratch");
+    if (!browserReq) return;
+    api?.addPanel({
+      id: `browser-${browserReq.n}`,
+      component: "browser",
+      params: { url: browserReq.url },
+      title: "Browser",
+      position: { referencePanel: "active", direction: "within" },
+    });
+  }, [browserReq]);
+
+  // A pane-launcher button → focus the singleton pane if it's already open, else add
+  // it. New panes land "within" the main group (next to Active/Backlog/Archive) when
+  // that anchor exists, otherwise wherever dockview puts a group-less panel — so a
+  // launcher always brings the pane up even if the default layout was torn apart.
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!paneReq || !api) return;
+    const existing = api.getPanel(paneReq.id);
     if (existing) {
       existing.api.setActive();
       return;
     }
+    const anchor = api.getPanel("active") ? "active" : api.panels[0]?.id;
     api.addPanel({
-      id: "scratch",
-      component: "scratch",
-      title: "Scratch",
-      position: { referencePanel: "active", direction: "left" },
+      id: paneReq.id,
+      component: paneReq.id,
+      title: PANE_TITLES[paneReq.id] ?? paneReq.id,
+      position: anchor ? { referencePanel: anchor, direction: "within" } : undefined,
     });
-  }, [notesReq]);
+  }, [paneReq]);
 
   const disconnected = useConnectionWatch();
 
@@ -129,6 +150,7 @@ export function App() {
           theme={themeAbyss}
         />
       </div>
+      <ReviewOverlay />
     </div>
   );
 }

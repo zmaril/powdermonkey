@@ -7,11 +7,13 @@
 export { SESSION_BADGE, KIND_ICON, STATUS_COLOR } from "./constants.ts";
 export { AgentNarrative } from "./AgentNarrative.tsx";
 export { AgentStateBadge } from "./AgentStateBadge.tsx";
+export { CompleteTaskControl } from "./CompleteTaskControl.tsx";
 export { IdTag } from "./IdTag.tsx";
 export { LaunchActions } from "./LaunchActions.tsx";
 export { PhaseList } from "./PhaseList.tsx";
 export { PrRow } from "./PrRow.tsx";
 export { ProgressBar } from "./ProgressBar.tsx";
+export { ReviewLink, prNumberFromUrl } from "./ReviewLink.tsx";
 export { ProgressPill } from "./ProgressPill.tsx";
 export { SessionActions } from "./SessionActions.tsx";
 export { SessionStateBadge } from "./SessionStateBadge.tsx";

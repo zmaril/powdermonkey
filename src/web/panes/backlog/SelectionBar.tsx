@@ -1,60 +1,28 @@
 import { Button, Group, Text } from "@mantine/core";
-import { useState } from "react";
-import { useStore } from "../../store.ts";
+import { TaskActions } from "./TaskActions.tsx";
 
-/** The batch action bar, shown while one or more tasks are selected. Launches the
- *  whole selection as ONE session (local or remote) and then clears the selection.
- *  Order follows the rendered backlog so the first card is the primary task. */
+/** The batch action bar, shown while one or more tasks are selected: bigger and lit
+ *  with an electric-blue edge so it's unmissable. Same action cluster as a card, but
+ *  applied to the whole selection as ONE launch. */
 export function SelectionBar({ ids, clear }: { ids: number[]; clear: () => void }) {
-  const { startLocalMany, dispatchMany } = useStore();
-  // Track WHICH batch action is in flight, so the clicked button shows its own
-  // spinner (matching the per-task Dispatch remote / Start local loading state).
-  const [running, setRunning] = useState<"local" | "remote" | null>(null);
-  const busy = running !== null;
-
-  const run = async (kind: "local" | "remote") => {
-    if (busy || ids.length === 0) return;
-    setRunning(kind);
-    try {
-      if (kind === "local") await startLocalMany(ids);
-      else await dispatchMany(ids);
-      clear();
-    } finally {
-      setRunning(null);
-    }
-  };
-
   return (
     <Group
       justify="space-between"
-      px="md"
-      py={8}
-      style={{ flex: "0 0 auto", borderTop: "1px solid #2c2e33", background: "#25262b" }}
+      px="lg"
+      py="md"
+      style={{
+        flex: "0 0 auto",
+        borderTop: "2px solid var(--mantine-color-blue-5)",
+        background: "#1b2434",
+        boxShadow: "0 -4px 22px 2px rgba(59,130,246,0.5)",
+      }}
     >
-      <Text size="sm" fw={600}>
+      <Text size="md" fw={700}>
         {ids.length} selected
       </Text>
-      <Group gap="xs">
-        <Button
-          size="compact-xs"
-          variant="light"
-          loading={running === "local"}
-          disabled={busy}
-          onClick={() => run("local")}
-        >
-          Start local
-        </Button>
-        <Button
-          size="compact-xs"
-          variant="subtle"
-          color="gray"
-          loading={running === "remote"}
-          disabled={busy}
-          onClick={() => run("remote")}
-        >
-          Dispatch remote
-        </Button>
-        <Button size="compact-xs" variant="subtle" color="gray" disabled={busy} onClick={clear}>
+      <Group gap="sm" wrap="nowrap">
+        <TaskActions ids={ids} onDone={clear} />
+        <Button size="compact-sm" variant="subtle" color="gray" onClick={clear}>
           clear
         </Button>
       </Group>

@@ -1,15 +1,18 @@
-import { Button, Group, Text, Title } from "@mantine/core";
+import { Divider, Group, Text, Title } from "@mantine/core";
 import { useLiveQuery } from "@tanstack/react-db";
 import { tasksCollection } from "../collections.ts";
 import { useStore } from "../store.ts";
-import { AttachButton } from "./AttachButton.tsx";
-import { NotifyButton } from "./NotifyButton.tsx";
+import { PaneButton } from "./PaneButton.tsx";
 
-// Slim global toolbar: the app title, the cross-cutting actions (Shell / Scratch /
-// Reconcile), and the error banner. Lives above the dockview so it's always visible
-// regardless of which panel is focused.
+// Slim global toolbar: the app title, the error banner, and a launcher for every
+// pane type. Click one and the pane appears (or comes forward) below — singletons
+// focus their one instance, Shell/Browser open a fresh one each time. Lives above
+// the dockview so it's always reachable regardless of which panel is focused.
 export function TopBar() {
-  const { error, reconcile, openTerminal, openNotes } = useStore();
+  const openPane = useStore((s) => s.openPane);
+  const openTerminal = useStore((s) => s.openTerminal);
+  const openBrowser = useStore((s) => s.openBrowser);
+  const error = useStore((s) => s.error);
   // "loading" until the first collection snapshot lands.
   const loading = useLiveQuery(() => tasksCollection).isLoading;
   return (
@@ -29,17 +32,23 @@ export function TopBar() {
           )}
         </Group>
         <Group gap={6} wrap="nowrap">
-          <NotifyButton />
-          <Button size="compact-xs" variant="default" onClick={() => openTerminal("")}>
-            Shell
-          </Button>
-          <AttachButton />
-          <Button size="compact-xs" variant="default" onClick={openNotes}>
-            Scratch
-          </Button>
-          <Button size="compact-xs" variant="default" onClick={reconcile}>
-            Reconcile
-          </Button>
+          <PaneButton label="Active" onClick={() => openPane("active")} />
+          <PaneButton label="Backlog" onClick={() => openPane("backlog")} />
+          <PaneButton
+            label="Archive"
+            onClick={
+              () => openPane("archive") /* lint-allow-string: pane id, not ProposalOp.Archive */
+            }
+          />
+          <PaneButton label="Plan" onClick={() => openPane("planreview")} />
+          <Divider orientation="vertical" />
+          <PaneButton label="Shell" onClick={() => openTerminal("")} />
+          <PaneButton label="Browser" onClick={() => openBrowser()} />
+          <PaneButton label="Scratch" onClick={() => openPane("scratch")} />
+          <Divider orientation="vertical" />
+          <PaneButton label="Settings" onClick={() => openPane("settings")} />
+          <PaneButton label="About" onClick={() => openPane("about")} />
+          <PaneButton label="Help" onClick={() => openPane("help")} />
         </Group>
       </Group>
     </div>

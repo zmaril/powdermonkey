@@ -1,5 +1,6 @@
 import { Button, Group, Stack, Text, Title } from "@mantine/core";
 import { useLiveQuery } from "@tanstack/react-db";
+import { SessionState } from "../../shared/types.ts";
 import { sessionTasksCollection, sessionsCollection, tasksCollection } from "../collections.ts";
 import { useStore } from "../store.ts";
 
@@ -25,7 +26,7 @@ export function SessionEndedOverlay({
   const prUrl = tasks.find((t) => taskIds.has(t.id) && t.prUrl)?.prUrl ?? null;
   const worktree = session?.worktreePath ?? "";
   const message =
-    session?.state === "stopped"
+    session?.state === SessionState.Stopped
       ? "This session was stopped — its agent was killed and the task re-pended."
       : "This session has ended — landed, merged, or its agent exited.";
   return (

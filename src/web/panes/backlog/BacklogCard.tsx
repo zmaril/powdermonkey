@@ -1,11 +1,14 @@
-import { Card, Checkbox, Group, Text } from "@mantine/core";
+import { Card, Group, Text } from "@mantine/core";
 import type { Phase, Task } from "../../../server/schema.ts";
-import { IdTag, LaunchActions, PhaseList, StarToggle, TaskBadges, TaskLinks } from "../../plan-ui";
+import { IdTag, PhaseList, StarToggle } from "../../plan-ui";
+import { TaskActions } from "./TaskActions.tsx";
+import { SELECTED_SHADOW } from "./constants.ts";
 import type { Selection } from "./types.ts";
 
-/** One backlog task card: a select checkbox + star, id + title + status, its phase
- *  checklist, and the single-task launch actions. Checking several cards reveals
- *  the batch bar that launches them together. */
+/** One backlog task card. Star + id + title on the left, actions on the right (hidden
+ *  while a selection is live, so the batch bar owns them). Shift-click anywhere selects
+ *  it (mousedown preventDefault stops the stray text-highlight); selected cards get an
+ *  electric-blue glow. */
 export function BacklogCard({
   task,
   phases,
@@ -17,28 +20,34 @@ export function BacklogCard({
 }) {
   const checked = selection.selected.has(task.id);
   return (
-    <Card withBorder radius="md" padding="sm" bg={checked ? "dark.5" : undefined}>
+    <Card
+      withBorder
+      radius="md"
+      padding="sm"
+      data-pm-card={task.id}
+      bg={checked ? "dark.5" : undefined}
+      style={{ boxShadow: checked ? SELECTED_SHADOW : undefined }}
+      onMouseDown={(e) => {
+        if (e.shiftKey) e.preventDefault();
+      }}
+      onClick={(e) => {
+        if (e.shiftKey) {
+          e.preventDefault();
+          selection.toggle(task.id);
+        }
+      }}
+    >
       <Group justify="space-between" wrap="nowrap" mb={6}>
         <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-          <Checkbox
-            size="xs"
-            checked={checked}
-            onChange={() => selection.toggle(task.id)}
-            aria-label={`Select ${task.title}`}
-          />
           <StarToggle task={task} />
           <IdTag prefix="t" id={task.id} />
           <Text fw={500} truncate>
             {task.title}
           </Text>
         </Group>
-        <TaskBadges task={task} />
+        {!selection.active && <TaskActions ids={[task.id]} />}
       </Group>
       <PhaseList phases={phases} />
-      <Group gap="xs" mt={10} justify="space-between">
-        <LaunchActions taskId={task.id} />
-        <TaskLinks task={task} />
-      </Group>
     </Card>
   );
 }

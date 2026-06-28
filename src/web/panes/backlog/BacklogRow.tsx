@@ -1,19 +1,13 @@
-import { Box, Checkbox, Group, Text } from "@mantine/core";
+import { Box, Group, Text } from "@mantine/core";
 import type { Task } from "../../../server/schema.ts";
 import type { Indexes } from "../../plan-data.ts";
-import {
-  IdTag,
-  LaunchActions,
-  ProgressPill,
-  StarToggle,
-  TaskBadges,
-  TaskLinks,
-} from "../../plan-ui";
+import { IdTag, ProgressPill, StarToggle } from "../../plan-ui";
+import { TaskActions } from "./TaskActions.tsx";
+import { SELECTED_SHADOW } from "./constants.ts";
 import type { Selection } from "./types.ts";
 
-/** One dense backlog row for the flat view: select · star · id · title · context, a
- *  progress pill and status badges, with the launch actions below. Mirrors the
- *  Active flat row so the two panes read the same. */
+/** One dense backlog row for the flat view: star · id · title · context on the left,
+ *  the same actions on the right. Shift-click selects; selected rows get the glow. */
 export function BacklogRow({
   task,
   idx,
@@ -31,15 +25,23 @@ export function BacklogRow({
     <Box
       px="sm"
       py={8}
-      style={{ borderBottom: "1px solid #2c2e33", background: checked ? "#25262b" : undefined }}
+      data-pm-card={task.id}
+      style={{
+        borderBottom: "1px solid #2c2e33",
+        background: checked ? "#25262b" : undefined,
+        boxShadow: checked ? SELECTED_SHADOW : undefined,
+      }}
+      onMouseDown={(e) => {
+        if (e.shiftKey) e.preventDefault();
+      }}
+      onClick={(e) => {
+        if (e.shiftKey) {
+          e.preventDefault();
+          selection.toggle(task.id);
+        }
+      }}
     >
-      <Group gap="sm" wrap="nowrap" align="flex-start">
-        <Checkbox
-          size="xs"
-          checked={checked}
-          onChange={() => selection.toggle(task.id)}
-          aria-label={`Select ${task.title}`}
-        />
+      <Group gap="sm" wrap="nowrap" align="center">
         <StarToggle task={task} />
         <Box style={{ flex: 1, minWidth: 0 }}>
           <Group gap={6} wrap="nowrap">
@@ -55,11 +57,7 @@ export function BacklogRow({
           )}
         </Box>
         {phases.length > 0 && <ProgressPill phases={phases} />}
-        <TaskBadges task={task} />
-      </Group>
-      <Group gap="xs" wrap="wrap" justify="flex-end" mt={6}>
-        <LaunchActions taskId={task.id} />
-        <TaskLinks task={task} />
+        {!selection.active && <TaskActions ids={[task.id]} />}
       </Group>
     </Box>
   );

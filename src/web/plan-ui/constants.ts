@@ -8,14 +8,15 @@ export const STATUS_COLOR: Record<TaskStatus, string> = {
   [TaskStatus.Pending]: "gray",
   [TaskStatus.Dispatched]: "blue",
   [TaskStatus.Merged]: "green",
+  [TaskStatus.Cancelled]: "red",
 };
 
 // "Try Again" is the user-facing label for a session parked waiting to resume.
 export const SESSION_BADGE: Record<SessionState, { label: string; color: string }> = {
-  [SessionState.Running]: { label: "running", color: "blue" },
+  [SessionState.Running]: { label: "running", color: "blue" }, // lint-allow-string: UI label
   [SessionState.Waiting]: { label: "Try Again", color: "yellow" },
-  [SessionState.Idle]: { label: "idle", color: "gray" },
-  [SessionState.Stopped]: { label: "stopped", color: "red" },
+  [SessionState.Idle]: { label: "idle", color: "gray" }, // lint-allow-string: UI label
+  [SessionState.Stopped]: { label: "stopped", color: "red" }, // lint-allow-string: UI label
 };
 
 // Glyph per session kind. Typed as Record<SessionKind, …> so adding a kind is a
