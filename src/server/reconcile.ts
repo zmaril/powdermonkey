@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import { db } from "./db.ts";
 import { commitBodies } from "./git.ts";
+import { notifyChange } from "./realtime.ts";
 import { phases, sessionTasks, sessions, tasks } from "./schema.ts";
 import { landSession } from "./worktree.ts";
 
@@ -150,6 +151,10 @@ export async function reconcile(): Promise<ReconcileResult> {
   }
 
   const sessionsArchived = await archiveMergedTaskSessions();
+
+  // Only ping clients when this pass actually changed something, so the idle
+  // reconcile loop doesn't wake every browser on every tick.
+  if (phasesMarked > 0 || tasksCompleted > 0 || sessionsArchived > 0) notifyChange();
 
   return {
     phasesMarked,

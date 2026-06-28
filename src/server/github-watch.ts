@@ -3,6 +3,7 @@ import { taskRepo } from "./crud.ts";
 import { db } from "./db.ts";
 import { type CloudPr, bus } from "./events.ts";
 import { pullMain } from "./git.ts";
+import { notifyChange } from "./realtime.ts";
 import { reconcile } from "./reconcile.ts";
 import { phases } from "./schema.ts";
 
@@ -206,6 +207,11 @@ async function tick(initial: boolean): Promise<number> {
   const events = diffCloudPrs(lastByNumber, prs);
   for (const ev of events) await bus.emit(ev.type, ev.pr, { initial });
   lastByNumber = new Map(prs.map((p) => [p.number, p]));
+  // Live PR status (CI / mergeable / draft) is served from memory via /cloud-prs,
+  // not the DB, so a status move writes no row a CRUD ping would catch. Push one
+  // here when anything we track actually changed, so the Active panel's PR badges
+  // stay live without the poll.
+  if (events.length > 0) notifyChange();
   return events.length;
 }
 

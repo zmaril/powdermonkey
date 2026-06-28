@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "./db.ts";
 import { pullMain } from "./git.ts";
+import { notifyChange } from "./realtime.ts";
 import { type Phase, type Session, type Task, phases, sessions, tasks } from "./schema.ts";
 import { linkSessionTasks } from "./session-tasks.ts";
 
@@ -216,5 +217,6 @@ export async function dispatchTask(taskIds: number | number[]): Promise<Dispatch
     .set({ sessionUrl, status: "dispatched", sessionState: "running", updatedAt: new Date() })
     .where(inArray(tasks.id, ids));
 
+  notifyChange();
   return { ok: true, sessionUrl, session };
 }

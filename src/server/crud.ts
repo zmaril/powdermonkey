@@ -1,5 +1,6 @@
 import { eq, isNull } from "drizzle-orm";
 import { db } from "./db.ts";
+import { notifyChange } from "./realtime.ts";
 import {
   type Goal,
   type Milestone,
@@ -35,6 +36,7 @@ function crud<TSelect, TInsert extends Record<string, unknown>>(table: AnyTable)
     },
     async create(values: TInsert): Promise<TSelect> {
       const rows = (await db.insert(table).values(values).returning()) as TSelect[];
+      notifyChange();
       return rows[0];
     },
     async update(id: number, values: Partial<TInsert>): Promise<TSelect | undefined> {
@@ -43,6 +45,7 @@ function crud<TSelect, TInsert extends Record<string, unknown>>(table: AnyTable)
         .set({ ...values, updatedAt: new Date() })
         .where(eq(table.id, id))
         .returning()) as TSelect[];
+      if (rows[0]) notifyChange();
       return rows[0];
     },
     async archive(id: number): Promise<TSelect | undefined> {
@@ -51,6 +54,7 @@ function crud<TSelect, TInsert extends Record<string, unknown>>(table: AnyTable)
         .set({ archivedAt: new Date(), updatedAt: new Date() })
         .where(eq(table.id, id))
         .returning()) as TSelect[];
+      if (rows[0]) notifyChange();
       return rows[0];
     },
     async restore(id: number): Promise<TSelect | undefined> {
@@ -59,6 +63,7 @@ function crud<TSelect, TInsert extends Record<string, unknown>>(table: AnyTable)
         .set({ archivedAt: null, updatedAt: new Date() })
         .where(eq(table.id, id))
         .returning()) as TSelect[];
+      if (rows[0]) notifyChange();
       return rows[0];
     },
   };

@@ -9,6 +9,7 @@ import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
 import { models } from "./models.ts";
 import { loadPlan, planSchema } from "./plan.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
+import { addRealtimeClient, removeRealtimeClient } from "./realtime.ts";
 import { reconcile } from "./reconcile.ts";
 import {
   SUPERVISOR_ID,
@@ -272,6 +273,22 @@ export const app = new Elysia()
       // Attached sockets just detach — the session PTY lives on. Fresh shells die.
       if (handle.kind === "attach") handle.detach();
       else closePty(handle.proc);
+    },
+  })
+  // Realtime change feed. The browser opens this once and refetches its snapshot
+  // on every ping, replacing the old 4s poll. Server → client only: a content-free
+  // "changed" ping fired by notifyChange() on any plan/session mutation. We don't
+  // expect client messages, so there's no body schema.
+  .ws("/events", {
+    open(ws) {
+      addRealtimeClient(ws.raw, (msg) => {
+        try {
+          ws.send(msg);
+        } catch {}
+      });
+    },
+    close(ws) {
+      removeRealtimeClient(ws.raw);
     },
   })
   // CRUD groups.

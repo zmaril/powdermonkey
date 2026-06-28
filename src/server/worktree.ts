@@ -4,6 +4,7 @@ import { eq, inArray } from "drizzle-orm";
 import { db } from "./db.ts";
 import { loadTaskPrompt } from "./dispatch.ts";
 import { worktreeAdd, worktreeAddRemote, worktreeRemove } from "./git.ts";
+import { notifyChange } from "./realtime.ts";
 import { type Session, sessions, tasks } from "./schema.ts";
 import { killSessionPty, startSessionPty } from "./session-pty.ts";
 import { linkSessionTasks, taskIdsForSession } from "./session-tasks.ts";
@@ -108,6 +109,7 @@ export async function startLocalSession(
   writeFileSync(promptPath, `${prompt}\n`);
   startSessionPty(session.id, worktreePath, sessionStartup(promptPath, opts.startup));
 
+  notifyChange();
   return { ok: true, session, worktreePath, branch, prompt, trailers };
 }
 
@@ -141,6 +143,7 @@ export async function landSession(sessionId: number): Promise<LandResult> {
     .set({ state: "idle", archivedAt: new Date(), updatedAt: new Date() })
     .where(eq(sessions.id, sessionId))
     .returning();
+  notifyChange();
   return { ok: true, session: updated };
 }
 
@@ -195,5 +198,6 @@ export async function stopSession(sessionId: number): Promise<StopResult> {
       .where(inArray(tasks.id, taskIds));
   }
 
+  notifyChange();
   return { ok: true, session: updated };
 }

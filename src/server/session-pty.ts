@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "./db.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
+import { notifyChange } from "./realtime.ts";
 import { sessions } from "./schema.ts";
 import { SOCKET, TMUX_BIN, hasSession, shq, tmux } from "./tmux.ts";
 
@@ -80,6 +81,9 @@ async function persistNeedsInput(sessionId: number, value: boolean): Promise<voi
       .update(sessions)
       .set({ needsInput: value, updatedAt: new Date() })
       .where(eq(sessions.id, sessionId));
+    // Push the edge to clients immediately — this is what lights up the Active pane
+    // / fires the "needs you" notification without waiting on a poll.
+    notifyChange();
   } catch {}
 }
 
