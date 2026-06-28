@@ -25,7 +25,6 @@ import {
 } from "./plan-ui.tsx";
 import { useStore } from "./store.ts";
 
-// The Active pane is the live monitor — every task with a session running right
 // now (the derived-active set; see active.ts). The unit here is the WORKER, not
 // the task: each live session renders as one card, because a single worker can be
 // dispatched for several tasks at once (the session_tasks join). The card header
@@ -34,8 +33,8 @@ import { useStore } from "./store.ts";
 // their own PR/CI status). Two views, toggled:
 //   • Flat   — worker cards in one list.
 //   • Grouped — the same cards nested under goal → milestone.
-// It re-renders off the same 4s poll as the rest of the app, so session state
-// (running / Try Again / needs you) stays current without a refresh.
+// It re-renders off the same WebSocket change feed as the rest of the app, so
+// session state (running / Try Again / needs you) stays current without a refresh.
 
 type View = "flat" | "grouped";
 

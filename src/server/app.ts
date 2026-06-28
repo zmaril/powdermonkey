@@ -1,9 +1,11 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { TSchema } from "@sinclair/typebox";
+import { getTableColumns, getTableName } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 import { P, match } from "ts-pattern";
 import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
+import { pg } from "./db.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
 import {
@@ -17,6 +19,16 @@ import { PUBLIC_DIR } from "./paths.ts";
 import { loadPlan, planSchema } from "./plan.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { reconcile } from "./reconcile.ts";
+import {
+  goals as goalsTable,
+  milestones as milestonesTable,
+  notes as notesTable,
+  phases as phasesTable,
+  pullRequests as pullRequestsTable,
+  sessionTasks as sessionTasksTable,
+  sessions as sessionsTable,
+  tasks as tasksTable,
+} from "./schema.ts";
 import {
   SUPERVISOR_ID,
   attachSessionPty,
@@ -46,6 +58,36 @@ type PtyHandle =
   // biome-ignore lint/suspicious/noExplicitAny: native PTY handle (see pty.ts).
   { kind: "fresh"; proc: any } | { kind: "attach"; sessionId: number; detach: () => void };
 const ptys = new Map<object, PtyHandle>();
+
+// Per-socket teardown for /sync: each connection owns one PGlite live.changes
+// subscription, dropped when the socket closes.
+const syncSubs = new Map<object, () => void>();
+
+// The tables the browser mirrors as TanStack DB collections. The SELECT and the
+// primary-key column are derived from the Drizzle schema — adding a table here is the
+// only per-table server code. We stream EVERY row (live + archived); the browser's
+// live queries filter to non-archived for the working panes and to archived/merged
+// for the Archive pane, so one collection set serves both.
+const SYNC_TABLES: Record<string, { sql: string; key: string }> = Object.fromEntries(
+  [
+    goalsTable,
+    milestonesTable,
+    tasksTable,
+    phasesTable,
+    sessionsTable,
+    sessionTasksTable,
+    notesTable,
+    pullRequestsTable,
+    // biome-ignore lint/suspicious/noExplicitAny: heterogeneous pgTable objects, introspected generically.
+  ].map((tbl: any) => {
+    const name = getTableName(tbl);
+    const cols = getTableColumns(tbl);
+    const pk =
+      (Object.values(cols) as Array<{ name: string; primary: boolean }>).find((c) => c.primary)
+        ?.name ?? "id";
+    return [name, { sql: `SELECT * FROM "${name}"`, key: pk }];
+  }),
+);
 
 /** A CRUD route group: list / get / create / update / archive(DELETE) / restore. */
 function resource(name: string, repo: Repo, body: { create: TSchema; update: TSchema }) {
@@ -326,6 +368,42 @@ export const app = new Elysia()
       // Attached sockets just detach — the session PTY lives on. Fresh shells die.
       if (handle.kind === "attach") handle.detach();
       else closePty(handle.proc);
+    },
+  })
+  // Realtime row-delta sync for the browser's TanStack DB collections — the sole
+  // realtime channel (it replaced the old content-free /events ping, where the browser
+  // refetched everything). This streams the actual row deltas (insert/update/delete)
+  // straight from PGlite's `live.changes`, one socket per table (?table=tasks). Each
+  // connection opens its OWN subscription, so its initial snapshot and the live stream
+  // are atomic — a reconnecting client just gets a fresh snapshot, no offset/catch-up
+  // bookkeeping. The browser half (src/web/collections.ts) applies these via
+  // begin/write/commit. Reads are reactive; writes still go through the REST routes
+  // and stream back here.
+  .ws("/sync", {
+    query: t.Object({ table: t.String() }),
+    async open(ws) {
+      const spec = SYNC_TABLES[ws.data.query.table];
+      if (!spec) {
+        ws.close();
+        return;
+      }
+      const send = (changes: unknown) => {
+        try {
+          ws.send(JSON.stringify({ changes }));
+        } catch {}
+      };
+      // Partial update mode: an UPDATE delta carries only the changed columns (the
+      // rest come back null), so the client merges by __changed_columns__.
+      const lc = await pg.live.changes(spec.sql, [], spec.key);
+      send(lc.initialChanges); // snapshot first (may be empty → client still readies)
+      const onChange = (changes: unknown) => send(changes);
+      lc.subscribe(onChange);
+      syncSubs.set(ws.raw, () => lc.unsubscribe(onChange));
+    },
+    close(ws) {
+      const off = syncSubs.get(ws.raw);
+      syncSubs.delete(ws.raw);
+      off?.();
     },
   })
   // CRUD groups.

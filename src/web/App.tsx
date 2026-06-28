@@ -1,5 +1,6 @@
 import { Button, Code, CopyButton, Group, Popover, Stack, Text, Title } from "@mantine/core";
 import "dockview-core/dist/styles/dockview.css";
+import { useLiveQuery } from "@tanstack/react-db";
 import {
   type DockviewApi,
   DockviewReact,
@@ -12,16 +13,24 @@ import { ActivePane } from "./ActivePane.tsx";
 import { ArchivePane } from "./ArchivePane.tsx";
 import { BacklogPane } from "./BacklogPane.tsx";
 import { ShellTerminal } from "./ShellTerminal.tsx";
+import { ActivityTab, useTabActivity } from "./TabActivity.tsx";
+import {
+  notesCollection,
+  sessionTasksCollection,
+  sessionsCollection,
+  tasksCollection,
+} from "./collections.ts";
+import { useNeedsInputNotifications, useNotificationPermission } from "./notifications.ts";
 import { useStore } from "./store.ts";
 
 // The single pane of glass. The plan is split into three panels — a live ACTIVE
 // monitor, a launchpad BACKLOG editor, and the ARCHIVE book of work — alongside
-// the scratchpad and the supervisor shell. One poll (here) keeps the live panels'
-// store-derived views fresh (Archive runs its own slower poll for archived rows);
-// the panes themselves are pure derivations off the store (see plan-data.ts).
+// the scratchpad and the supervisor shell. Every panel renders off TanStack DB
+// collections (collections.ts) that sync themselves live from PGlite over /sync —
+// no store data, no poll, no refetch (see plan-data.ts).
 
 // The scratchpad: one note, one big textarea. Holds its own draft state seeded
-// once from the server so the 4s background poll can't clobber what you're typing;
+// once from the server so a background refetch can't clobber what you're typing;
 // edits update the draft immediately and debounce a PATCH. The supervisor reads it
 // on "check @notes" (GET /notes).
 function ScratchPad() {
@@ -33,11 +42,11 @@ function ScratchPad() {
   // The server value we're synced with. We only adopt an incoming change when the
   // local draft still equals this — i.e. there are no unsaved keystrokes to lose.
   const serverBody = useRef("");
-  // The scratch note as the 4s poll keeps it in the store. Watching it lets
-  // out-of-band edits (another tab, or the supervisor editing @notes) show up here.
-  const storeBody = useStore((s) =>
-    id == null ? undefined : s.notes.find((n) => n.id === id)?.body,
-  );
+  // The scratch note as the notes collection keeps it (synced live from PGlite).
+  // Watching it lets out-of-band edits (another tab, or the supervisor editing
+  // @notes) show up.
+  const notes = useLiveQuery(() => notesCollection);
+  const storeBody = id == null ? undefined : notes.data?.find((n) => n.id === id)?.body;
 
   useEffect(() => {
     let active = true;
@@ -119,19 +128,14 @@ function ScratchPad() {
 // so the PR link survives the session being archived on land/merge.
 function SessionEndedOverlay({ sessionId, onClose }: { sessionId: number; onClose: () => void }) {
   const openTerminal = useStore((s) => s.openTerminal);
-  const session = useStore(
-    (s) =>
-      s.sessions.find((x) => x.id === sessionId) ??
-      s.archive.sessions.find((x) => x.id === sessionId),
-  );
-  const prUrl = useStore((s) => {
-    const taskIds = new Set(
-      s.sessionTasks.filter((l) => l.sessionId === sessionId).map((l) => l.taskId),
-    );
-    return (
-      [...s.tasks, ...s.archive.tasks].find((t) => taskIds.has(t.id) && t.prUrl)?.prUrl ?? null
-    );
-  });
+  // The collections stream every row (live + archived), so the session and its PR
+  // link survive the session being archived on land/merge.
+  const sessions = useLiveQuery(() => sessionsCollection).data ?? [];
+  const tasks = useLiveQuery(() => tasksCollection).data ?? [];
+  const links = useLiveQuery(() => sessionTasksCollection).data ?? [];
+  const session = sessions.find((x) => x.id === sessionId);
+  const taskIds = new Set(links.filter((l) => l.sessionId === sessionId).map((l) => l.taskId));
+  const prUrl = tasks.find((t) => taskIds.has(t.id) && t.prUrl)?.prUrl ?? null;
   const worktree = session?.worktreePath ?? "";
   const message =
     session?.state === "stopped"
@@ -261,6 +265,33 @@ function buildDefaultLayout(api: DockviewApi) {
   active.api.setActive();
 }
 
+// Opt into OS web notifications. Browsers only grant permission on a user gesture,
+// so this is an explicit button; once granted/denied it reflects the standing
+// state (and there's nothing more to do — the choice is the browser's to keep).
+function NotifyButton() {
+  const { permission, request } = useNotificationPermission();
+  if (permission === "unsupported") return null;
+  const label =
+    permission === "granted" ? "🔔 On" : permission === "denied" ? "🔕 Blocked" : "🔔 Notify";
+  return (
+    <Button
+      size="compact-xs"
+      variant="default"
+      onClick={request}
+      disabled={permission !== "default"}
+      title={
+        permission === "granted"
+          ? "Desktop notifications are on — you'll be pinged when a session needs you"
+          : permission === "denied"
+            ? "Notifications are blocked in your browser settings"
+            : "Enable desktop notifications when a session needs you"
+      }
+    >
+      {label}
+    </Button>
+  );
+}
+
 // One command + a copy button. The shell can't reach into the operator's terminal
 // to attach for them — all the UI can do is hand over the exact line to paste.
 function CommandRow({ cmd, hint }: { cmd: string; hint: string }) {
@@ -316,7 +347,9 @@ function AttachButton() {
 // Reconcile), and the error banner. Lives above the dockview so it's always visible
 // regardless of which panel is focused.
 function TopBar() {
-  const { error, loading, reconcile, openTerminal, openNotes } = useStore();
+  const { error, reconcile, openTerminal, openNotes } = useStore();
+  // "loading" until the first collection snapshot lands.
+  const loading = useLiveQuery(() => tasksCollection).isLoading;
   return (
     <div style={{ flex: "0 0 auto", borderBottom: "1px solid #2c2e33", background: "#141517" }}>
       <Group justify="space-between" px="md" py={6} wrap="nowrap">
@@ -334,6 +367,7 @@ function TopBar() {
           )}
         </Group>
         <Group gap={6} wrap="nowrap">
+          <NotifyButton />
           <Button size="compact-xs" variant="default" onClick={() => openTerminal("")}>
             Shell
           </Button>
@@ -413,16 +447,24 @@ export function App() {
   const layoutSubRef = useRef<{ dispose: () => void } | null>(null);
   const shellReq = useStore((s) => s.shellReq);
   const notesReq = useStore((s) => s.notesReq);
-  const refresh = useStore((s) => s.refresh);
   const setLayout = useStore((s) => s.setLayout);
+  const loadSettings = useStore((s) => s.loadSettings);
 
-  // The one poll for the whole app. Every panel renders off the store, so this
-  // keeps Active/Backlog/Scratch current as branches land and sessions change.
+  // The plan/session data flows through the TanStack DB collections (each syncs
+  // itself over /sync). The only server state not in a collection is the auto-rebase
+  // toggle, so fetch that once on mount.
   useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, 4000);
-    return () => clearInterval(id);
-  }, [refresh]);
+    loadSettings();
+  }, [loadSettings]);
+
+  // Ping the operator (OS notification) whenever a session falls idle at a prompt.
+  // Watches the sessions collection, firing only on the needs_input edge.
+  useNeedsInputNotifications();
+
+  // In-app glanceable layer: light up a pane's tab when something happens in it
+  // while its tab is off screen (new session, needs-you, task status change). The
+  // tab clears itself when viewed. apiRef is set in onReady below.
+  useTabActivity(apiRef);
 
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;
@@ -496,7 +538,12 @@ export function App() {
       {disconnected && <DisconnectBanner />}
       <TopBar />
       <div style={{ flex: 1, minHeight: 0 }}>
-        <DockviewReact components={dockComponents} onReady={onReady} theme={themeAbyss} />
+        <DockviewReact
+          components={dockComponents}
+          defaultTabComponent={ActivityTab}
+          onReady={onReady}
+          theme={themeAbyss}
+        />
       </div>
     </div>
   );

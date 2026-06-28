@@ -1,9 +1,23 @@
+import { useLiveQuery } from "@tanstack/react-db";
 import { useMemo } from "react";
 import type { CloudPr } from "../server/events.ts";
 import type { Goal, Milestone, Phase, Session, Task } from "../server/schema.ts";
 import { TaskStatus } from "../shared/types.ts";
 import { type SessionLink, activeTaskIds } from "./active.ts";
-import { useStore } from "./store.ts";
+import {
+  goalsCollection,
+  milestonesCollection,
+  phasesCollection,
+  pullRequestsCollection,
+  sessionTasksCollection,
+  sessionsCollection,
+  tasksCollection,
+} from "./collections.ts";
+
+// The collections stream every row (live + archived); the live panes want only the
+// non-archived ones. sessionTasks carry no archived_at — their liveness is the
+// session's, which buildIndexes already resolves — so they're never filtered here.
+const notArchived = <T extends { archivedAt?: Date | null }>(r: T): boolean => r.archivedAt == null;
 
 // Shared read-model for the two panes. Both the Active and Backlog panes need the
 // same goal→milestone→task→phase indexes and the same derived active set, so we
@@ -87,48 +101,63 @@ export type PlanData = {
   error: string | null;
 };
 
-/** Pure derivation off the store: the shared indexes plus the derived active set.
- *  No polling here — App owns the single refresh timer. */
+/** The shared indexes + derived active set, now sourced from the TanStack DB
+ *  collections (synced live from PGlite). No store, no poll, no refetch: each
+ *  collection re-emits as deltas arrive and this re-derives. The Indexes shape is
+ *  unchanged, so the panes are untouched. */
 export function usePlanData(): PlanData {
-  const goals = useStore((s) => s.goals);
-  const milestones = useStore((s) => s.milestones);
-  const tasks = useStore((s) => s.tasks);
-  const phases = useStore((s) => s.phases);
-  const sessions = useStore((s) => s.sessions);
-  const sessionTasks = useStore((s) => s.sessionTasks);
-  const cloudPrs = useStore((s) => s.cloudPrs);
-  const loading = useStore((s) => s.loading);
-  const error = useStore((s) => s.error);
+  const goals = useLiveQuery(() => goalsCollection);
+  const milestones = useLiveQuery(() => milestonesCollection);
+  const tasks = useLiveQuery(() => tasksCollection);
+  const phases = useLiveQuery(() => phasesCollection);
+  const sessions = useLiveQuery(() => sessionsCollection);
+  const sessionTasks = useLiveQuery(() => sessionTasksCollection);
+  const cloudPrs = useLiveQuery(() => pullRequestsCollection);
 
-  const idx = useMemo(
-    () => buildIndexes(goals, milestones, tasks, phases, sessions, sessionTasks, cloudPrs),
-    [goals, milestones, tasks, phases, sessions, sessionTasks, cloudPrs],
-  );
-  const activeIds = useMemo(() => activeTaskIds(sessions, sessionTasks), [sessions, sessionTasks]);
+  const g = (goals.data ?? []).filter(notArchived);
+  const m = (milestones.data ?? []).filter(notArchived);
+  const t = (tasks.data ?? []).filter(notArchived);
+  const p = (phases.data ?? []).filter(notArchived);
+  const s = (sessions.data ?? []).filter(notArchived);
+  const links: SessionLink[] = sessionTasks.data ?? [];
+  const prs = cloudPrs.data ?? [];
 
-  return { idx, activeIds, loading, error };
+  const idx = useMemo(() => buildIndexes(g, m, t, p, s, links, prs), [g, m, t, p, s, links, prs]);
+  const activeIds = useMemo(() => activeTaskIds(s, links), [s, links]);
+
+  // "loading" until the core plan tables have delivered their first snapshot.
+  const loading = goals.isLoading || milestones.isLoading || tasks.isLoading || sessions.isLoading;
+  return { idx, activeIds, loading, error: null };
 }
 
-/** Derivation off the archive slice (live + archived rows). `tasks` is the book of
- *  work: everything finished (merged) or archived. Indexes cover the full
- *  hierarchy so a task under an archived goal/milestone still resolves context. */
+/** The archive view, off the same collections. `tasks` is the book of work:
+ *  everything finished (merged) or archived. Indexes cover the FULL hierarchy (all
+ *  rows, archived included) so a task under an archived goal/milestone still resolves
+ *  its context. */
 export function useArchiveData(): { idx: Indexes; tasks: Task[] } {
-  const archive = useStore((s) => s.archive);
+  const goals = useLiveQuery(() => goalsCollection);
+  const milestones = useLiveQuery(() => milestonesCollection);
+  const tasks = useLiveQuery(() => tasksCollection);
+  const phases = useLiveQuery(() => phasesCollection);
+  const sessions = useLiveQuery(() => sessionsCollection);
+  const sessionTasks = useLiveQuery(() => sessionTasksCollection);
+
+  const allTasks = tasks.data ?? [];
   const idx = useMemo(
     () =>
       buildIndexes(
-        archive.goals,
-        archive.milestones,
-        archive.tasks,
-        archive.phases,
-        archive.sessions,
-        archive.sessionTasks,
+        goals.data ?? [],
+        milestones.data ?? [],
+        allTasks,
+        phases.data ?? [],
+        sessions.data ?? [],
+        sessionTasks.data ?? [],
       ),
-    [archive],
+    [goals.data, milestones.data, allTasks, phases.data, sessions.data, sessionTasks.data],
   );
-  const tasks = useMemo(
-    () => archive.tasks.filter((t) => t.archivedAt != null || t.status === TaskStatus.Merged),
-    [archive.tasks],
+  const archivedTasks = useMemo(
+    () => allTasks.filter((t) => t.archivedAt != null || t.status === TaskStatus.Merged),
+    [allTasks],
   );
-  return { idx, tasks };
+  return { idx, tasks: archivedTasks };
 }

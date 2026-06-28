@@ -80,6 +80,9 @@ export function hasSessionPty(sessionId: number): boolean {
  *  only write on edges, not on every output chunk. */
 async function persistNeedsInput(sessionId: number, value: boolean): Promise<void> {
   try {
+    // Writing the sessions row is enough to reach the browser: the /sync feed
+    // (app.ts) streams the edge into the sessions collection — which lights up the
+    // Active pane and fires the "needs you" notification — without a poll.
     await db
       .update(sessions)
       .set({ needsInput: value, updatedAt: new Date() })

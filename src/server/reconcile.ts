@@ -159,6 +159,10 @@ export async function reconcile(): Promise<ReconcileResult> {
 
   const sessionsArchived = await archiveMergedTaskSessions();
 
+  // No explicit client ping here: the phase/task/session writes above go through
+  // the DB, so the /sync feed (app.ts) streams them on its own. An idle pass writes
+  // nothing and so wakes nobody.
+
   return {
     phasesMarked,
     tasksCompleted,
