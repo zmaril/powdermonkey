@@ -1,5 +1,5 @@
 import { boolean, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
-import type { PhaseStatus, SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
+import { PhaseStatus, SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 
 // The plan vocabulary, fully normalized: every entity is its own relation with an
 // auto-assigned integer id and an `archived_at` soft-delete column (null = live).
@@ -40,7 +40,7 @@ export const tasks = pgTable("tasks", {
   // Operator priority: a starred task sorts to the top of its group (active/backlog).
   starred: boolean("starred").notNull().default(false),
   // Progress is set during reconciliation when a PR merges, never self-reported.
-  status: text("status").$type<TaskStatus>().notNull().default("pending"),
+  status: text("status").$type<TaskStatus>().notNull().default(TaskStatus.Pending),
   // Runtime session fields (a session is attached to the task it was dispatched
   // for; sessions can also exist independently in the sessions table).
   sessionUrl: text("session_url"),
@@ -55,7 +55,7 @@ export const phases = pgTable("phases", {
     .notNull()
     .references(() => tasks.id),
   name: text("name").notNull(),
-  status: text("status").$type<PhaseStatus>().notNull().default("todo"),
+  status: text("status").$type<PhaseStatus>().notNull().default(PhaseStatus.Todo),
   position: integer("position").notNull().default(0),
   ...timestamps,
 });
@@ -67,8 +67,8 @@ export const phases = pgTable("phases", {
 // join below (a single session can be dispatched for several tasks at once).
 export const sessions = pgTable("sessions", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  kind: text("kind").$type<SessionKind>().notNull().default("local"),
-  state: text("state").$type<SessionState>().notNull().default("running"),
+  kind: text("kind").$type<SessionKind>().notNull().default(SessionKind.Local),
+  state: text("state").$type<SessionState>().notNull().default(SessionState.Running),
   branch: text("branch"),
   worktreePath: text("worktree_path"),
   url: text("url"),

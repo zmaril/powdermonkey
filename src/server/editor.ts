@@ -1,4 +1,5 @@
 import { eq, inArray } from "drizzle-orm";
+import { SessionKind } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { sessions, tasks } from "./schema.ts";
 import { taskIdsForSession } from "./session-tasks.ts";
@@ -31,7 +32,7 @@ export async function openSessionEditor(sessionId: number): Promise<OpenEditorRe
   const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId));
   if (!session) return { ok: false, error: `unknown session "${sessionId}"` };
 
-  if (session.kind === "local") {
+  if (session.kind === SessionKind.Local) {
     if (!session.worktreePath) return { ok: false, error: "session has no worktree" };
     spawnDetached([CODE_BIN, session.worktreePath]);
     return { ok: true, target: session.worktreePath };

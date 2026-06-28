@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { CloudPr } from "../server/events.ts";
 import type { Goal, Milestone, Phase, Session, Task } from "../server/schema.ts";
+import { TaskStatus } from "../shared/types.ts";
 import { type SessionLink, activeTaskIds } from "./active.ts";
 import { useStore } from "./store.ts";
 
@@ -126,7 +127,7 @@ export function useArchiveData(): { idx: Indexes; tasks: Task[] } {
     [archive],
   );
   const tasks = useMemo(
-    () => archive.tasks.filter((t) => t.archivedAt != null || t.status === "merged"),
+    () => archive.tasks.filter((t) => t.archivedAt != null || t.status === TaskStatus.Merged),
     [archive.tasks],
   );
   return { idx, tasks };

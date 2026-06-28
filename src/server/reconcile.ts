@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNull, ne } from "drizzle-orm";
+import { PhaseStatus, SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { commitBodies } from "./git.ts";
 import { phases, sessionTasks, sessions, tasks } from "./schema.ts";
@@ -65,12 +66,12 @@ async function archiveMergedTaskSessions(): Promise<number> {
       .from(sessionTasks)
       .innerJoin(tasks, eq(sessionTasks.taskId, tasks.id))
       .where(eq(sessionTasks.sessionId, s.id));
-    if (linked.length > 0 && linked.every((t) => t.status === "merged")) live.push(s);
+    if (linked.length > 0 && linked.every((t) => t.status === TaskStatus.Merged)) live.push(s);
   }
 
   let archived = 0;
   for (const s of live) {
-    if (s.kind === "local") {
+    if (s.kind === SessionKind.Local) {
       const res = await landSession(s.id);
       if (res.ok) archived++;
       else console.warn(`reconcile: could not land session ${s.id}: ${res.error}`);
@@ -80,7 +81,7 @@ async function archiveMergedTaskSessions(): Promise<number> {
     // on archivedAt so a concurrent land/stop can't double-archive.
     const [updated] = await db
       .update(sessions)
-      .set({ state: "idle", archivedAt: new Date(), updatedAt: new Date() })
+      .set({ state: SessionState.Idle, archivedAt: new Date(), updatedAt: new Date() })
       .where(and(eq(sessions.id, s.id), isNull(sessions.archivedAt)))
       .returning({ id: sessions.id });
     if (updated) archived++;
@@ -108,12 +109,12 @@ export async function reconcile(): Promise<ReconcileResult> {
   if (phaseIds.size > 0) {
     const marked = await db
       .update(phases)
-      .set({ status: "done", updatedAt: new Date() })
+      .set({ status: PhaseStatus.Done, updatedAt: new Date() })
       .where(
         and(
           inArray(phases.id, [...phaseIds]),
           isNull(phases.archivedAt),
-          ne(phases.status, "done"),
+          ne(phases.status, PhaseStatus.Done),
         ),
       )
       .returning({ id: phases.id });
@@ -137,13 +138,13 @@ export async function reconcile(): Promise<ReconcileResult> {
       .select({ status: phases.status })
       .from(phases)
       .where(and(eq(phases.taskId, taskId), isNull(phases.archivedAt)));
-    const allDone = ps.length > 0 && ps.every((p) => p.status === "done");
+    const allDone = ps.length > 0 && ps.every((p) => p.status === PhaseStatus.Done);
     // Explicit PM-Task trailer completes the task even if it has no phases.
     if (allDone || taskTrailers.has(taskId)) {
       const done = await db
         .update(tasks)
-        .set({ status: "merged", updatedAt: new Date() })
-        .where(and(eq(tasks.id, taskId), ne(tasks.status, "merged")))
+        .set({ status: TaskStatus.Merged, updatedAt: new Date() })
+        .where(and(eq(tasks.id, taskId), ne(tasks.status, TaskStatus.Merged)))
         .returning({ id: tasks.id });
       tasksCompleted += done.length;
     }
