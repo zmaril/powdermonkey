@@ -1,14 +1,16 @@
+import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { Group, Stack, Text, Title } from "@mantine/core";
 import { useState } from "react";
-import type { Goal } from "../../../server/schema.ts";
+import type { Goal, Milestone, Task } from "../../../server/schema.ts";
 import { Decision, ProposalOp, VocabKind } from "../../../shared/types.ts";
 import { type EntityEdit, type GroupedGhosts, editLabel, entityKey } from "../../ghosts.ts";
-import { type Indexes, starFirst } from "../../plan-data.ts";
+import type { Indexes } from "../../plan-data.ts";
 import { IdTag } from "../../plan-ui";
 import { Caret } from "./Caret.tsx";
 import { GhostHeader } from "./GhostHeader.tsx";
 import { MilestoneGroup } from "./MilestoneGroup.tsx";
 import { ProposedStrip } from "./ProposedStrip.tsx";
+import { type Reorder, mId } from "./reorder.ts";
 import type { Selection } from "./types.ts";
 import { useDecide } from "./useDecide.ts";
 
@@ -23,6 +25,7 @@ export function GoalGroup({
   selection,
   ghosts,
   edits,
+  reorder,
 }: {
   goal: Goal;
   idx: Indexes;
@@ -30,6 +33,7 @@ export function GoalGroup({
   selection: Selection;
   ghosts: GroupedGhosts;
   edits: Map<string, EntityEdit[]>;
+  reorder: Reorder;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const { busy, decide } = useDecide();
@@ -37,10 +41,20 @@ export function GoalGroup({
   const goalArchive = goalEdits.some((e) => e.op === ProposalOp.Archive);
   const ghostMilestones = ghosts.milestonesByGoal.get(goal.id) ?? [];
 
-  const milestones = (idx.milestonesByGoal.get(goal.id) ?? [])
+  // Order milestones (and each milestone's tasks) by the live drag order — pure
+  // `position` order, not star-first, so a drag maps one-to-one onto stored positions.
+  // (Stars still float tasks to the top of the flat launch list; here they're a marker.)
+  const milestones = reorder
+    .milestoneOrder(goal.id)
+    .map((id) => idx.milestoneById.get(id))
+    .filter((m): m is Milestone => m != null)
     .map((m) => ({
       m,
-      tasks: starFirst((idx.tasksByMilestone.get(m.id) ?? []).filter((t) => backlog.has(t.id))),
+      tasks: reorder
+        .taskOrder(m.id)
+        .filter((id) => backlog.has(id))
+        .map((id) => reorder.taskById(id))
+        .filter((t): t is Task => t != null),
     }))
     .filter(
       ({ m, tasks }) =>
@@ -97,18 +111,25 @@ export function GoalGroup({
         ))}
       </div>
 
-      {!collapsed &&
-        milestones.map(({ m, tasks }) => (
-          <MilestoneGroup
-            key={m.id}
-            milestone={m}
-            tasks={tasks}
-            idx={idx}
-            selection={selection}
-            ghosts={ghosts}
-            edits={edits}
-          />
-        ))}
+      {!collapsed && (
+        <SortableContext
+          items={milestones.map(({ m }) => mId(m.id))}
+          strategy={verticalListSortingStrategy}
+        >
+          {milestones.map(({ m, tasks }) => (
+            <MilestoneGroup
+              key={m.id}
+              milestone={m}
+              tasks={tasks}
+              idx={idx}
+              selection={selection}
+              ghosts={ghosts}
+              edits={edits}
+              reorder={reorder}
+            />
+          ))}
+        </SortableContext>
+      )}
       {!collapsed &&
         ghostMilestones.map((g) => (
           <div key={`p${g.proposalId}-${g.changeIndex}`} style={{ marginLeft: 20 }}>

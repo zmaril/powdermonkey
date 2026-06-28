@@ -1,4 +1,5 @@
-import { Box, Group, SegmentedControl, Stack, Text } from "@mantine/core";
+import { DndContext, DragOverlay, closestCorners } from "@dnd-kit/core";
+import { Box, Card, Group, SegmentedControl, Stack, Text } from "@mantine/core";
 import type { ComboboxData } from "@mantine/core";
 import type { DockviewPanelApi } from "dockview-react";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -22,6 +23,7 @@ import { ScrollIndicator } from "./ScrollIndicator.tsx";
 import { SelectionBar } from "./SelectionBar.tsx";
 import { StartPanel } from "./StartPanel.tsx";
 import { HighlightProvider, useNewTaskReveal } from "./new-task.ts";
+import { useBacklogReorder } from "./reorder.ts";
 import type { Selection, View } from "./types.ts";
 
 // The task lifecycle buckets the operator filters on (default Backlog). Done/archived
@@ -91,7 +93,13 @@ function topAnchor(scroller: HTMLElement): { key: string; offset: number } | nul
  *  off-screen): those go through `revealCard`, which scrolls the card in and then re-reads
  *  the anchor synchronously, so the very next restore is a no-op instead of yanking you
  *  back to where you were before the reveal. */
-function usePreserveScrollAcrossResort(scrollRef: React.RefObject<HTMLDivElement | null>) {
+function usePreserveScrollAcrossResort(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  // Paused while a drag is in flight: a reorder shifts cards every frame on purpose, and
+  // re-anchoring the scroll to a moving card would fight the drag. We leave the scroll
+  // alone during the drag and let the post-drop render settle it.
+  paused = false,
+) {
   const anchor = useRef<{ key: string; offset: number } | null>(null);
 
   // Keep the anchor fresh as the operator scrolls.
@@ -112,7 +120,7 @@ function usePreserveScrollAcrossResort(scrollRef: React.RefObject<HTMLDivElement
   // shift.
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
-    if (!scroller) return;
+    if (!scroller || paused) return;
     const a = anchor.current;
     if (a) {
       const sel = `[data-pm-card="${a.key.replace(/["\\]/g, "\\$&")}"]`;
@@ -151,10 +159,14 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
   const { idx, activeIds, loading } = useFullData();
   const ghosts = useProposalGhosts();
   const edits = useProposalEdits();
+  const reorder = useBacklogReorder(idx);
   const [view, setView] = useState<View>("grouped");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const scroll = usePaneScroll("tasks", api); // lint-allow-string: pane scroll key, not an enum value
-  const { revealCard } = usePreserveScrollAcrossResort(scroll.ref);
+  // Pause the scroll re-anchor while a drag is in flight — a reorder shifts cards on
+  // purpose every frame, and re-anchoring to a moving card would fight the drag. Also
+  // exposes revealCard for the new-task glow/scroll (below).
+  const { revealCard } = usePreserveScrollAcrossResort(scroll.ref, reorder.activeId != null);
   // Opens to backlog (DEFAULT_TASK_FILTER) so the pane comes up showing what the old
   // Backlog did; widen the status filter to see active / done / cancelled / archived.
   const [filter, setFilter] = useState<TaskFilter>(DEFAULT_TASK_FILTER);
@@ -305,19 +317,37 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
                 </>
               )
             ) : (
-              <Stack gap="xl">
-                {goals.map((g) => (
-                  <GoalGroup
-                    key={g.id}
-                    goal={g}
-                    idx={idx}
-                    backlog={visible}
-                    selection={selection}
-                    ghosts={ghosts}
-                    edits={edits}
-                  />
-                ))}
-              </Stack>
+              <DndContext
+                sensors={reorder.sensors}
+                collisionDetection={closestCorners}
+                onDragStart={reorder.onDragStart}
+                onDragOver={reorder.onDragOver}
+                onDragEnd={reorder.onDragEnd}
+              >
+                <Stack gap="xl">
+                  {goals.map((g) => (
+                    <GoalGroup
+                      key={g.id}
+                      goal={g}
+                      idx={idx}
+                      backlog={visible}
+                      selection={selection}
+                      ghosts={ghosts}
+                      edits={edits}
+                      reorder={reorder}
+                    />
+                  ))}
+                </Stack>
+                <DragOverlay>
+                  {reorder.draggedLabel ? (
+                    <Card withBorder radius="md" padding="xs" bg="dark.5" style={{ opacity: 0.95 }}>
+                      <Text size="sm" fw={600} truncate>
+                        {reorder.draggedLabel}
+                      </Text>
+                    </Card>
+                  ) : null}
+                </DragOverlay>
+              </DndContext>
             )}
           </Box>
           {hasAbove && <ScrollIndicator dir="up" onClick={jumpAbove} />}

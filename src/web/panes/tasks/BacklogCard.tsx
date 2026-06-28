@@ -1,5 +1,6 @@
 import { Button, Card, Group, Text } from "@mantine/core";
 import { IconAlertTriangle } from "@tabler/icons-react";
+import type { ReactNode } from "react";
 import { useState } from "react";
 import type { Phase, Task } from "../../../server/schema.ts";
 import { Decision, ProposalOp, TaskStatus } from "../../../shared/types.ts";
@@ -37,6 +38,7 @@ export function BacklogCard({
   phaseGhosts = [],
   phaseEdits = [],
   onEditingChange,
+  handle,
 }: {
   task?: Task;
   phases?: Phase[];
@@ -48,6 +50,8 @@ export function BacklogCard({
   /** Told when this card enters/leaves edit mode, so the list can suspend its animation
    *  (the card<->editor swap shouldn't morph for 300ms — editing should feel instant). */
   onEditingChange?: (editing: boolean) => void;
+  /** Drag handle (⠿) rendered at the head of the card, when the card is sortable. */
+  handle?: ReactNode;
 }) {
   const { busy, conflict, decide } = useDecide();
   const [editing, setEditing] = useState(false);
@@ -103,6 +107,7 @@ export function BacklogCard({
     >
       <Group justify="space-between" wrap="nowrap" mb="snug">
         <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+          {handle}
           <StarToggle task={task} />
           <IdTag prefix="t" id={task.id} />
           <Text
