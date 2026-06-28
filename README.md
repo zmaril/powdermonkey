@@ -1,9 +1,18 @@
 # PowderMonkey
 
-PowderMonkey is an alternative web interface for Claude Code. It's really nothing more than a thousand `claude -p` in a trenchcoat. You can read [`design.md`](./design.md) for more info, or the rest of this file for how to use it and why it was built.
+PowderMonkey helps you plan and execute long term projects via coding agents in the cloud through Github and Claude Code.
 
 ![A powder monkey serving the guns](docs/powder-monkey.jpg)
 
+## Background 
+
+Coding agents are now able to quickly accomplish tasks that would otherwise take a person with a decade or more of specialized experience to complete. Knowledge work is now a resource that you can pour over a problem, and see how much of it saturates and dissolves on its own, without human effort or intervention. What I feel myself struggling with day to day is the long term coordination of many agents working together towards related yet disparate goals.
+
+At times, I feel like I am just ferrying information back and forth between Claude sessions. I often already have a long term plan written down somewhere, with various milestones and tasks all written up and ready to go. I might even have little scripts that will take that plan, make an agent create prompts for other agents to use, and dispatch those agents out to the cloud. However, ultimately, I still feel like I am just running back and forth, copying and pasting things, without a clear sense of how I am progressing on long term goals.
+
+One might reasonably suggest Linear or Jira or any other project management software. I have found those distasteful and counterproductive when I am just working by myself. In my personal projects, I do not need or want to hold anyone accountable for delivery, there's no need for a ticket that can be reported on at stand up. Current long term planning systems are centered around communication between humans, about creating and shipping context around to people so that they can accomplish their part of the larger task at hand. Agents can and will do most of the work for me on my personal projects, so I don't need to create as much context, or filter and shape it so much, when there's no handoff from engineering to design or marketing. 
+
+In short, there are many new and exciting software factories out there, but this one is mine. It is not meant to solve enterprise problems, just the problems of an enterprising young man. I've open sourced it because I think others might enjoy using it and have new ideas to add that would make it even better to use. PowderMonkey has solved a lot of my agent coordination isuses and I hope it can do the same for you!
 
 ## Run (dev)
 
@@ -99,12 +108,3 @@ commands — reserved session names, detaching safely, killing a stuck session, 
 finding the supervisor pane.
 
 
-## Why 
-
-Coding agents have sped up the production of code tremendously. They are able to quickly accomplish tasks that would otherwise take a person with a decade or more of specialized experience to complete. Knowledge work is now a resource that you can pour over a problem, and see how much of it saturates and dissolves on its own, without human effort or intervention. What I feel myself struggling with day to day is the long term coordination of many agents working together towards related yet disparate goals.
-
-At times, I feel like I am just ferrying information back and forth between Claude sessions. I already have a long term plan written down somewhere, with various milestones and tasks all written up. I even have little scripts that will take that plan, make an agent create prompts for other agents to use, and dispatch those agents out. However, ultimately, I still feel like I am just running back and forth, copying and pasting things, without a clear sense of how I am progressing on long term goals.
-
-One might reasonably suggest Linear or Jira or any other project management software. I have found those distasteful and counterproductive when used with agents, when I am just working by myself. In my personal projects, I do not need to hold anyone accountable for delivery. I do not need a ticket that I can watch and reference during stand up. Current long term planning systems are centered around communication between humans, about creating and shipping context around to people so that they can accomplish their part of the epic task at hand. Agents can and will do most of the work for me on my personal projects, so I don't need to create as much context, or filter and shape it so much, when there's no handoff from engineering to design or marketing.
-
-There are likely new and exciting long term planning systems out there, alternatives to the ideas in here. This one is mine, wherein I try to capture the spirit of how I felt being a powder monkey carrying context back and forth to the slop cannons.
