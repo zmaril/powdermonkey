@@ -338,7 +338,7 @@ function buildDefaultLayout(api: DockviewApi) {
   api.addPanel({
     id: "planreview",
     component: "planreview",
-    title: "Plan Review",
+    title: "Plan",
     position: { direction: "within", referencePanel: "active" },
   });
   api.addPanel({
@@ -398,7 +398,12 @@ function TopBar() {
         <Group gap={6} wrap="nowrap">
           <PaneButton label="Active" onClick={() => openPane("active")} />
           <PaneButton label="Backlog" onClick={() => openPane("backlog")} />
-          <PaneButton label="Archive" onClick={() => openPane("archive")} />
+          <PaneButton
+            label="Archive"
+            onClick={
+              () => openPane("archive") /* lint-allow-string: pane id, not ProposalOp.Archive */
+            }
+          />
           <PaneButton label="Plan" onClick={() => openPane("planreview")} />
           <Divider orientation="vertical" />
           <PaneButton label="Shell" onClick={() => openTerminal("")} />
