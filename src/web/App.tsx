@@ -13,6 +13,7 @@ import { ArchivePane } from "./ArchivePane.tsx";
 import { BacklogPane } from "./BacklogPane.tsx";
 import { ShellTerminal } from "./ShellTerminal.tsx";
 import { useNeedsInputNotifications, useNotificationPermission } from "./notifications.ts";
+import { useRealtime } from "./realtime.ts";
 import { useStore } from "./store.ts";
 
 // The single pane of glass. The plan is split into three panels — a live ACTIVE
@@ -324,6 +325,10 @@ export function App() {
     const id = setInterval(refresh, 4000);
     return () => clearInterval(id);
   }, [refresh]);
+
+  // Subscribe to server-pushed changes: the store refetches on every ping, so the
+  // panes update the moment state moves rather than on the next poll tick.
+  useRealtime();
 
   // Ping the operator (OS notification) whenever a session falls idle at a prompt.
   // Watches the same store the panes do, firing only on the needs_input edge.
