@@ -1,4 +1,5 @@
 import { Badge, Box, Group, SegmentedControl, Stack, Text, Title } from "@mantine/core";
+import type { DockviewPanelApi } from "dockview-react";
 import { useState } from "react";
 import type { Goal, Milestone, Task } from "../server/schema.ts";
 import { TaskStatus } from "../shared/types.ts";
@@ -109,12 +110,12 @@ function GroupedView({ tasks, idx }: { tasks: Task[]; idx: Indexes }) {
   );
 }
 
-export function ArchivePane() {
+export function ArchivePane({ api }: { api?: DockviewPanelApi }) {
   // Archived/finished work comes off the same live collections as everything else —
   // no separate fetch or poll.
   const { idx, tasks } = useArchiveData();
   const [view, setView] = useState<View>("flat");
-  const scroll = usePaneScroll("archive");
+  const scroll = usePaneScroll("archive", api);
 
   return (
     <Box

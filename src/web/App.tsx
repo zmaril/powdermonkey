@@ -203,16 +203,20 @@ function ShellPanel(props: IDockviewPanelProps<{ cwd: string; session: number | 
   );
 }
 
-function ActivePanel() {
-  return <ActivePane />;
+// The tabbed list panes take their dockview panel api so they can persist/restore
+// their scroll position across a tab switch — under the default 'onlyWhenVisible'
+// renderer a switch detaches the pane's DOM (resetting scrollTop) while the React
+// component stays mounted, so the visibility edge is the only signal to restore on.
+function ActivePanel(props: IDockviewPanelProps) {
+  return <ActivePane api={props.api} />;
 }
 
-function BacklogPanel() {
-  return <BacklogPane />;
+function BacklogPanel(props: IDockviewPanelProps) {
+  return <BacklogPane api={props.api} />;
 }
 
-function ArchivePanel() {
-  return <ArchivePane />;
+function ArchivePanel(props: IDockviewPanelProps) {
+  return <ArchivePane api={props.api} />;
 }
 
 function ScratchPanel() {

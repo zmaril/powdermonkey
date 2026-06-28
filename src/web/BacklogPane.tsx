@@ -11,6 +11,7 @@ import {
   Text,
   Title,
 } from "@mantine/core";
+import type { DockviewPanelApi } from "dockview-react";
 import { useState } from "react";
 import type { Goal, Phase, Task } from "../server/schema.ts";
 import { SessionKind, TaskStatus } from "../shared/types.ts";
@@ -306,11 +307,11 @@ function StartPanel() {
 
 type View = "flat" | "grouped";
 
-export function BacklogPane() {
+export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
   const { idx, activeIds, loading } = usePlanData();
   const [view, setView] = useState<View>("grouped");
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const scroll = usePaneScroll("backlog");
+  const scroll = usePaneScroll("backlog", api);
 
   // Backlog = everything to-be-worked: not active (no live session) and not merged.
   const allTasks = [...idx.tasksByMilestone.values()].flat();
