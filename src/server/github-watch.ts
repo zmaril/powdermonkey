@@ -3,9 +3,8 @@ import { taskRepo } from "./crud.ts";
 import { db } from "./db.ts";
 import { type CloudPr, bus } from "./events.ts";
 import { pullMain } from "./git.ts";
-import { notifyChange } from "./realtime.ts";
 import { reconcile } from "./reconcile.ts";
-import { phases } from "./schema.ts";
+import { cloudPrs, phases } from "./schema.ts";
 
 // The one loop. It polls GitHub for the PRs our cloud workers open — branches
 // named `pm/task-<id>-<slug>` — diffs each tick against the last-seen state, and
@@ -192,13 +191,43 @@ export function diffCloudPrs(prev: Map<number, CloudPr>, next: CloudPr[]): Cloud
 }
 
 // ---- the loop --------------------------------------------------------------
+// In-memory cache of the last-seen PRs, used only to diff each tick. The durable
+// copy lives in the cloud_prs table (persisted below); this map just lets us spot
+// what changed without re-reading the DB. Reset on restart — the initial catch-up
+// re-derives it (and re-upserts, idempotently).
 let lastByNumber = new Map<number, CloudPr>();
 
-/** The watcher's latest known PR state, one per task-linked PR. Served live to the
- *  UI (GET /cloud-prs) so the Active panel can show CI / merge-conflict status
- *  without persisting this fast-moving data to the DB. */
-export function currentCloudPrs(): CloudPr[] {
-  return [...lastByNumber.values()];
+/** The latest known PR state per task-linked PR, read from PGlite. The UI fetches
+ *  this for CI / merge-conflict badges. Persisted (not in-memory) so it lives in
+ *  the DB like the rest of the state — which is what lets the realtime change feed
+ *  push badge updates with no special-casing. */
+export async function currentCloudPrs(): Promise<CloudPr[]> {
+  return db.select().from(cloudPrs);
+}
+
+/** Upsert observed PRs into cloud_prs, keyed by PR number. Called only with the
+ *  changed/new PRs each tick, so the change feed (which watches this table) stays
+ *  quiet when nothing moved — and the write itself is what pushes the update. */
+async function persistCloudPrs(prs: CloudPr[]): Promise<void> {
+  for (const pr of prs) {
+    await db
+      .insert(cloudPrs)
+      .values(pr)
+      .onConflictDoUpdate({
+        target: cloudPrs.number,
+        set: {
+          taskId: pr.taskId,
+          url: pr.url,
+          state: pr.state,
+          isDraft: pr.isDraft,
+          merged: pr.merged,
+          checks: pr.checks,
+          mergeable: pr.mergeable,
+          headRefName: pr.headRefName,
+          updatedAt: pr.updatedAt,
+        },
+      });
+  }
 }
 
 async function tick(initial: boolean): Promise<number> {
@@ -207,12 +236,9 @@ async function tick(initial: boolean): Promise<number> {
   const events = diffCloudPrs(lastByNumber, prs);
   for (const ev of events) await bus.emit(ev.type, ev.pr, { initial });
   lastByNumber = new Map(prs.map((p) => [p.number, p]));
-  // Live PR status (CI / mergeable / draft) is served from memory via /cloud-prs,
-  // not the DB — so a status move writes no row the DB change feed would catch.
-  // This is the one place that still pings clients by hand. (The enricher's
-  // task.prUrl writes DO go through the DB and reach clients via the feed; once
-  // cloud-PR status itself lives in PGlite, this call goes away too.)
-  if (events.length > 0) notifyChange();
+  // Persist only the changed/new PRs. The cloud_prs write is what the realtime
+  // change feed observes, so there's no manual client ping here anymore.
+  await persistCloudPrs(events.map((e) => e.pr));
   return events.length;
 }
 

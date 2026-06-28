@@ -61,3 +61,27 @@ test("no write, no ping", async () => {
   });
   expect(got).toEqual([]);
 });
+
+test("a cloud_prs write pushes a ping and is served by currentCloudPrs", async () => {
+  const { db } = await import("../src/server/db.ts");
+  const { cloudPrs } = await import("../src/server/schema.ts");
+  const { currentCloudPrs } = await import("../src/server/github-watch.ts");
+  const got = await pingsFrom(() =>
+    db.insert(cloudPrs).values({
+      number: 101,
+      taskId: 1,
+      url: "https://example/pr/101",
+      state: "OPEN",
+      isDraft: false,
+      merged: false,
+      checks: "PENDING",
+      mergeable: "MERGEABLE",
+      headRefName: "pm/task-1",
+      updatedAt: "2026-06-28T00:00:00Z",
+    }),
+  );
+  // Cloud-PR status now lives in PGlite, so its write rides the same feed.
+  expect(got).toContain(CHANGED_MESSAGE);
+  const prs = await currentCloudPrs();
+  expect(prs.find((p) => p.number === 101)?.checks).toBe("PENDING");
+});

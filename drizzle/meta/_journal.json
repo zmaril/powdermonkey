@@ -43,6 +43,13 @@
       "when": 1782603889487,
       "tag": "0005_thick_nocturne",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1782660718744,
+      "tag": "0006_parched_hiroim",
+      "breakpoints": true
     }
   ]
 }

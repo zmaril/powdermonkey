@@ -7,9 +7,9 @@
 // per-table triggers that fire on every INSERT/UPDATE/DELETE (see db.ts), so a
 // single live query per table tells us whenever that table moves — no matter which
 // code path wrote it. That means mutations no longer announce themselves by hand;
-// startChangeFeed() watches the tables and the WS fan-out reacts. (The one
-// exception is the cloud-PR CI/mergeable status, which the github-watch loop holds
-// in memory rather than the DB; it calls notifyChange() directly.)
+// startChangeFeed() watches the tables and the WS fan-out reacts. Everything the UI
+// reads lives in PGlite (down to cloud-PR status), so notifyChange() is no longer
+// called from anywhere outside this module — the feed is the single mechanism.
 //
 // The fan-out half is kept framework-free (no Elysia import) so it's unit-testable:
 // the .ws route in app.ts registers each socket's send function here.
@@ -76,6 +76,7 @@ const WATCHED_TABLES = [
   "sessions",
   "session_tasks",
   "notes",
+  "cloud_prs",
 ] as const;
 
 /** The slice of the PGlite client the feed needs — just `live.query`. Structural so

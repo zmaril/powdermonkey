@@ -106,6 +106,28 @@ export const notes = pgTable("notes", {
   ...timestamps,
 });
 
+// Cloud-PR status mirror. The github-watch loop polls GitHub for the PRs cloud
+// workers open and upserts the fields the UI reacts to (state, CI checks,
+// mergeable, draft) here — so PR status lives in PGlite like everything else, and
+// the realtime change feed pushes badge updates with no special-casing. Keyed by
+// PR number (unique per repo). `taskId` is the resolved task but carries no FK: a
+// PR can name a branch whose task was deleted, and that must never block the upsert.
+// This is fast-moving runtime data, not part of the goal hierarchy, so no
+// archived_at — rows are simply upserted to the latest observed state.
+export const cloudPrs = pgTable("cloud_prs", {
+  number: integer("number").primaryKey(),
+  taskId: integer("task_id").notNull(),
+  url: text("url").notNull(),
+  state: text("state").$type<"OPEN" | "CLOSED" | "MERGED">().notNull(),
+  isDraft: boolean("is_draft").notNull().default(false),
+  merged: boolean("merged").notNull().default(false),
+  checks: text("checks"),
+  mergeable: text("mergeable"),
+  headRefName: text("head_ref_name").notNull(),
+  // GitHub's own updatedAt (ISO string) — surfaced to the UI, not our bookkeeping.
+  updatedAt: text("updated_at").notNull(),
+});
+
 // Types derived directly from the table definitions — no separate schema layer.
 export type Goal = typeof goals.$inferSelect;
 export type Milestone = typeof milestones.$inferSelect;
@@ -114,3 +136,4 @@ export type Phase = typeof phases.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type SessionTask = typeof sessionTasks.$inferSelect;
 export type Note = typeof notes.$inferSelect;
+export type CloudPrRow = typeof cloudPrs.$inferSelect;
