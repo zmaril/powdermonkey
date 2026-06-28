@@ -12,7 +12,7 @@ import { ActivePane } from "./ActivePane.tsx";
 import { ArchivePane } from "./ArchivePane.tsx";
 import { BacklogPane } from "./BacklogPane.tsx";
 import { ShellTerminal } from "./ShellTerminal.tsx";
-import { useNotificationPermission } from "./notifications.ts";
+import { useNeedsInputNotifications, useNotificationPermission } from "./notifications.ts";
 import { useStore } from "./store.ts";
 
 // The single pane of glass. The plan is split into three panels — a live ACTIVE
@@ -324,6 +324,10 @@ export function App() {
     const id = setInterval(refresh, 4000);
     return () => clearInterval(id);
   }, [refresh]);
+
+  // Ping the operator (OS notification) whenever a session falls idle at a prompt.
+  // Watches the same store the panes do, firing only on the needs_input edge.
+  useNeedsInputNotifications();
 
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;
