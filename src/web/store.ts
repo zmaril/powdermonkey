@@ -51,6 +51,12 @@ type State = {
   shellReq: { key: string; cwd: string; session: number | null; title: string; n: number } | null;
   // Bumped each time the operator asks to open the notepad; App watches it.
   notesReq: number;
+  // In-app activity indicators, keyed by dockview panel id (e.g. "active"). True
+  // means the pane has changes you haven't seen because its tab wasn't on screen;
+  // the tab shows an ambient dot until viewed. Transient — never persisted.
+  tabActivity: Record<string, boolean>;
+  flagTab: (paneId: string) => void;
+  clearTab: (paneId: string) => void;
   // The serialized dockview layout (api.toJSON()). Persisted so a reload — notably
   // the disconnect→refresh recovery — restores your panes; null means "lay out the
   // default". This is the single source of truth for the dock; layout-changing
@@ -158,6 +164,17 @@ export const useStore = create<State>()(
       lastStart: null,
       shellReq: null,
       notesReq: 0,
+      tabActivity: {},
+      flagTab: (paneId) =>
+        set((s) =>
+          s.tabActivity[paneId] ? {} : { tabActivity: { ...s.tabActivity, [paneId]: true } },
+        ),
+      clearTab: (paneId) =>
+        set((s) => {
+          if (!s.tabActivity[paneId]) return {};
+          const { [paneId]: _drop, ...rest } = s.tabActivity;
+          return { tabActivity: rest };
+        }),
       layout: null,
       setLayout: (layout) => set({ layout }),
       openTerminal: (cwd = "") =>

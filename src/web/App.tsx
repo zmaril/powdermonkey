@@ -12,6 +12,7 @@ import { ActivePane } from "./ActivePane.tsx";
 import { ArchivePane } from "./ArchivePane.tsx";
 import { BacklogPane } from "./BacklogPane.tsx";
 import { ShellTerminal } from "./ShellTerminal.tsx";
+import { ActivityTab, useTabActivity } from "./TabActivity.tsx";
 import { useNeedsInputNotifications, useNotificationPermission } from "./notifications.ts";
 import { useRealtime } from "./realtime.ts";
 import { useStore } from "./store.ts";
@@ -328,6 +329,11 @@ export function App() {
   // Watches the same store the panes do, firing only on the needs_input edge.
   useNeedsInputNotifications();
 
+  // In-app glanceable layer: light up a pane's tab when something happens in it
+  // while its tab is off screen (new session, needs-you, task status change). The
+  // tab clears itself when viewed. apiRef is set in onReady below.
+  useTabActivity(apiRef);
+
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;
     // Restore the layout from the store (rehydrated from localStorage by persist);
@@ -400,7 +406,12 @@ export function App() {
       {disconnected && <DisconnectBanner />}
       <TopBar />
       <div style={{ flex: 1, minHeight: 0 }}>
-        <DockviewReact components={dockComponents} onReady={onReady} theme={themeAbyss} />
+        <DockviewReact
+          components={dockComponents}
+          defaultTabComponent={ActivityTab}
+          onReady={onReady}
+          theme={themeAbyss}
+        />
       </div>
     </div>
   );
