@@ -31,6 +31,10 @@ type Entry = {
   chunks: Uint8Array[];
   bytes: number;
   subscribers: Set<(b: Uint8Array) => void>;
+  // Notified once when the durable session ends for good (PTY exited, or it was
+  // landed/stopped/killed) — distinct from a viewer merely detaching. Lets the
+  // browser swap the dead terminal for an end-state instead of a blank pane.
+  endSubscribers: Set<() => void>;
   idleTimer: ReturnType<typeof setTimeout> | null;
   needsInput: boolean;
 };
@@ -145,6 +149,7 @@ function createAttachEntry(sessionId: number): Entry {
     chunks: [],
     bytes: 0,
     subscribers: new Set(),
+    endSubscribers: new Set(),
     idleTimer: null,
     needsInput: false,
   };
@@ -167,17 +172,41 @@ function createAttachEntry(sessionId: number): Entry {
     `exec ${TMUX_BIN} -L ${SOCKET} attach -t ${name}`,
   );
   armIdle(sessionId);
-  ptyExited(entry.proc).then(() => detachSessionPty(sessionId));
+  // The attach PTY exiting while it's still the registered entry means the durable
+  // session went away under us (its agent exited, or tmux was killed) — not a
+  // viewer leaving (that path deletes the entry first, so the check below fails).
+  // Signal end-of-session to any watchers before tearing the attach view down.
+  ptyExited(entry.proc).then(() => {
+    if (registry.get(sessionId) === entry) {
+      notifyEnded(sessionId);
+      detachSessionPty(sessionId);
+    }
+  });
   return entry;
+}
+
+/** Fire the end-of-session callbacks for a session's watchers, once. */
+function notifyEnded(sessionId: number): void {
+  const entry = registry.get(sessionId);
+  if (!entry) return;
+  for (const onEnd of entry.endSubscribers) {
+    try {
+      onEnd();
+    } catch {}
+  }
+  entry.endSubscribers.clear();
 }
 
 /** Subscribe to a session's live stream after replaying its scrollback. Lazily
  *  (re)creates the attach PTY if the durable tmux session exists — so this works
- *  the first time, across tabs, and after a supervisor restart. Returns an
- *  unsubscribe fn, or null if no live session exists. */
+ *  the first time, across tabs, and after a supervisor restart. `onEnd` (optional)
+ *  fires once if the durable session ends while subscribed (so the UI can show an
+ *  end-state rather than a dead terminal). Returns an unsubscribe fn, or null if no
+ *  live session exists. */
 export function attachSessionPty(
   sessionId: number,
   onData: (b: Uint8Array) => void,
+  onEnd?: () => void,
 ): (() => void) | null {
   let entry = registry.get(sessionId);
   if (!entry) {
@@ -191,8 +220,10 @@ export function attachSessionPty(
     } catch {}
   }
   e.subscribers.add(onData);
+  if (onEnd) e.endSubscribers.add(onEnd);
   return () => {
     e.subscribers.delete(onData);
+    if (onEnd) e.endSubscribers.delete(onEnd);
     // Last viewer left: drop the attach PTY so it stops constraining the agent's
     // size. The tmux session (and its agent) keeps running, ready to re-attach.
     if (e.subscribers.size === 0) detachSessionPty(sessionId);
@@ -227,6 +258,10 @@ function detachSessionPty(sessionId: number): void {
 /** Tear down a session for good (on land): kill the tmux session and its agent,
  *  and detach our view. */
 export function killSessionPty(sessionId: number): void {
+  // Tell watchers the session is ending before we drop the entry — detach alone is
+  // silent (it's also the viewer-left path), so an active shell pane would just go
+  // blank on land/stop without this.
+  notifyEnded(sessionId);
   detachSessionPty(sessionId);
   if (hasSessionPty(sessionId)) tmux("kill-session", "-t", sessionName(sessionId));
   cwdById.delete(sessionId);

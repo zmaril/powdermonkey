@@ -1,5 +1,13 @@
 import { boolean, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
-import { PhaseStatus, SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
+import {
+  type CheckRollupState,
+  type MergeableState,
+  PhaseStatus,
+  type PrState,
+  SessionKind,
+  SessionState,
+  TaskStatus,
+} from "../shared/types.ts";
 
 // The plan vocabulary, fully normalized: every entity is its own relation with an
 // auto-assigned integer id and an `archived_at` soft-delete column (null = live).
@@ -106,26 +114,42 @@ export const notes = pgTable("notes", {
   ...timestamps,
 });
 
-// Cloud-PR status mirror. The github-watch loop polls GitHub for the PRs cloud
-// workers open and upserts the fields the UI reacts to (state, CI checks,
-// mergeable, draft) here — so PR status lives in PGlite like everything else, and
-// the realtime change feed pushes badge updates with no special-casing. Keyed by
-// PR number (unique per repo). `taskId` is the resolved task but carries no FK: a
-// PR can name a branch whose task was deleted, and that must never block the upsert.
-// This is fast-moving runtime data, not part of the goal hierarchy, so no
-// archived_at — rows are simply upserted to the latest observed state.
-export const cloudPrs = pgTable("cloud_prs", {
+// Persisted PR state — the durable mirror of what github-watch polls from GitHub,
+// plus the rebase-ask ledger. Two kinds of data live here with deliberately
+// different lifetimes:
+//   • Observed GitHub state (state / checks / mergeable / …) is a *cache*. GitHub
+//     is the source of truth and we refetch every tick, so these columns are
+//     overwritten freely; persisting them only buys cold-start UI and history.
+//   • `rebaseAskedAt` is a *ledger of a side-effect we performed* — the @claude
+//     rebase comment. It must survive restarts so we never re-ask the same
+//     conflict. The poll upsert rewrites the cache columns and never touches this
+//     one; only the ask logic (github-watch) writes it. That split is the whole
+//     reason the two can share a row safely.
+// Keyed by the GitHub PR `number` (unique per repo) — supplied by us, not generated.
+export const pullRequests = pgTable("pull_requests", {
   number: integer("number").primaryKey(),
+  // The task this PR is tied to, resolved by the watcher from the branch name or
+  // commit trailers. Plain integer, *not* a FK: a branch like `pm/task-166` yields
+  // 166 whether or not that task row exists locally, and persistence must not throw
+  // on the mismatch.
   taskId: integer("task_id").notNull(),
   url: text("url").notNull(),
-  state: text("state").$type<"OPEN" | "CLOSED" | "MERGED">().notNull(),
+  state: text("state").$type<PrState>().notNull(),
   isDraft: boolean("is_draft").notNull().default(false),
   merged: boolean("merged").notNull().default(false),
-  checks: text("checks"),
-  mergeable: text("mergeable"),
+  // statusCheckRollup state (SUCCESS / FAILURE / PENDING / …), null when none.
+  checks: text("checks").$type<CheckRollupState>(),
+  // MERGEABLE / CONFLICTING / UNKNOWN, or null — GitHub computes it lazily.
+  mergeable: text("mergeable").$type<MergeableState>(),
   headRefName: text("head_ref_name").notNull(),
-  // GitHub's own updatedAt (ISO string) — surfaced to the UI, not our bookkeeping.
-  updatedAt: text("updated_at").notNull(),
+  // GitHub's own PR updatedAt (ISO string). Named apart from the row's `updatedAt`
+  // below, which tracks when *we* last wrote the row.
+  ghUpdatedAt: text("gh_updated_at").notNull(),
+  // The ledger: when set, we've already asked @claude to rebase this conflict
+  // episode; cleared when the PR goes MERGEABLE (or leaves the board) so a later,
+  // distinct conflict re-asks. Survives restarts — that's the point of this table.
+  rebaseAskedAt: timestamp("rebase_asked_at"),
+  ...timestamps,
 });
 
 // Types derived directly from the table definitions — no separate schema layer.
@@ -136,4 +160,4 @@ export type Phase = typeof phases.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type SessionTask = typeof sessionTasks.$inferSelect;
 export type Note = typeof notes.$inferSelect;
-export type CloudPrRow = typeof cloudPrs.$inferSelect;
+export type PullRequestRow = typeof pullRequests.$inferSelect;

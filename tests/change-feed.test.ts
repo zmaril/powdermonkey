@@ -62,12 +62,11 @@ test("no write, no ping", async () => {
   expect(got).toEqual([]);
 });
 
-test("a cloud_prs write pushes a ping and is served by currentCloudPrs", async () => {
-  const { db } = await import("../src/server/db.ts");
-  const { cloudPrs } = await import("../src/server/schema.ts");
+test("a pull_requests write pushes a ping and is served by currentCloudPrs", async () => {
+  const { upsertPrState } = await import("../src/server/pr-store.ts");
   const { currentCloudPrs } = await import("../src/server/github-watch.ts");
   const got = await pingsFrom(() =>
-    db.insert(cloudPrs).values({
+    upsertPrState({
       number: 101,
       taskId: 1,
       url: "https://example/pr/101",
@@ -80,7 +79,8 @@ test("a cloud_prs write pushes a ping and is served by currentCloudPrs", async (
       updatedAt: "2026-06-28T00:00:00Z",
     }),
   );
-  // Cloud-PR status now lives in PGlite, so its write rides the same feed.
+  // PR status lives in PGlite (the pull_requests table), so its write rides the
+  // same feed as every other table — no special-casing in the watcher.
   expect(got).toContain(CHANGED_MESSAGE);
   const prs = await currentCloudPrs();
   expect(prs.find((p) => p.number === 101)?.checks).toBe("PENDING");

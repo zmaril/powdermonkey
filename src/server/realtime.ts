@@ -76,7 +76,7 @@ const WATCHED_TABLES = [
   "sessions",
   "session_tasks",
   "notes",
-  "cloud_prs",
+  "pull_requests",
 ] as const;
 
 /** The slice of the PGlite client the feed needs — just `live.query`. Structural so

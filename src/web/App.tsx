@@ -1,4 +1,4 @@
-import { Button, Group, Text, Title } from "@mantine/core";
+import { Button, Group, Stack, Text, Title } from "@mantine/core";
 import "dockview-core/dist/styles/dockview.css";
 import {
   type DockviewApi,
@@ -114,13 +114,89 @@ function ScratchPad() {
   );
 }
 
-function ShellPanel(props: IDockviewPanelProps<{ cwd: string; session: number | null }>) {
+// Shown over a shell pane whose attached session has ended (landed / merged /
+// stopped, or its agent exited) — see ShellTerminal's onEnded. Instead of a blank,
+// dead terminal the operator gets a clear end-state and a way out: close the pane,
+// open a fresh shell (at the session's worktree if it still exists, else the repo —
+// the server falls back), or jump to the PR. PR / worktree are looked up from the
+// store by session id; the session↔task join is returned for archived sessions too,
+// so the PR link survives the session being archived on land/merge.
+function SessionEndedOverlay({ sessionId, onClose }: { sessionId: number; onClose: () => void }) {
+  const openTerminal = useStore((s) => s.openTerminal);
+  const session = useStore(
+    (s) =>
+      s.sessions.find((x) => x.id === sessionId) ??
+      s.archive.sessions.find((x) => x.id === sessionId),
+  );
+  const prUrl = useStore((s) => {
+    const taskIds = new Set(
+      s.sessionTasks.filter((l) => l.sessionId === sessionId).map((l) => l.taskId),
+    );
+    return (
+      [...s.tasks, ...s.archive.tasks].find((t) => taskIds.has(t.id) && t.prUrl)?.prUrl ?? null
+    );
+  });
+  const worktree = session?.worktreePath ?? "";
+  const message =
+    session?.state === "stopped"
+      ? "This session was stopped — its agent was killed and the task re-pended."
+      : "This session has ended — landed, merged, or its agent exited.";
   return (
-    <div style={{ height: "100%", width: "100%", background: "#1a1b1e" }}>
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "rgba(26,27,30,0.88)",
+        padding: 16,
+      }}
+    >
+      <Stack gap="sm" align="center" maw={420} style={{ textAlign: "center" }}>
+        <Title order={5}>Session ended</Title>
+        <Text size="sm" c="dimmed">
+          {message}
+          {session?.branch ? ` (${session.branch})` : ""}
+        </Text>
+        <Group gap="xs" justify="center">
+          <Button size="compact-sm" variant="default" onClick={onClose}>
+            Close pane
+          </Button>
+          <Button size="compact-sm" variant="light" onClick={() => openTerminal(worktree)}>
+            Open a shell
+          </Button>
+          {prUrl && (
+            <Button
+              size="compact-sm"
+              variant="light"
+              color="blue"
+              component="a"
+              href={prUrl}
+              target="_blank"
+            >
+              View PR ↗
+            </Button>
+          )}
+        </Group>
+      </Stack>
+    </div>
+  );
+}
+
+function ShellPanel(props: IDockviewPanelProps<{ cwd: string; session: number | null }>) {
+  const [ended, setEnded] = useState(false);
+  const session = props.params.session;
+  return (
+    <div style={{ height: "100%", width: "100%", background: "#1a1b1e", position: "relative" }}>
       <ShellTerminal
         cwd={props.params.cwd || undefined}
-        session={props.params.session ?? undefined}
+        session={session ?? undefined}
+        onEnded={() => setEnded(true)}
       />
+      {ended && session != null && (
+        <SessionEndedOverlay sessionId={session} onClose={() => props.api.close()} />
+      )}
     </div>
   );
 }

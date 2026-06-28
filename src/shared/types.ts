@@ -36,3 +36,32 @@ export type SessionState = ValueOf<typeof SessionState>;
 /** Where a session executes: a local git worktree, or a cloud `claude --remote` run. */
 export const SessionKind = { Local: "local", Remote: "remote" } as const;
 export type SessionKind = ValueOf<typeof SessionKind>;
+
+// GitHub PR state, bounded to the values GitHub's GraphQL actually returns. Same
+// const-object-is-the-source-of-truth shape as the status enums above, so the rest
+// of the code (CloudPr, the pull_requests row, the UI badges) speaks one closed
+// vocabulary instead of bare `string`. Stored as text + `$type` (see schema.ts), so
+// widening one later is a code change, not a migration.
+
+/** A PR's lifecycle state. */
+export const PrState = { Open: "OPEN", Closed: "CLOSED", Merged: "MERGED" } as const;
+export type PrState = ValueOf<typeof PrState>;
+
+/** statusCheckRollup state for a PR's head commit — the CI summary. Null (modelled
+ *  separately) means the commit has no checks configured. */
+export const CheckRollupState = {
+  Success: "SUCCESS",
+  Failure: "FAILURE",
+  Error: "ERROR",
+  Pending: "PENDING",
+  Expected: "EXPECTED",
+} as const;
+export type CheckRollupState = ValueOf<typeof CheckRollupState>;
+
+/** GitHub's lazily-computed merge state. `UNKNOWN` means "not yet computed". */
+export const MergeableState = {
+  Mergeable: "MERGEABLE",
+  Conflicting: "CONFLICTING",
+  Unknown: "UNKNOWN",
+} as const;
+export type MergeableState = ValueOf<typeof MergeableState>;
