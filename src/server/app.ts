@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { TSchema } from "@sinclair/typebox";
 import { Elysia, t } from "elysia";
@@ -206,6 +206,17 @@ export const app = new Elysia()
           ptys.delete(ws.raw);
         });
       };
+      // Control frames go out as text (the client tells them from binary PTY
+      // output by type). "session-ended" tells the browser the session is gone for
+      // good so it can show an end-state instead of a blank/dead terminal.
+      const sendEnded = () => {
+        try {
+          ws.raw.send(JSON.stringify({ type: "session-ended" }));
+        } catch {}
+        try {
+          ws.close();
+        } catch {}
+      };
 
       // Which durable session to attach to: an explicit ?session=<id>, or — when
       // neither session nor cwd is given — the supervisor's own reserved session.
@@ -222,15 +233,26 @@ export const app = new Elysia()
         .otherwise(() => null);
 
       if (sessionId != null) {
-        const detach = attachSessionPty(sessionId, send);
+        const detach = attachSessionPty(sessionId, send, sendEnded);
         if (detach) {
           ptys.set(ws.raw, { kind: "attach", sessionId, detach });
           return;
         }
+        const isSupervisor = sessionId === SUPERVISOR_ID;
+        // No live PTY and this is a worker session that has already ended (landed,
+        // stopped, or merge-archived): don't quietly spawn a fresh shell on a dead
+        // session — tell the client so it shows the end-state. The supervisor (id 0)
+        // never ends, so it always falls through to the recovery shell below.
+        if (!isSupervisor) {
+          const row = await sessionRepo.get(sessionId);
+          if (!row || row.archivedAt || row.state === "idle" || row.state === "stopped") {
+            sendEnded();
+            return;
+          }
+        }
         // No live PTY (tmux unavailable, or a worker session whose PTY didn't
         // survive): fall back to a fresh shell. The supervisor drops into Claude
         // at the repo dir; a worker gets a plain shell in its worktree.
-        const isSupervisor = sessionId === SUPERVISOR_ID;
         const cwd = isSupervisor
           ? process.env.PM_REPO_DIR || process.cwd()
           : (await sessionRepo.get(sessionId))?.worktreePath ||
@@ -247,8 +269,11 @@ export const app = new Elysia()
         return;
       }
 
-      // ?cwd=<path> → a plain fresh worktree shell.
-      spawnFresh(q || process.env.PM_REPO_DIR || process.cwd(), "");
+      // ?cwd=<path> → a plain fresh worktree shell. The "Open a shell" action on an
+      // ended session passes its old worktree, which land/merge has usually removed —
+      // fall back to the repo dir so the shell always lands somewhere real.
+      const repoDir = process.env.PM_REPO_DIR || process.cwd();
+      spawnFresh(q && existsSync(q) ? q : repoDir, "");
     },
     message(ws, msg) {
       const handle = ptys.get(ws.raw);
