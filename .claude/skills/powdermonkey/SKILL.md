@@ -111,6 +111,34 @@ PM-Phase: 41
 
 Commit small and often — each landed `PM-Phase:` ticks a box on the operator's tree. The operator merges `pm/task-<id>` into `main`; once your trailered commits are reachable from `main`, reconcile marks the phases done. Stay scoped to your task — other worktrees may run in parallel.
 
+### Hand a follow-up back instead of doing it or dropping it
+
+Mid-task you'll spot things **out of scope** for the task you're on — a bug in a neighbouring file, a cleanup, a "we should also…". Don't do it (that's scope creep, and it muddies your PR) and don't just drop it (it's lost). **Hand it back** as a *follow-up*: it lands as a pending **proposal** (a `create task` change-set) in the operator's decision queue, who approves it into the plan or rejects it — the same review flow as any proposal. Keep doing your actual task.
+
+How you send it depends on where you run:
+
+**Local worktree** — you can reach the API, so POST it:
+
+```sh
+curl -s -X POST "$PM_URL/followups" -H 'content-type: application/json' -d '{
+  "title": "Dedup the date helpers in src/web",
+  "body": "Spotted two copies of formatRelative while working t41 — worth one shared util.",
+  "sourceTaskId": 41
+}'
+```
+
+`title` is all that's required; `body` (context) and `sourceTaskId` (the task you were on — it picks which milestone the proposed task hangs under) make the proposal sharper. That's it — keep working.
+
+**Cloud session** — you can't reach `$PM_URL`, so leave a marked comment on your PR and the supervisor's github-watch loop slurps it into the same queue. Mark it with `<!-- pm:followup -->`, one comment per follow-up (these are append-only — *not* the sticky status comment, don't overwrite that):
+
+```
+<!-- pm:followup -->
+title: Dedup the date helpers in src/web
+body: Spotted two copies of formatRelative while working this task — worth one shared util.
+```
+
+`title:` is the one-liner; everything after it is the optional `body`. The watcher ties the follow-up back to your PR/task automatically and ingests each comment exactly once — so post a new marked comment per follow-up and otherwise leave it alone. Don't put follow-ups in commit trailers; trailers are only for `PM-Phase:` / `PM-Task:` completion.
+
 ### Status comment (cloud sessions): keep the operator looking over your shoulder
 
 A cloud session runs out of sight of the supervisor. Your link back is a **marked status comment on your PR**, carrying `<!-- pm:status -->`. The supervisor's github-watch loop finds the **newest** comment with that marker, parses the block below, persists it, and surfaces it live on the Active panel (state chip, summary, a `blocked` → *needs-you* flag, and the full comment body on expand). This is how a remote worker stops being a black box.

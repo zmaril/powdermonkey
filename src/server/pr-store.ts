@@ -38,6 +38,9 @@ function rowToCloudPr(r: PullRequestRow): CloudPr {
             body: r.agentBody,
             updatedAt: r.agentUpdatedAt,
           },
+    // Follow-ups are ephemeral — turned into proposals the tick they appear and never
+    // persisted on the PR row — so a reconstructed-from-DB PR carries none.
+    followups: [],
   };
 }
 

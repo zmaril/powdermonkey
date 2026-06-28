@@ -11,6 +11,7 @@ import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } f
 import { pg } from "./db.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
+import { proposeFollowup } from "./followups.ts";
 import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
 import { applyPlanMarkdown, planMarkdown, proposalMarkdown } from "./markdown.ts";
 import { models } from "./models.ts";
@@ -305,6 +306,29 @@ const proposalsGroup = new Elysia({ prefix: "/proposals" })
     if (!result.ok) set.status = "conflicts" in result && result.conflicts ? 409 : 400;
     return result;
   });
+
+// Follow-ups: the capture channel for a worker handing an out-of-scope find back to
+// the operator. A local worker (which can reach $PM_URL) POSTs here; the handler
+// authors a pending `create task` proposal (see followups.ts), so it lands in the
+// same review queue as any other proposal. A cloud worker can't reach this — it
+// leaves a `<!-- pm:followup -->` PR comment that github-watch slurps into the same
+// path. Just the title is required; body (context) and sourceTaskId (the task the
+// worker was on, which picks the milestone) sharpen the proposal.
+const followupsGroup = new Elysia({ prefix: "/followups" }).post(
+  "/",
+  async ({ body, set }) => {
+    const result = await proposeFollowup(body);
+    if (!result.ok) set.status = 400;
+    return result;
+  },
+  {
+    body: t.Object({
+      title: t.String(),
+      body: t.Optional(t.String()),
+      sourceTaskId: t.Optional(t.Number()),
+    }),
+  },
+);
 
 export const app = new Elysia()
   .get("/health", () => ({ ok: true }))
@@ -641,6 +665,7 @@ export const app = new Elysia()
   .use(sessionsGroup)
   .use(resource("notes", noteRepo, models.notes))
   .use(proposalsGroup)
+  .use(followupsGroup)
   // Static: bundled web app, SPA fallback to index.html. Served from the package's
   // public/ (resolved via PUBLIC_DIR), not the cwd — a global install runs from the
   // operator's project dir, which has no bundle of its own.

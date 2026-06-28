@@ -2,7 +2,14 @@ import { inArray } from "drizzle-orm";
 import { AgentState, MergeableState, PrState } from "../shared/types.ts";
 import { taskRepo } from "./crud.ts";
 import { db } from "./db.ts";
-import { type AgentStatus, type CloudEventMeta, type CloudPr, bus } from "./events.ts";
+import {
+  type AgentStatus,
+  type CloudEventMeta,
+  type CloudPr,
+  type FollowupComment,
+  bus,
+} from "./events.ts";
+import { ingestFollowups } from "./followups.ts";
 import { askClaude, gh, resolveRepo } from "./gh.ts";
 import { pullMain } from "./git.ts";
 import {
@@ -46,7 +53,7 @@ const GQL = `query($owner:String!,$name:String!){
         number title url state isDraft merged mergeable updatedAt headRefName
         checks: commits(last:1){nodes{commit{statusCheckRollup{state}}}}
         history: commits(first:100){nodes{commit{messageBody}}}
-        comments(last:30){nodes{body updatedAt}}
+        comments(last:30){nodes{databaseId body updatedAt}}
       }
     }
   }
@@ -102,6 +109,7 @@ export async function fetchCloudPrs(): Promise<CloudPr[] | null> {
       headRefName: n.headRefName,
       updatedAt: n.updatedAt,
       agent: statusFromComments(n.comments?.nodes ?? []),
+      followups: followupsFromComments(n.comments?.nodes ?? []),
     });
   }
   return prs;
@@ -175,6 +183,66 @@ export function statusFromComments(
   return agent;
 }
 
+// The marker that tags a follow-up a cloud worker hands back. Unlike the single
+// newest-wins status comment, follow-up comments are append-only: a worker that
+// can't reach $PM_URL posts one per follow-up, and the watcher turns each into a
+// pending proposal (see followups.ingestFollowups + the skill).
+export const FOLLOWUP_MARKER = "<!-- pm:followup -->";
+
+/** Parse a `<!-- pm:followup -->` comment into a follow-up's title + body. Returns
+ *  null when the comment isn't a follow-up (no marker). Forgiving of markdown noise
+ *  like the status parser: a `title:` line names the title and everything after is the
+ *  body; failing an explicit `title:`, the first non-empty line becomes the title and
+ *  the rest the body — so a worker can write a keyed block or just a one-liner. An
+ *  optional leading `body:` label on the remainder is stripped. Pure — exported for tests. */
+export function parseFollowupComment(raw: string): { title: string; body: string } | null {
+  if (!raw || !raw.includes(FOLLOWUP_MARKER)) return null;
+  const clean = (s: string) =>
+    s
+      .replace(/[*`>]/g, "")
+      .replace(/^\s*[-+]\s*/, "")
+      .trim();
+  let title = "";
+  const bodyLines: string[] = [];
+  for (const line of raw.replace(FOLLOWUP_MARKER, "").split(/\r?\n/)) {
+    if (!title) {
+      const c = clean(line);
+      const m = c.match(/^title\s*:\s*(.*)$/i);
+      if (m) {
+        title = m[1].trim();
+        continue;
+      }
+      if (c) {
+        title = c; // no `title:` key — adopt the first non-empty line as the title
+        continue;
+      }
+      continue; // leading blank line
+    }
+    bodyLines.push(line);
+  }
+  if (!title) return null; // marker but nothing usable
+  const body = bodyLines
+    .join("\n")
+    .trim()
+    .replace(/^\s*body\s*:\s*/i, "")
+    .trim();
+  return { title, body };
+}
+
+/** Collect every follow-up comment on a PR (append-only, so all of them, not just the
+ *  latest). Carries each comment's databaseId through as the ingest dedup key. */
+function followupsFromComments(
+  comments: { databaseId?: number; body?: string; updatedAt?: string }[],
+): FollowupComment[] {
+  const out: FollowupComment[] = [];
+  for (const c of comments) {
+    const parsed = parseFollowupComment(c.body ?? "");
+    if (parsed)
+      out.push({ commentId: c.databaseId ?? null, ...parsed, updatedAt: c.updatedAt ?? null });
+  }
+  return out;
+}
+
 /** Pull `PM-Task:` / `PM-Phase:` ids out of commit-trailer text (the same trailers
  *  reconciliation reads off main). Each may be repeated or comma/space-separated.
  *  Pure — exported for tests. */
@@ -221,7 +289,10 @@ async function resolveTaskId(headRefName: string, commitText: string): Promise<n
  *  status persist (the upsert runs on changed PRs) and reach the UI — without
  *  reacting to unrelated PR churn. */
 function sig(pr: CloudPr): string {
-  return `${pr.state}|${pr.merged}|${pr.isDraft}|${pr.checks}|${pr.mergeable}|${pr.url}|${pr.agent?.updatedAt ?? ""}`;
+  // The follow-up comment ids are folded in so a freshly-posted `<!-- pm:followup -->`
+  // comment counts as a change — that's what wakes the ingest subscriber to slurp it.
+  const followups = pr.followups.map((f) => f.commentId ?? "?").join("+");
+  return `${pr.state}|${pr.merged}|${pr.isDraft}|${pr.checks}|${pr.mergeable}|${pr.url}|${pr.agent?.updatedAt ?? ""}|${followups}`;
 }
 
 export type CloudEventType = "pr.opened" | "pr.updated" | "pr.merged" | "pr.closed";
@@ -395,6 +466,18 @@ function registerSubscribers(): void {
   bus.on("pr.opened", enrich);
   bus.on("pr.updated", enrich);
   bus.on("pr.merged", enrich);
+
+  // Slurp follow-ups: a `<!-- pm:followup -->` comment a cloud worker left becomes a
+  // pending `create task` proposal (see followups.ts). Idempotent by comment id, so it
+  // runs on every event — including the startup catch-up — without ever duplicating.
+  // The cloud counterpart to a local worker POSTing /followups.
+  const ingest = async (pr: CloudPr) => {
+    const n = await ingestFollowups(pr);
+    if (n > 0) console.log(`github-watch: PR #${pr.number} → ${n} follow-up(s) → proposals`);
+  };
+  bus.on("pr.opened", ingest);
+  bus.on("pr.updated", ingest);
+  bus.on("pr.merged", ingest);
 
   // Auto-rebase: a PR that becomes CONFLICTING gets one @claude rebase ask. Both
   // first-sight (pr.opened) and live drift (pr.updated) can surface the conflict;

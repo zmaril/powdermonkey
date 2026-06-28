@@ -8,8 +8,14 @@ import { join } from "node:path";
 // Importing the module still transitively opens db.ts (subscribers use the task
 // repo), so isolate it to a throwaway data dir to avoid the writer lock.
 process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
-const { diffCloudPrs, parseTrailerIds, parseStatusComment, statusFromComments, rebaseAction } =
-  await import("../src/server/github-watch.ts");
+const {
+  diffCloudPrs,
+  parseTrailerIds,
+  parseStatusComment,
+  statusFromComments,
+  parseFollowupComment,
+  rebaseAction,
+} = await import("../src/server/github-watch.ts");
 type CloudPr = import("../src/server/events.ts").CloudPr;
 
 function pr(over: Partial<CloudPr> & { number: number; taskId: number }): CloudPr {
@@ -24,6 +30,7 @@ function pr(over: Partial<CloudPr> & { number: number; taskId: number }): CloudP
     headRefName: `pm/task-${over.taskId}-slug`,
     updatedAt: "2026-06-27T00:00:00Z",
     agent: null,
+    followups: [],
     ...over,
   };
 }
@@ -161,6 +168,59 @@ test("statusFromComments takes the newest marked comment (append-only, newest-wi
 test("statusFromComments returns null when no comment carries the marker", () => {
   expect(statusFromComments([{ body: "lgtm", updatedAt: "t1" }])).toBeNull();
   expect(statusFromComments([])).toBeNull();
+});
+
+test("parseFollowupComment pulls a keyed title + body out of the marked comment", () => {
+  const body = [
+    "<!-- pm:followup -->",
+    "title: Dedup the date helpers in src/web",
+    "Spotted two copies of formatRelative while working — worth one shared util.",
+  ].join("\n");
+  expect(parseFollowupComment(body)).toEqual({
+    title: "Dedup the date helpers in src/web",
+    body: "Spotted two copies of formatRelative while working — worth one shared util.",
+  });
+});
+
+test("parseFollowupComment falls back to the first line as title when there's no title: key", () => {
+  const body = [
+    "<!-- pm:followup -->",
+    "Add a retry to the dispatch PTY parse",
+    "It's flaky.",
+  ].join("\n");
+  expect(parseFollowupComment(body)).toEqual({
+    title: "Add a retry to the dispatch PTY parse",
+    body: "It's flaky.",
+  });
+});
+
+test("parseFollowupComment tolerates markdown noise and an explicit body: label", () => {
+  const body = [
+    "<!-- pm:followup -->",
+    "- **title:** Cache the repo slug lookup",
+    "body: It re-shells out every tick.",
+  ].join("\n");
+  expect(parseFollowupComment(body)).toEqual({
+    title: "Cache the repo slug lookup",
+    body: "It re-shells out every tick.",
+  });
+});
+
+test("parseFollowupComment returns null without the marker, or with nothing usable", () => {
+  expect(parseFollowupComment("just a normal comment\ntitle: nope")).toBeNull();
+  expect(parseFollowupComment("<!-- pm:followup -->\n   \n")).toBeNull();
+});
+
+test("a new follow-up comment changes the sig so it emits pr.updated (→ gets ingested)", () => {
+  const prev = index([pr({ number: 1, taskId: 10 })]);
+  const next = [
+    pr({
+      number: 1,
+      taskId: 10,
+      followups: [{ commentId: 555, title: "do a thing", body: "", updatedAt: "t1" }],
+    }),
+  ];
+  expect(diffCloudPrs(prev, next).map((e) => e.type)).toEqual(["pr.updated"]);
 });
 
 test("a fresh status comment (agent.updatedAt bump) emits pr.updated so it persists", () => {
