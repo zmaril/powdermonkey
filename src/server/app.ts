@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { TSchema } from "@sinclair/typebox";
 import { Elysia, t } from "elysia";
@@ -269,8 +269,11 @@ export const app = new Elysia()
         return;
       }
 
-      // ?cwd=<path> → a plain fresh worktree shell.
-      spawnFresh(q || process.env.PM_REPO_DIR || process.cwd(), "");
+      // ?cwd=<path> → a plain fresh worktree shell. The "Open a shell" action on an
+      // ended session passes its old worktree, which land/merge has usually removed —
+      // fall back to the repo dir so the shell always lands somewhere real.
+      const repoDir = process.env.PM_REPO_DIR || process.cwd();
+      spawnFresh(q && existsSync(q) ? q : repoDir, "");
     },
     message(ws, msg) {
       const handle = ptys.get(ws.raw);
