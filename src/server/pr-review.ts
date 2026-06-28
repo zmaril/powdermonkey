@@ -40,6 +40,8 @@ export type ReviewComment = {
 export type PrReview = {
   number: number;
   title: string;
+  /** The PR description (markdown source), shown in the review sidebar. */
+  body: string;
   state: string;
   /** Head commit sha — echoed back by the client when posting (commit_id). */
   headSha: string;
@@ -123,6 +125,7 @@ export async function getPrReview(number: number): Promise<ReviewResult> {
       review: {
         number,
         title: fixturePr.title ?? `PR #${number}`,
+        body: fixturePr.body ?? "",
         state: fixturePr.state ?? "open",
         headSha: fixturePr.head?.sha ?? fixturePr.headSha ?? "",
         url: fixturePr.html_url ?? fixturePr.url ?? "",
@@ -147,6 +150,7 @@ export async function getPrReview(number: number): Promise<ReviewResult> {
     review: {
       number,
       title: pr.title ?? `PR #${number}`,
+      body: pr.body ?? "",
       state: pr.state ?? "open",
       headSha: pr.head?.sha ?? "",
       url: pr.html_url ?? "",

@@ -36,10 +36,44 @@ PrReview { number, title, state, headSha, url, files[], comments[] }
 - **Routes** (`app.ts`): `GET /prs/:number/review`, `POST /prs/:number/comments`.
   A GitHub failure is a 502 with `{ error }`; the pane shows it inline.
 
+## Layout
+
+The pane is **one dockview panel** with an internal three-region layout — not
+several panels — because the regions share one PR's selection / scroll / viewed
+state, which would be painful to sync across independent dockview panels:
+
+```
+┌ header: REVIEW #n title · [Unified|Split] · Refresh ─────────────────────┐
+├ sidebar (280px) ┬ diff (scrolls) ───────────────────────────────────────┤
+│ PR title + desc │  file ▸ +adds/-dels [Viewed]                           │
+│ (own scroll)    │  @@ hunk … lines … threads … pending … composer        │
+│ FILES  n/m view │  …                                                     │
+│ @pierre/trees   │                                                        │
+├ footer: Finish review (summary + Approve / Request changes / Comment) ────┤
+```
+
+The operator still gets a "big pane" by maximizing/floating the dockview tab.
+
+- **Sidebar — PR description + file tree.** The PR title and description sit top-left
+  in their own scroll region, so they stay put while the diff scrolls. Below them is
+  a file tree rendered with **[`@pierre/trees`](https://www.npmjs.com/package/@pierre/trees)**
+  (`useFileTree` + `<FileTree>`) — virtualized, with file-type icons and git-status
+  colours (we map GitHub's per-file `status` → its `gitStatus`). It renders in a
+  shadow root, so it's themed by setting `--trees-*` CSS variables on the host
+  (they pierce the shadow boundary). Selecting a file scrolls the diff to it (each
+  file registers a ref; `onSelectionChange` → `scrollIntoView`). This is the one
+  place we took a Pierre package — the diff renderer is still hand-rolled (see the
+  spike); the tree is enough of its own thing, and virtualization helps a big PR.
+- **Viewed / unviewed.** Each file header has a **Viewed** checkbox (GitHub's
+  mechanic): ticking it collapses the file and bumps the sidebar's `n/m viewed`
+  count. State is per-file, persisted to `localStorage` keyed by PR number + head
+  sha, so it survives a reload (and resets when the PR gets new commits). You can
+  still expand a viewed file manually with its ▾.
+
 ## The pane
 
-`ReviewPane` is pure rendering off the payload plus one POST per comment — no diff
-library, matching the rest of the app's hand-rolled Mantine panes.
+`ReviewPane` renders the diff off the payload — no diff *library* (the file tree is
+the one third-party piece), matching the rest of the app's hand-rolled Mantine panes.
 
 - **Comment anchoring.** A diff line anchors a comment to `RIGHT`/new-line for added
   or context lines, `LEFT`/old-line for removed — the same model GitHub's

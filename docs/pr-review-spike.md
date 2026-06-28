@@ -9,22 +9,29 @@
 ## TL;DR
 
 - **Pierre the git platform is dead** (the team labels it "Pierre.co, RIP
-  2023–2026"). But the part we'd want **survived as Apache-2.0 open source**:
+  2023–2026"). But the parts we'd want **survived as Apache-2.0 open source**:
   [`@pierre/diffs`](https://www.npmjs.com/package/@pierre/diffs) — a
-  virtualization-first React diff renderer with an annotation framework for
-  inline comments. So Pierre is **more than design inspiration**: there's reusable
-  code, with caveats.
-- For PowderMonkey's *first* cut we deliberately **did not** pull in `@pierre/diffs`
-  (or any diff library). The diffs we review are our own small `pm/task-*` PRs, the
-  app is "useful over elegant / short shelf life" (see `design.md`), and the whole
-  diff+comment pane is ~600 lines with **zero new dependencies**. Adding a
-  Shiki-in-a-worker virtualized renderer is the right move only if/when we start
-  reviewing large diffs. The seam is clean enough to swap later (see "If we outgrow
-  this").
-- What shipped (phase 302/303): a `Review` pane in the dockview split that renders a
-  PR's diff (parsed from `gh api .../pulls/{n}/files`) with threaded inline comments
-  anchored to lines, an inline composer that posts via `gh api`, and a Unified/Split
-  toggle.
+  virtualization-first React diff renderer with an annotation framework for inline
+  comments — and [`@pierre/trees`](https://www.npmjs.com/package/@pierre/trees), a
+  virtualized file-tree component. So Pierre is **more than design inspiration**:
+  there's reusable code, with caveats.
+- For the **diff renderer** we deliberately **did not** pull in `@pierre/diffs` (or
+  any diff library). The diffs we review are our own small `pm/task-*` PRs, the app
+  is "useful over elegant / short shelf life" (see `design.md`), and the hand-rolled
+  diff+comment renderer matches the rest of the app's panes. A Shiki-in-a-worker
+  virtualized renderer is the right move only if/when we start reviewing large
+  diffs; the seam is clean enough to swap later (see "If we outgrow this").
+- For the **file tree** we *did* adopt `@pierre/trees` (operator's call) — a tree is
+  enough of its own thing that hand-rolling buys little, virtualization helps a long
+  file list, and it ships file-type icons + git-status colouring for free. It's the
+  one third-party piece in the pane (~0.5 MB to the bundle, preact-based, themed via
+  `--trees-*` CSS vars through its shadow root).
+- What shipped (302/303 + follow-ups): a `Review` pane in the dockview split — a
+  left sidebar (PR title + description + `@pierre/trees` file tree), a scrollable diff
+  (parsed from `gh api .../pulls/{n}/files`) with threaded inline comments and a
+  Unified/Split toggle, per-file **Viewed** collapse, and a footer that submits a
+  **batched** review with an Approve / Request changes / Comment verdict (one webhook
+  event, not one per comment). See `docs/pr-review.md`.
 
 ## What Pierre is, and its status
 
@@ -84,19 +91,25 @@ shape against the package `.d.ts` before committing to it.
 
 ## Decision
 
-**For now: parse the patches ourselves, no library.** Rationale, weighed against
-`design.md`'s explicit non-goals ("short shelf life", "useful over elegant", single
-operator):
+**Diff renderer: parse the patches ourselves, no library. File tree:
+`@pierre/trees`.** Rationale, weighed against `design.md`'s non-goals ("short shelf
+life", "useful over elegant", single operator):
 
 - The diffs in scope are our own `pm/task-*` PRs — small, text, a handful of files.
-  Virtualization and worker-thread highlighting solve a problem we don't have.
-- The parser is ~80 lines, pure, and unit-tested (`src/server/diff.ts`,
-  `tests/diff.test.ts`). The renderer is plain Mantine/JSX that matches the rest of
-  the app (themeAbyss dockview, dark panes) with **no new dependencies** and nothing
-  to keep in sync with a fast-moving upstream.
-- Everything else here is already a thin shell over `gh` (see `github-watch.ts`);
-  doing the GitHub I/O for review through the same `gh` seam keeps the architecture
-  uniform.
+  Virtualization and worker-thread highlighting solve a problem the *diff* doesn't
+  have. The parser is ~80 lines, pure, and unit-tested (`src/server/diff.ts`,
+  `tests/diff.test.ts`); the renderer is plain Mantine/JSX that matches the app
+  (themeAbyss dockview, dark panes) with nothing to keep in sync with a fast-moving
+  upstream.
+- A **file tree** is the exception: hand-rolling a nested, collapsible,
+  icon-decorated tree buys little over `@pierre/trees`, which is Apache-2.0, ships
+  file-type icons + git-status colouring, virtualizes a long list, and exposes a
+  clean `useFileTree`/`<FileTree>` React API. It cost ~0.5 MB (preact-based) and a
+  bit of shadow-DOM theming via `--trees-*` CSS vars — a fair trade for the
+  navigation it gives. (This was the operator's call; the symmetry of using a Pierre
+  package where it earns its keep, and skipping one where it doesn't, is the point.)
+- The GitHub I/O for review goes through the same `gh` seam as `github-watch.ts`, so
+  the architecture stays uniform.
 
 **If we outgrow this** (we start reviewing large/external diffs, or want syntax
 highlighting): the swap point is small. `src/server/pr-review.ts` already returns a

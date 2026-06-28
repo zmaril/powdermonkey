@@ -3,16 +3,33 @@ import {
   Badge,
   Box,
   Button,
+  Checkbox,
   Group,
   SegmentedControl,
   Stack,
   Text,
   Textarea,
 } from "@mantine/core";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { GitStatus } from "@pierre/trees";
+import { FileTree, useFileTree } from "@pierre/trees/react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DiffLine, Hunk } from "../server/diff.ts";
 import type { PrReview, ReviewComment, ReviewEvent, ReviewFile } from "../server/pr-review.ts";
 import { api } from "./client.ts";
+
+/** GitHub's per-file status → the git status @pierre/trees colours rows by. */
+function mapGitStatus(status: string): GitStatus {
+  switch (status) {
+    case "added":
+      return "added";
+    case "removed":
+      return "deleted";
+    case "renamed":
+      return "renamed";
+    default:
+      return "modified"; // modified / changed / copied
+  }
+}
 
 // A drafted (not-yet-submitted) inline comment, accumulated locally and sent as part
 // of one batched review (see submit()). `id` is a client-only key for removal.
@@ -44,8 +61,6 @@ type LineAnchor = { side: Side; line: number };
 const COL = {
   add: "#12331f",
   del: "#3a1518",
-  addNo: "#1a4d2e",
-  delNo: "#5c2126",
   gutter: "#787f87",
   context: "transparent",
 } as const;
@@ -358,6 +373,8 @@ function FileView({
   draftByKey,
   onRemoveDraft,
   view,
+  viewed,
+  onToggleViewed,
   onAdd,
   onReply,
   composerKey,
@@ -370,6 +387,8 @@ function FileView({
   draftByKey: Map<string, DraftComment[]>;
   onRemoveDraft: (id: number) => void;
   view: "unified" | "split";
+  viewed: boolean;
+  onToggleViewed: () => void;
   onAdd: (path: string, a: LineAnchor) => void;
   onReply: (inReplyTo: number, body: string) => Promise<void>;
   composerKey: string | null;
@@ -378,6 +397,9 @@ function FileView({
   posting: boolean;
 }) {
   const [open, setOpen] = useState(true);
+  // Marking a file viewed collapses it (GitHub's mechanic); unviewing re-expands.
+  // The operator can still toggle ▾ manually in between.
+  useEffect(() => setOpen(!viewed), [viewed]);
   const { topByAnchor, repliesByParent } = indexComments(comments, file.filename);
 
   // The posted thread, drafted (pending) comments, and the open composer for a given
@@ -431,13 +453,23 @@ function FileView({
             {file.status}
           </Badge>
         </Group>
-        <Group gap={8} wrap="nowrap">
+        <Group gap={10} wrap="nowrap">
           <Text size="xs" c="green">
             +{file.additions}
           </Text>
           <Text size="xs" c="red">
             -{file.deletions}
           </Text>
+          {/* Stop the header's collapse toggle from firing when ticking Viewed. */}
+          <Box onClick={(e) => e.stopPropagation()}>
+            <Checkbox
+              size="xs"
+              label="Viewed"
+              checked={viewed}
+              onChange={onToggleViewed}
+              styles={{ label: { fontSize: 11, color: "#909296", paddingLeft: 6 } }}
+            />
+          </Box>
         </Group>
       </Group>
 
@@ -512,6 +544,94 @@ function FileView({
   );
 }
 
+// Theme the @pierre/trees shadow-DOM tree to match the app's dark panes. CSS custom
+// properties pierce the shadow boundary, so setting them on the host is enough.
+const TREE_VARS: CSSProperties = {
+  background: "#1a1b1e",
+  "--trees-fg-override": "#c1c2c5",
+  "--trees-border-color-override": "#2c2e33",
+  "--trees-selected-bg-override": "#2f3136",
+} as CSSProperties;
+
+/** The review sidebar: the PR title + description (stays put while the diff scrolls)
+ *  over a @pierre/trees file tree. Selecting a file scrolls the diff to it. */
+function ReviewSidebar({
+  review,
+  viewedCount,
+  onSelect,
+}: {
+  review: PrReview;
+  viewedCount: number;
+  onSelect: (path: string) => void;
+}) {
+  const files = review.files;
+  // Keep the select handler current without re-creating the tree model each render.
+  const selectRef = useRef(onSelect);
+  selectRef.current = onSelect;
+  const pathsKey = files.map((f) => f.filename).join("\n");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: rebuild the model only when the file set changes, not on every parent render.
+  const options = useMemo(
+    () => ({
+      paths: files.map((f) => f.filename),
+      gitStatus: files.map((f) => ({ path: f.filename, status: mapGitStatus(f.status) })),
+      initialExpansion: "open" as const,
+      flattenEmptyDirectories: true,
+      stickyFolders: true,
+      onSelectionChange: (paths: readonly string[]) => {
+        if (paths[0]) selectRef.current(paths[0]);
+      },
+    }),
+    [pathsKey],
+  );
+  const { model } = useFileTree(options);
+
+  return (
+    <Box
+      style={{
+        width: 280,
+        flexShrink: 0,
+        borderRight: "1px solid #2c2e33",
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+      }}
+    >
+      <Box
+        px="md"
+        py={10}
+        style={{ borderBottom: "1px solid #2c2e33", maxHeight: "45%", overflowY: "auto" }}
+      >
+        <Text size="sm" fw={600}>
+          {review.title}
+        </Text>
+        <Text size="xs" c="dimmed" mt={2}>
+          #{review.number} · {review.state}
+        </Text>
+        {review.body ? (
+          <Text size="xs" mt={8} style={{ whiteSpace: "pre-wrap", color: "#a6a7ab" }}>
+            {review.body}
+          </Text>
+        ) : (
+          <Text size="xs" c="dimmed" mt={8} fs="italic">
+            No description.
+          </Text>
+        )}
+      </Box>
+      <Group justify="space-between" px="md" py={6} style={{ flexShrink: 0 }}>
+        <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
+          FILES
+        </Text>
+        <Text size="xs" c="dimmed">
+          {viewedCount}/{files.length} viewed
+        </Text>
+      </Group>
+      <Box style={{ flex: 1, minHeight: 0, ...TREE_VARS }}>
+        <FileTree model={model} style={{ height: "100%" }} />
+      </Box>
+    </Box>
+  );
+}
+
 export function ReviewPane({ number }: { number: number }) {
   const [review, setReview] = useState<PrReview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -529,6 +649,38 @@ export function ReviewPane({ number }: { number: number }) {
   const [summary, setSummary] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const nextId = useRef(1);
+  // Per-file "viewed" state (GitHub's mechanic), persisted per PR+head so it
+  // survives a reload. The diff collapses a viewed file; the sidebar shows the count.
+  const [viewed, setViewed] = useState<Set<string>>(new Set());
+  const viewedKey = review ? `pm-review-viewed:${number}:${review.headSha}` : null;
+  // Scroll-to-file: each file's wrapper registers here, the tree scrolls to it.
+  const fileEls = useRef(new Map<string, HTMLDivElement>());
+  const scrollToFile = (path: string) =>
+    fileEls.current.get(path)?.scrollIntoView({ block: "start", behavior: "smooth" });
+
+  // Load persisted viewed state once the PR (and its head sha) is known.
+  useEffect(() => {
+    if (!viewedKey) return;
+    try {
+      const raw = localStorage.getItem(viewedKey);
+      setViewed(new Set(raw ? (JSON.parse(raw) as string[]) : []));
+    } catch {
+      setViewed(new Set());
+    }
+  }, [viewedKey]);
+
+  const toggleViewed = (path: string) =>
+    setViewed((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      if (viewedKey) {
+        try {
+          localStorage.setItem(viewedKey, JSON.stringify([...next]));
+        } catch {}
+      }
+      return next;
+    });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -653,51 +805,69 @@ export function ReviewPane({ number }: { number: number }) {
         </Group>
       </Group>
 
-      <Box style={{ flex: 1, overflowY: "auto" }} px="sm" py={4}>
-        {error && (
-          <Text c="red" size="sm" px="sm" py="sm">
-            {error}
-          </Text>
+      <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
+        {/* Left: PR title + description (visible while the diff scrolls) and the
+            @pierre/trees file tree (click a file → scroll the diff to it). */}
+        {review && review.files.length > 0 && (
+          <ReviewSidebar review={review} viewedCount={viewed.size} onSelect={scrollToFile} />
         )}
-        {loading && !review ? (
-          <Text c="dimmed" size="sm" px="sm" py="lg">
-            Loading diff…
-          </Text>
-        ) : review && review.files.length === 0 ? (
-          <Text c="dimmed" size="sm" px="sm" py="lg">
-            No files in this PR.
-          </Text>
-        ) : (
-          <Stack gap="sm">
-            {review?.files.map((file) => (
-              <FileView
-                key={file.filename}
-                file={file}
-                comments={review.comments}
-                draftByKey={draftByKey}
-                onRemoveDraft={removeDraft}
-                view={view}
-                composerKey={compose?.key ?? null}
-                onAdd={(path, anchor) => setCompose({ key: keyOf(path, anchor), path, anchor })}
-                onCancelCompose={() => setCompose(null)}
-                onSubmitCompose={(body) => {
-                  if (compose) addDraft(body, compose.anchor, compose.path);
-                }}
-                onReply={(inReplyTo, body) => {
-                  // A reply re-uses the parent's anchor only for the (unused on the
-                  // reply path) line/side; the server ignores them when in_reply_to is set.
-                  const parent = review.comments.find((c) => c.id === inReplyTo);
-                  const anchor: LineAnchor = {
-                    side: parent?.side ?? "RIGHT",
-                    line: parent?.line ?? 1,
-                  };
-                  return reply(body, anchor, parent?.path ?? file.filename, inReplyTo);
-                }}
-                posting={posting}
-              />
-            ))}
-          </Stack>
-        )}
+
+        {/* Right: the scrollable diff. */}
+        <Box style={{ flex: 1, overflowY: "auto", minWidth: 0 }} px="sm" py={4}>
+          {error && (
+            <Text c="red" size="sm" px="sm" py="sm">
+              {error}
+            </Text>
+          )}
+          {loading && !review ? (
+            <Text c="dimmed" size="sm" px="sm" py="lg">
+              Loading diff…
+            </Text>
+          ) : review && review.files.length === 0 ? (
+            <Text c="dimmed" size="sm" px="sm" py="lg">
+              No files in this PR.
+            </Text>
+          ) : (
+            <Stack gap="sm">
+              {review?.files.map((file) => (
+                <Box
+                  key={file.filename}
+                  ref={(el: HTMLDivElement | null) => {
+                    if (el) fileEls.current.set(file.filename, el);
+                    else fileEls.current.delete(file.filename);
+                  }}
+                >
+                  <FileView
+                    file={file}
+                    comments={review.comments}
+                    draftByKey={draftByKey}
+                    onRemoveDraft={removeDraft}
+                    view={view}
+                    viewed={viewed.has(file.filename)}
+                    onToggleViewed={() => toggleViewed(file.filename)}
+                    composerKey={compose?.key ?? null}
+                    onAdd={(path, anchor) => setCompose({ key: keyOf(path, anchor), path, anchor })}
+                    onCancelCompose={() => setCompose(null)}
+                    onSubmitCompose={(body) => {
+                      if (compose) addDraft(body, compose.anchor, compose.path);
+                    }}
+                    onReply={(inReplyTo, body) => {
+                      // A reply re-uses the parent's anchor only for the (unused on the
+                      // reply path) line/side; the server ignores them when in_reply_to is set.
+                      const parent = review.comments.find((c) => c.id === inReplyTo);
+                      const anchor: LineAnchor = {
+                        side: parent?.side ?? "RIGHT",
+                        line: parent?.line ?? 1,
+                      };
+                      return reply(body, anchor, parent?.path ?? file.filename, inReplyTo);
+                    }}
+                    posting={posting}
+                  />
+                </Box>
+              ))}
+            </Stack>
+          )}
+        </Box>
       </Box>
 
       {review && (
