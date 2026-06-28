@@ -8,6 +8,7 @@ import {
   SegmentedControl,
   Stack,
   Text,
+  TextInput,
   Textarea,
 } from "@mantine/core";
 import type { DiffLineAnnotation } from "@pierre/diffs/react";
@@ -541,10 +542,19 @@ function DescriptionPanel(_props: IDockviewPanelProps) {
 function FileTreeColumn() {
   const { review, viewed, scrollToFile } = useReviewCtx();
   const files = review.files;
+  const [query, setQuery] = useState("");
   // Keep the select handler current without re-creating the tree model each render.
   const selectRef = useRef(scrollToFile);
   selectRef.current = scrollToFile;
   const pathsKey = files.map((f) => f.filename).join("\n");
+  // Per-file ±counts for the tree row badges (static — set when the model is built).
+  const counts = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const f of files) m.set(f.filename, `+${f.additions} −${f.deletions}`);
+    return m;
+  }, [files]);
+  const countsRef = useRef(counts);
+  countsRef.current = counts;
   // biome-ignore lint/correctness/useExhaustiveDependencies: rebuild the model only when the file set changes, not on every parent render.
   const options = useMemo(
     () => ({
@@ -553,9 +563,13 @@ function FileTreeColumn() {
       initialExpansion: "open" as const,
       flattenEmptyDirectories: true,
       stickyFolders: true,
+      fileTreeSearchMode: "hide-non-matches" as const,
       onSelectionChange: (paths: readonly string[]) => {
         if (paths[0]) selectRef.current(paths[0]);
       },
+      // A ±count badge on each file row (read off a ref so it survives model reuse).
+      renderRowDecoration: (ctx: { item: { kind: string; path: string } }) =>
+        ctx.item.kind === "file" ? { text: countsRef.current.get(ctx.item.path) ?? "" } : null,
     }),
     [pathsKey],
   );
@@ -563,7 +577,7 @@ function FileTreeColumn() {
   return (
     <Box
       style={{
-        width: 240,
+        width: 250,
         flexShrink: 0,
         borderRight: "1px solid #2c2e33",
         display: "flex",
@@ -579,6 +593,18 @@ function FileTreeColumn() {
           {viewed.size}/{files.length} viewed
         </Text>
       </Group>
+      <Box px="sm" pb={6} style={{ flexShrink: 0 }}>
+        <TextInput
+          size="xs"
+          placeholder="Filter files…"
+          value={query}
+          onChange={(e) => {
+            const v = e.currentTarget.value;
+            setQuery(v);
+            model.setSearch(v || null);
+          }}
+        />
+      </Box>
       <Box style={{ flex: 1, minHeight: 0, ...TREE_VARS }}>
         <FileTree model={model} style={{ height: "100%" }} />
       </Box>
