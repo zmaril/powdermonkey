@@ -155,3 +155,20 @@ test("stop does NOT un-merge an already-merged task on a multi-task session", as
   expect((await taskRepo.get(merged.id))?.status).toBe("merged");
   expect((await taskRepo.get(unfinished.id))?.status).toBe("pending");
 });
+
+test("land tears down a merged task's session without regressing its status", async () => {
+  // The graceful teardown path: a merged task's session is landed (worktree
+  // removed, row archived). Unlike stop, land never touches task status — a
+  // finished task must stay merged when its shared session ends.
+  const [task] = await taskRepo.list();
+  const started = await startLocalSession(task.id);
+  if (!started.ok) throw new Error(started.error);
+  await taskRepo.update(task.id, { status: "merged" });
+
+  const result = await landSession(started.session.id);
+  if (!result.ok) throw new Error(`${result.error}: ${result.output ?? ""}`);
+
+  expect(existsSync(started.worktreePath)).toBe(false);
+  expect((await sessionRepo.get(started.session.id))?.archivedAt).toBeTruthy();
+  expect((await taskRepo.get(task.id))?.status).toBe("merged");
+});
