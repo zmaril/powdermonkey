@@ -16,6 +16,7 @@ import type { Goal, Phase, Task } from "../server/schema.ts";
 import { SessionKind, TaskStatus } from "../shared/types.ts";
 import { AnimatedList } from "./AnimatedList.tsx";
 import { partitionTasks } from "./active.ts";
+import { usePaneScroll } from "./pane-scroll.ts";
 import { type Indexes, starFirst, usePlanData } from "./plan-data.ts";
 import {
   CompleteTaskControl,
@@ -309,6 +310,7 @@ export function BacklogPane() {
   const { idx, activeIds, loading } = usePlanData();
   const [view, setView] = useState<View>("grouped");
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const scroll = usePaneScroll("backlog");
 
   // Backlog = everything to-be-worked: not active (no live session) and not merged.
   const allTasks = [...idx.tasksByMilestone.values()].flat();
@@ -357,7 +359,13 @@ export function BacklogPane() {
         />
       </Group>
 
-      <Box style={{ flex: 1, overflowY: "auto" }} px={view === "grouped" ? "md" : 0} py={4}>
+      <Box
+        ref={scroll.ref}
+        onScroll={scroll.onScroll}
+        style={{ flex: 1, overflowY: "auto" }}
+        px={view === "grouped" ? "md" : 0}
+        py={4}
+      >
         <Box px={view === "grouped" ? 0 : "md"}>
           <StartPanel />
         </Box>

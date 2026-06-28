@@ -2,6 +2,7 @@ import { Badge, Box, Group, SegmentedControl, Stack, Text, Title } from "@mantin
 import { useState } from "react";
 import type { Goal, Milestone, Task } from "../server/schema.ts";
 import { TaskStatus } from "../shared/types.ts";
+import { usePaneScroll } from "./pane-scroll.ts";
 import { type Indexes, useArchiveData } from "./plan-data.ts";
 import { CompleteTaskControl, IdTag, STATUS_COLOR, TaskLinks } from "./plan-ui.tsx";
 
@@ -113,6 +114,7 @@ export function ArchivePane() {
   // no separate fetch or poll.
   const { idx, tasks } = useArchiveData();
   const [view, setView] = useState<View>("flat");
+  const scroll = usePaneScroll("archive");
 
   return (
     <Box
@@ -138,7 +140,13 @@ export function ArchivePane() {
         />
       </Group>
 
-      <Box style={{ flex: 1, overflowY: "auto" }} px={view === "grouped" ? "md" : 0} py={4}>
+      <Box
+        ref={scroll.ref}
+        onScroll={scroll.onScroll}
+        style={{ flex: 1, overflowY: "auto" }}
+        px={view === "grouped" ? "md" : 0}
+        py={4}
+      >
         {tasks.length === 0 ? (
           <Text c="dimmed" size="sm" px="md" py="lg">
             Nothing here yet. Tasks land in the archive once they're merged (finished) or archived.
