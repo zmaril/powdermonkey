@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNull, ne } from "drizzle-orm";
+import { match } from "ts-pattern";
 import { PhaseStatus, SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { commitBodies } from "./git.ts";
@@ -59,7 +60,7 @@ async function archiveMergedTaskSessions(): Promise<number> {
     .where(isNull(sessions.archivedAt));
 
   // Keep only sessions that have linked tasks and whose tasks have ALL merged.
-  const live: { id: number; kind: string }[] = [];
+  const live: { id: number; kind: SessionKind }[] = [];
   for (const s of liveSessions) {
     const linked = await db
       .select({ status: tasks.status })
@@ -71,20 +72,26 @@ async function archiveMergedTaskSessions(): Promise<number> {
 
   let archived = 0;
   for (const s of live) {
-    if (s.kind === SessionKind.Local) {
-      const res = await landSession(s.id);
-      if (res.ok) archived++;
-      else console.warn(`reconcile: could not land session ${s.id}: ${res.error}`);
-      continue;
-    }
-    // Remote session: no worktree/PTY to tear down — just archive the row. Guarded
-    // on archivedAt so a concurrent land/stop can't double-archive.
-    const [updated] = await db
-      .update(sessions)
-      .set({ state: SessionState.Idle, archivedAt: new Date(), updatedAt: new Date() })
-      .where(and(eq(sessions.id, s.id), isNull(sessions.archivedAt)))
-      .returning({ id: sessions.id });
-    if (updated) archived++;
+    // Exhaustive over SessionKind, so a new kind forces a teardown decision here.
+    const ok = await match(s.kind)
+      // local: reuse landSession to tear down the worktree + PTY.
+      .with(SessionKind.Local, async () => {
+        const res = await landSession(s.id);
+        if (!res.ok) console.warn(`reconcile: could not land session ${s.id}: ${res.error}`);
+        return res.ok;
+      })
+      // remote: no worktree/PTY to tear down — just archive the row. Guarded on
+      // archivedAt so a concurrent land/stop can't double-archive.
+      .with(SessionKind.Remote, async () => {
+        const [updated] = await db
+          .update(sessions)
+          .set({ state: SessionState.Idle, archivedAt: new Date(), updatedAt: new Date() })
+          .where(and(eq(sessions.id, s.id), isNull(sessions.archivedAt)))
+          .returning({ id: sessions.id });
+        return Boolean(updated);
+      })
+      .exhaustive();
+    if (ok) archived++;
   }
   return archived;
 }

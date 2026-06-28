@@ -33,6 +33,14 @@ export const SESSION_BADGE: Record<SessionState, { label: string; color: string 
   [SessionState.Stopped]: { label: "stopped", color: "red" },
 };
 
+// Glyph per session kind. Typed as Record<SessionKind, …> so adding a kind is a
+// compile error here until it has an icon — the same total-coverage guarantee the
+// status/badge maps rely on.
+export const KIND_ICON: Record<SessionKind, string> = {
+  [SessionKind.Local]: "💻",
+  [SessionKind.Remote]: "☁️",
+};
+
 /** A small monospace id chip (g1 / m6 / t110 / p41) so the operator can reference
  *  any entity by id. `flexShrink: 0` keeps it visible when a title truncates. */
 export function IdTag({ prefix, id }: { prefix: string; id: number }) {
@@ -168,7 +176,8 @@ export function SessionActions({ session, taskId }: { session: Session; taskId: 
   return (
     <Group gap="xs" wrap="nowrap">
       <Badge variant="dot" color="teal" title={session.kind}>
-        <span aria-label={session.kind}>{isRemote ? "☁️" : "💻"}</span> {session.branch ?? "remote"}
+        <span aria-label={session.kind}>{KIND_ICON[session.kind]}</span>{" "}
+        {session.branch ?? "remote"}
       </Badge>
       {isRemote ? (
         <>

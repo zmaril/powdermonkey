@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { Goal, Milestone, Session, Task } from "../server/schema.ts";
 import { partitionTasks } from "./active.ts";
 import { type Indexes, starFirst, usePlanData } from "./plan-data.ts";
-import { IdTag, PrStatus, SessionActions, StarToggle, TaskBadges } from "./plan-ui.tsx";
+import { IdTag, KIND_ICON, PrStatus, SessionActions, StarToggle, TaskBadges } from "./plan-ui.tsx";
 
 // The Active pane is the live monitor — every task with a session running right
 // now (the derived-active set; see active.ts). The unit here is the SESSION, not
@@ -120,7 +120,7 @@ function SessionGroup({
       </Stack>
       <Group gap="xs" wrap="wrap" justify="space-between" align="center" mt={8}>
         <Text size="xs" c="dimmed">
-          {session.kind === "remote" ? "☁️" : "💻"}
+          {KIND_ICON[session.kind]}
           {multi ? ` ${tasks.length} tasks · one worker` : ""}
         </Text>
         <SessionActions session={session} taskId={tasks[0].id} />
