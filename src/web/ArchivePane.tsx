@@ -16,6 +16,8 @@ type View = "flat" | "grouped";
 /** One read-only archived/finished task row. */
 function ArchiveRow({ task, context }: { task: Task; context?: string }) {
   const archived = task.archivedAt != null;
+  // hover tooltip text, not the TaskStatus value
+  const stateLabel = task.status === TaskStatus.Merged ? "merged" : "archived"; // lint-allow-string: tooltip
   return (
     <Group
       gap="sm"
@@ -24,7 +26,7 @@ function ArchiveRow({ task, context }: { task: Task; context?: string }) {
       py={6}
       style={{ borderBottom: "1px solid #2c2e33", minHeight: 38 }}
     >
-      <Text size="sm" title={task.status === TaskStatus.Merged ? "merged" : "archived"}>
+      <Text size="sm" title={stateLabel}>
         {task.status === TaskStatus.Merged ? "✅" : "🗄️"}
       </Text>
       <Box style={{ flex: 1, minWidth: 0 }}>

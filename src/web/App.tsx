@@ -9,6 +9,7 @@ import {
   themeAbyss,
 } from "dockview-react";
 import { useEffect, useRef, useState } from "react";
+import { SessionState } from "../shared/types.ts";
 import { ActivePane } from "./ActivePane.tsx";
 import { ArchivePane } from "./ArchivePane.tsx";
 import { BacklogPane } from "./BacklogPane.tsx";
@@ -139,7 +140,7 @@ function SessionEndedOverlay({ sessionId, onClose }: { sessionId: number; onClos
   const prUrl = tasks.find((t) => taskIds.has(t.id) && t.prUrl)?.prUrl ?? null;
   const worktree = session?.worktreePath ?? "";
   const message =
-    session?.state === "stopped"
+    session?.state === SessionState.Stopped
       ? "This session was stopped — its agent was killed and the task re-pended."
       : "This session has ended — landed, merged, or its agent exited.";
   return (

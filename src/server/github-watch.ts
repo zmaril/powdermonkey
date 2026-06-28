@@ -1,5 +1,5 @@
 import { inArray } from "drizzle-orm";
-import { AgentState } from "../shared/types.ts";
+import { AgentState, MergeableState, PrState } from "../shared/types.ts";
 import { taskRepo } from "./crud.ts";
 import { db } from "./db.ts";
 import { type AgentStatus, type CloudEventMeta, type CloudPr, bus } from "./events.ts";
@@ -227,13 +227,13 @@ export function diffCloudPrs(prev: Map<number, CloudPr>, next: CloudPr[]): Cloud
     const before = prev.get(pr.number);
     if (!before) {
       if (pr.merged) events.push({ type: "pr.merged", pr });
-      else if (pr.state === "CLOSED") events.push({ type: "pr.closed", pr });
+      else if (pr.state === PrState.Closed) events.push({ type: "pr.closed", pr });
       else events.push({ type: "pr.opened", pr });
       continue;
     }
     if (sig(before) === sig(pr)) continue; // nothing we track moved
     if (pr.merged && !before.merged) events.push({ type: "pr.merged", pr });
-    else if (pr.state === "CLOSED" && before.state !== "CLOSED" && !pr.merged)
+    else if (pr.state === PrState.Closed && before.state !== PrState.Closed && !pr.merged)
       events.push({ type: "pr.closed", pr });
     else events.push({ type: "pr.updated", pr });
   }
@@ -262,12 +262,12 @@ export function diffCloudPrs(prev: Map<number, CloudPr>, next: CloudPr[]): Cloud
  *   • UNKNOWN / null                     → "skip" (transient; leave the ledger as-is)
  *  Exported for tests. */
 export function rebaseAction(
-  mergeable: string | null,
+  mergeable: MergeableState | null,
   alreadyAsked: boolean,
   initial: boolean,
 ): "ask" | "clear" | "skip" {
-  if (mergeable === "MERGEABLE") return "clear";
-  if (mergeable !== "CONFLICTING") return "skip";
+  if (mergeable === MergeableState.Mergeable) return "clear";
+  if (mergeable !== MergeableState.Conflicting) return "skip";
   if (alreadyAsked || initial) return "skip";
   return "ask";
 }

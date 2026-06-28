@@ -138,7 +138,7 @@ export const pullRequests = pgTable("pull_requests", {
   url: text("url").notNull(),
   state: text("state").$type<PrState>().notNull(),
   isDraft: boolean("is_draft").notNull().default(false),
-  merged: boolean("merged").notNull().default(false),
+  merged: boolean("merged").notNull().default(false), // lint-allow-string: DB column name
   // statusCheckRollup state (SUCCESS / FAILURE / PENDING / …), null when none.
   checks: text("checks").$type<CheckRollupState>(),
   // MERGEABLE / CONFLICTING / UNKNOWN, or null — GitHub computes it lazily.

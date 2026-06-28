@@ -13,7 +13,7 @@ import {
 } from "@mantine/core";
 import { useState } from "react";
 import type { Goal, Phase, Task } from "../server/schema.ts";
-import { TaskStatus } from "../shared/types.ts";
+import { SessionKind, TaskStatus } from "../shared/types.ts";
 import { partitionTasks } from "./active.ts";
 import { type Indexes, starFirst, usePlanData } from "./plan-data.ts";
 import {
@@ -219,14 +219,14 @@ function SelectionBar({ ids, clear }: { ids: number[]; clear: () => void }) {
   const { startLocalMany, dispatchMany } = useStore();
   // Track WHICH batch action is in flight, so the clicked button shows its own
   // spinner (matching the per-task Dispatch remote / Start local loading state).
-  const [running, setRunning] = useState<"local" | "remote" | null>(null);
+  const [running, setRunning] = useState<SessionKind | null>(null);
   const busy = running !== null;
 
-  const run = async (kind: "local" | "remote") => {
+  const run = async (kind: SessionKind) => {
     if (busy || ids.length === 0) return;
     setRunning(kind);
     try {
-      if (kind === "local") await startLocalMany(ids);
+      if (kind === SessionKind.Local) await startLocalMany(ids);
       else await dispatchMany(ids);
       clear();
     } finally {
@@ -248,9 +248,9 @@ function SelectionBar({ ids, clear }: { ids: number[]; clear: () => void }) {
         <Button
           size="compact-xs"
           variant="light"
-          loading={running === "local"}
+          loading={running === SessionKind.Local}
           disabled={busy}
-          onClick={() => run("local")}
+          onClick={() => run(SessionKind.Local)}
         >
           Start local
         </Button>
@@ -258,9 +258,9 @@ function SelectionBar({ ids, clear }: { ids: number[]; clear: () => void }) {
           size="compact-xs"
           variant="subtle"
           color="gray"
-          loading={running === "remote"}
+          loading={running === SessionKind.Remote}
           disabled={busy}
-          onClick={() => run("remote")}
+          onClick={() => run(SessionKind.Remote)}
         >
           Dispatch remote
         </Button>
