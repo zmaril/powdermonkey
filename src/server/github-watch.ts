@@ -1,8 +1,16 @@
 import { inArray } from "drizzle-orm";
 import { taskRepo } from "./crud.ts";
 import { db } from "./db.ts";
-import { type CloudPr, bus } from "./events.ts";
+import { type CloudEventMeta, type CloudPr, bus } from "./events.ts";
+import { askClaude, gh } from "./gh.ts";
 import { pullMain } from "./git.ts";
+import {
+  clearRebaseAsked,
+  isRebaseAsked,
+  listPrs,
+  markRebaseAsked,
+  upsertPrState,
+} from "./pr-store.ts";
 import { reconcile } from "./reconcile.ts";
 import { phases } from "./schema.ts";
 
@@ -40,16 +48,6 @@ const GQL = `query($owner:String!,$name:String!){
     }
   }
 }`;
-
-async function gh(args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "pipe" });
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  const code = await proc.exited;
-  return { ok: code === 0, stdout, stderr };
-}
 
 let repoSlug: { owner: string; name: string } | null = null;
 /** owner/name from $PM_GITHUB_REPO, else `gh repo view`. Cached after first hit. */
@@ -190,20 +188,90 @@ export function diffCloudPrs(prev: Map<number, CloudPr>, next: CloudPr[]): Cloud
   return events;
 }
 
+// ---- auto-rebase ask -------------------------------------------------------
+// When a task PR drifts into conflict with main, ask its live cloud session to
+// rebase — via an @claude comment (see gh.ts). The hard part is *idempotency*:
+// one ask per conflict, never a re-spam. GitHub's `mergeable` is a three-state
+// signal (CONFLICTING / MERGEABLE / UNKNOWN-or-null, the last meaning "not yet
+// computed"), so we track which PRs we've already pinged and decide from the
+// transition, not the raw state.
+
+/** Pure: decide what to do about a PR's merge state, given whether we've already
+ *  asked it to rebase this episode and whether this is a startup-catch-up (`initial`)
+ *  event. Folding `initial` in here keeps the whole decision testable.
+ *   • MERGEABLE                         → "clear" (episode over; a *future* conflict
+ *       re-asks). Runs even on `initial`, so a conflict resolved while we were down
+ *       reconciles the ledger on boot — otherwise a stale "asked" flag would suppress
+ *       the *next* real conflict.
+ *   • CONFLICTING + already asked        → "skip" (don't re-spam the same conflict)
+ *   • CONFLICTING + initial              → "skip" (don't re-ask pre-boot conflicts on
+ *       a restart, nor flood on the first-ever catch-up)
+ *   • CONFLICTING + fresh, live          → "ask"
+ *   • UNKNOWN / null                     → "skip" (transient; leave the ledger as-is)
+ *  Exported for tests. */
+export function rebaseAction(
+  mergeable: string | null,
+  alreadyAsked: boolean,
+  initial: boolean,
+): "ask" | "clear" | "skip" {
+  if (mergeable === "MERGEABLE") return "clear";
+  if (mergeable !== "CONFLICTING") return "skip";
+  if (alreadyAsked || initial) return "skip";
+  return "ask";
+}
+
+const REBASE_MESSAGE =
+  "This PR has merge conflicts with `main`. Please rebase onto the latest `main`, " +
+  "resolve the conflicts, and push — keeping the PM-Phase / PM-Task trailers intact.";
+
+// Idempotency now lives in the pull_requests table (rebaseAskedAt), not memory, so
+// the "we already asked" fact survives a restart — closing a real re-spam window:
+// after a restart an in-memory set was empty, so any sig change while a PR stayed
+// CONFLICTING would ask again. Because the ledger is durable, the `initial` skip is
+// scoped to the *ask* alone (in rebaseAction); a MERGEABLE seen during catch-up
+// still clears, so a conflict resolved during downtime can't leave a stale flag.
+async function maybeAskRebase(pr: CloudPr, meta: CloudEventMeta): Promise<void> {
+  const action = rebaseAction(pr.mergeable, await isRebaseAsked(pr.number), meta.initial);
+  if (action === "clear") {
+    await clearRebaseAsked(pr.number);
+    return;
+  }
+  if (action !== "ask") return;
+  await markRebaseAsked(pr.number); // mark first, so a failed post doesn't loop-retry
+  const repo = await resolveRepo();
+  const slug = repo ? `${repo.owner}/${repo.name}` : undefined;
+  const r = await askClaude(pr.number, REBASE_MESSAGE, slug);
+  if (r.ok) {
+    console.log(`github-watch: PR #${pr.number} conflicting → asked @claude to rebase`);
+  } else {
+    await clearRebaseAsked(pr.number); // post failed — let a later tick retry
+    console.warn(
+      `github-watch: rebase ask for PR #${pr.number} failed:`,
+      r.stderr.trim().slice(0, 200),
+    );
+  }
+}
+
 // ---- the loop --------------------------------------------------------------
 let lastByNumber = new Map<number, CloudPr>();
 
-/** The watcher's latest known PR state, one per task-linked PR. Served live to the
- *  UI (GET /cloud-prs) so the Active panel can show CI / merge-conflict status
- *  without persisting this fast-moving data to the DB. */
-export function currentCloudPrs(): CloudPr[] {
-  return [...lastByNumber.values()];
+/** The watcher's latest known PR state, one per task-linked PR. Served to the UI
+ *  (GET /cloud-prs) for the Active panel's CI / merge-conflict badges. Read from
+ *  the pull_requests table, so it's populated immediately on boot from last-known
+ *  state — before the first poll lands. */
+export function currentCloudPrs(): Promise<CloudPr[]> {
+  return listPrs();
 }
 
 async function tick(initial: boolean): Promise<number> {
   const prs = await fetchCloudPrs();
   if (prs === null) return 0; // fetch failed — keep last-known state untouched
   const events = diffCloudPrs(lastByNumber, prs);
+  // Persist the changed PRs *before* emitting, so their rows exist when the rebase
+  // subscriber reads/writes the ask ledger. upsertPrState only writes cache
+  // columns — it never disturbs rebaseAskedAt. Unchanged PRs already have a row
+  // from a prior tick, so we skip the write churn for them.
+  for (const ev of events) await upsertPrState(ev.pr);
   for (const ev of events) await bus.emit(ev.type, ev.pr, { initial });
   lastByNumber = new Map(prs.map((p) => [p.number, p]));
   return events.length;
@@ -259,6 +327,17 @@ function registerSubscribers(): void {
   bus.on("pr.opened", enrich);
   bus.on("pr.updated", enrich);
   bus.on("pr.merged", enrich);
+
+  // Auto-rebase: a PR that becomes CONFLICTING gets one @claude rebase ask. Both
+  // first-sight (pr.opened) and live drift (pr.updated) can surface the conflict;
+  // maybeAskRebase dedupes so only the first per episode actually comments.
+  bus.on("pr.opened", maybeAskRebase);
+  bus.on("pr.updated", maybeAskRebase);
+  // A PR leaving the board ends its conflict episode — clear the ledger so a reopen
+  // starts clean.
+  const forget = (pr: CloudPr) => clearRebaseAsked(pr.number);
+  bus.on("pr.merged", forget);
+  bus.on("pr.closed", forget);
 
   // Merge → reconcile. Coalesced: a tick can surface several merges at once (and
   // the startup sync surfaces every past merge), so we debounce to a single
