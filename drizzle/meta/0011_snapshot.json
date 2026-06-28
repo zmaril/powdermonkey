@@ -1,5 +1,5 @@
 {
-  "id": "e7c737c0-5a8e-4aad-b64b-c987f50239f6",
+  "id": "0a1fdb9d-c5a6-4d33-9951-9c044375acae",
   "prevId": "da1f5abd-00e0-4009-95a2-941cf1f2c3cb",
   "version": "7",
   "dialect": "postgresql",
@@ -261,8 +261,8 @@
           "notNull": true,
           "default": "'todo'"
         },
-        "done_source": {
-          "name": "done_source",
+        "decision_source": {
+          "name": "decision_source",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -727,8 +727,8 @@
           "notNull": true,
           "default": "'pending'"
         },
-        "done_source": {
-          "name": "done_source",
+        "decision_source": {
+          "name": "decision_source",
           "type": "text",
           "primaryKey": false,
           "notNull": false

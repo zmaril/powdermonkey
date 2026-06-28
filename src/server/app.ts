@@ -4,8 +4,8 @@ import type { TSchema } from "@sinclair/typebox";
 import { getTableColumns, getTableName } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 import { P, match } from "ts-pattern";
-import { SessionState } from "../shared/types.ts";
-import { completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
+import { OverrideSource, SessionState } from "../shared/types.ts";
+import { cancelTask, completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
 import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
 import { pg } from "./db.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
@@ -131,6 +131,21 @@ function launchIds(idParam: string, body?: { taskIds?: number[] } | null): numbe
   return [...new Set([Number(idParam), ...(body?.taskIds ?? [])])];
 }
 
+// Who made the call on an override route (complete/cancel): `operator` (the UI,
+// the default) or `supervisor` (the supervisor agent acting on the operator's
+// behalf). `reconciled` is deliberately not accepted — that's the reconciler's to
+// stamp. Defaults to `operator` when the body is absent so the UI can stay terse.
+const sourceBody = t.Optional(
+  t.Object({
+    source: t.Optional(
+      t.Union([t.Literal(OverrideSource.Operator), t.Literal(OverrideSource.Supervisor)]),
+    ),
+  }),
+);
+function decisionSource(body?: { source?: OverrideSource } | null): OverrideSource {
+  return body?.source ?? OverrideSource.Operator;
+}
+
 const tasksGroup = resource("tasks", taskRepo, models.tasks)
   .post(
     "/:id/dispatch",
@@ -166,28 +181,46 @@ const tasksGroup = resource("tasks", taskRepo, models.tasks)
     if (!result) set.status = 404;
     return result ?? { error: "not found" };
   })
-  // Operator-asserted completion (the non-reconciled path): mark a task done by hand
-  // for work that never landed a trailer. Stamps `done_source = operator`; reopen
-  // walks it back. Reconciled completions are never touched here.
-  .post("/:id/complete", async ({ params, set }) => {
-    const row = await completeTask(Number(params.id));
-    if (!row) set.status = 404;
-    return row ?? { error: "not found" };
-  })
+  // Override decisions (the non-reconciled path): close a task by hand for work that
+  // never landed a trailer (`complete` → merged), abandon it (`cancel` → cancelled),
+  // or walk either back (`reopen`). Each stamps `decision_source` with the caller's
+  // `source` (operator default, or supervisor). Reconciled rows are never touched.
+  .post(
+    "/:id/complete",
+    async ({ params, body, set }) => {
+      const row = await completeTask(Number(params.id), decisionSource(body));
+      if (!row) set.status = 404;
+      return row ?? { error: "not found" };
+    },
+    { body: sourceBody },
+  )
+  .post(
+    "/:id/cancel",
+    async ({ params, body, set }) => {
+      const row = await cancelTask(Number(params.id), decisionSource(body));
+      if (!row) set.status = 404;
+      return row ?? { error: "not found" };
+    },
+    { body: sourceBody },
+  )
   .post("/:id/reopen", async ({ params, set }) => {
     const row = await reopenTask(Number(params.id));
     if (!row) set.status = 404;
     return row ?? { error: "not found" };
   });
 
-// Phases carry the same operator complete/reopen on top of CRUD — the grain at
-// which a squash-dropped trailer is most often patched up by hand.
+// Phases carry the same complete/reopen on top of CRUD — the grain at which a
+// squash-dropped trailer is most often patched up by hand.
 const phasesGroup = resource("phases", phaseRepo, models.phases)
-  .post("/:id/complete", async ({ params, set }) => {
-    const row = await completePhase(Number(params.id));
-    if (!row) set.status = 404;
-    return row ?? { error: "not found" };
-  })
+  .post(
+    "/:id/complete",
+    async ({ params, body, set }) => {
+      const row = await completePhase(Number(params.id), decisionSource(body));
+      if (!row) set.status = 404;
+      return row ?? { error: "not found" };
+    },
+    { body: sourceBody },
+  )
   .post("/:id/reopen", async ({ params, set }) => {
     const row = await reopenPhase(Number(params.id));
     if (!row) set.status = 404;

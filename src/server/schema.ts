@@ -2,7 +2,7 @@ import { boolean, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core"
 import {
   type AgentState,
   type CheckRollupState,
-  type DoneSource,
+  type DecisionSource,
   type MergeableState,
   PhaseStatus,
   type PrState,
@@ -51,11 +51,11 @@ export const tasks = pgTable("tasks", {
   starred: boolean("starred").notNull().default(false),
   // Progress is set during reconciliation when a PR merges, never self-reported.
   status: text("status").$type<TaskStatus>().notNull().default(TaskStatus.Pending),
-  // Provenance of a completion: `reconciled` (a trailer landed on `main`) vs
-  // `operator` (asserted by hand for work that never produced one). Null until
-  // merged. Kept apart from `status` so the rollups stay one count — see
-  // docs/completion-model.md.
-  doneSource: text("done_source").$type<DoneSource>(),
+  // Who made the latest major decision on this task — `reconciled` (a trailer
+  // landed on `main`), `operator` (closed/reopened by hand), or `supervisor`
+  // (delegated to the supervisor agent). Null until a major decision is recorded.
+  // Kept apart from `status` (the what vs the who) — see docs/completion-model.md.
+  decisionSource: text("decision_source").$type<DecisionSource>(),
   // Runtime session fields (a session is attached to the task it was dispatched
   // for; sessions can also exist independently in the sessions table).
   sessionUrl: text("session_url"),
@@ -71,9 +71,10 @@ export const phases = pgTable("phases", {
     .references(() => tasks.id),
   name: text("name").notNull(),
   status: text("status").$type<PhaseStatus>().notNull().default(PhaseStatus.Todo),
-  // Provenance of completion (`reconciled` | `operator`), null while todo — the
-  // phase-grain twin of tasks.doneSource. See docs/completion-model.md.
-  doneSource: text("done_source").$type<DoneSource>(),
+  // Who completed this phase (`reconciled` | `operator` | `supervisor`), null
+  // while todo — the phase-grain twin of tasks.decisionSource. See
+  // docs/completion-model.md.
+  decisionSource: text("decision_source").$type<DecisionSource>(),
   position: integer("position").notNull().default(0),
   ...timestamps,
 });

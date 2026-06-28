@@ -94,46 +94,78 @@ distinction lives in the status enum itself, so no new column.
   `pull_requests` row deliberately keeps "observed cache" and "ledger" columns
   apart). And the reconciler and the operator would contend over one column.
 
-## The decision: a provenance field (option A)
+## The decision: a provenance field (option A), generalised to `decision_source`
 
-We add a nullable **`done_source`** column to `phases` and `tasks`, typed to a
-`DoneSource` enum of `reconciled | operator`. `status` stays the single
-todo/done axis; `done_source` only labels *how* a completed row got there.
+We add a nullable **`decision_source`** column to `phases` and `tasks`. It records
+*who made the latest major decision* on the row, decoupled from *what* the
+decision was (which is `status`). **`status` is the what; `decision_source` is the
+who.** Its values:
+
+- **`reconciled`** — the call came from `main`: the reconciler saw a
+  `PM-Phase:`/`PM-Task:` trailer land. Written only by the reconciler.
+- **`operator`** — you made the call by hand in the UI.
+- **`supervisor`** — you delegated the call to the supervisor agent and it acted
+  through the API on your behalf.
+
+`null` until a major decision is recorded. (This started as a two-value
+`done_source` of `reconciled | operator`; broadening it to "who made *any* major
+call" — and splitting by-hand from delegated — is the same field doing more, not a
+new mechanism.)
 
 This is the smallest change that respects **both** invariants the system cares
 about at once:
 
 - *`main` is the source of truth for reconciled progress* — the reconciler
-  remains the only thing that writes `done_source = reconciled`. Retro-trailer
+  remains the only thing that writes `decision_source = reconciled`. Retro-trailer
   commits (B) keep this but break the next invariant; operator-done status (C)
   corrupts the done axis the rollups read.
-- *the supervisor never writes work to `main`* — operator completion is recorded
-  beside the plan, in the DB, not laundered into commit history. Retro-trailers
-  (B) violate exactly this boundary.
+- *the supervisor never writes work to `main`* — an override completion is
+  recorded beside the plan, in the DB, not laundered into commit history.
+  Retro-trailers (B) violate exactly this boundary.
 
-Provenance sits beside both: reconciled progress is still earned on `main`, and
-operator assertions are first-class but visibly labelled as assertions, never
-disguised as landed work.
+Provenance sits beside both: reconciled progress is still earned on `main`, and an
+override (operator or supervisor) call is first-class but visibly labelled as
+such, never disguised as landed work.
+
+### The decisions it records
+
+Two new task lifecycle facts come with it:
+
+- **Completion** — close work that genuinely finished but never produced a trailer
+  (a squash dropped it, out-of-band work, a phase-less task). Sets the phase/task
+  to done/`merged`.
+- **Cancellation (won't-do)** — a new terminal task status, **`cancelled`**:
+  closed *without* being finished. A cancelled task is archived (filed into the
+  book of work) and never counts toward progress — it's deliberately **not** a
+  `done` flavour, because calling abandoned work "done" would inflate the rollups.
+
+Both carry a `decision_source` saying who made the call.
 
 ### How it behaves
 
 - **Reconciler.** When it marks a phase/task done it sets
-  `done_source = reconciled`. It may *upgrade* an operator-asserted row if a real
-  trailer later lands (truth supersedes assertion), but it never reopens or
-  overwrites operator work in the other direction. Still idempotent.
-- **Operator completion.** A dedicated action — `POST /phases/:id/complete` and
-  `POST /tasks/:id/complete` — sets `status = done`/`merged` with
-  `done_source = operator`. Going through an explicit endpoint (rather than a raw
+  `decision_source = reconciled`. It may *upgrade* an override row (operator or
+  supervisor) if a real trailer later lands (truth supersedes assertion), but it
+  never reopens or overwrites an override call in the other direction. Still
+  idempotent.
+- **Override completion.** Dedicated actions — `POST /phases/:id/complete`,
+  `POST /tasks/:id/complete` — set the row done/`merged` with the caller's
+  `decision_source` (`operator` by default, or `supervisor` via a `{ "source":
+  "supervisor" }` body). Going through an explicit endpoint (rather than a raw
   `status` PATCH) keeps the "don't fake progress" rule intact: the provenance is
-  stamped server-side, so an operator-asserted completion is always honestly
-  labelled and can never masquerade as reconciled.
-- **Reopen.** `POST /phases/:id/reopen` clears an *operator*-asserted completion
-  back to todo. Reconciled completions are not reopened this way — they reflect
-  `main`, so they're undone by changing `main`, not by a button.
+  stamped server-side, so a by-hand or delegated call is always honestly labelled
+  and can never masquerade as reconciled.
+- **Cancellation.** `POST /tasks/:id/cancel` (same `source` body) sets
+  `status = cancelled` + `archived_at`, recording who cancelled it.
+- **Reopen.** `POST /phases/:id/reopen` and `POST /tasks/:id/reopen` clear an
+  *override* call (done-by-hand or cancelled) back to todo/pending (un-archiving a
+  cancel). Reconciled completions are not reopened this way — they reflect `main`,
+  so they're undone by changing `main`, not by a button.
 - **Rollups.** Unchanged: `rollup()` still counts `status === done`, so an
-  operator-completed phase contributes to progress exactly like a reconciled one.
-  Only the *rendering* distinguishes them (a "by hand" marker + tooltip), so the
-  operator can always tell the asserted rows from the earned ones at a glance.
+  override-completed phase contributes to progress exactly like a reconciled one.
+  Only the *rendering* distinguishes them (a per-source glyph + tooltip — green ✓
+  reconciled, orange ✋ by hand, violet 🤖 via supervisor), so the operator can
+  always tell the asserted rows from the earned ones at a glance.
 
 ### Why not the others, in one line each
 
@@ -142,5 +174,7 @@ disguised as landed work.
   trail.
 - **Operator-done status (C):** splits "done" into two enum values every consumer
   must remember to treat as done — silent-undercount bugs waiting to happen, and
-  it conflates *is-it-done* with *who-said-so*.
+  it conflates *is-it-done* with *who-said-so*. (`cancelled` above is **not** this
+  mistake: it's a *non-done* terminal state, so `rollup()`'s `=== done` check
+  stays correct without change.)
 

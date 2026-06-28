@@ -17,7 +17,7 @@ import type { Phase, Session, Task } from "../server/schema.ts";
 import {
   AgentState,
   CheckRollupState,
-  DoneSource,
+  DecisionSource,
   MergeableState,
   PhaseStatus,
   SessionKind,
@@ -35,6 +35,7 @@ export const STATUS_COLOR: Record<TaskStatus, string> = {
   [TaskStatus.Pending]: "gray",
   [TaskStatus.Dispatched]: "blue",
   [TaskStatus.Merged]: "green",
+  [TaskStatus.Cancelled]: "red",
 };
 
 // "Try Again" is the user-facing label for a session parked waiting to resume.
@@ -110,21 +111,35 @@ export function ProgressPill({ phases }: { phases: Phase[] }) {
   );
 }
 
-// A phase's completion has two flavours, kept visually distinct so an operator can
-// always tell work that landed on `main` from one they asserted by hand: a
-// reconciled phase is a solid green ✓; an operator-asserted one is an orange ✋
-// ("by hand"). Todo is a gray dot. See docs/completion-model.md.
+// How each decision source renders — a colour and a short "by …" label, so an
+// operator can always tell a reconciled call (earned off `main`) from a by-hand one
+// from a delegated one. `null` covers a row with no recorded decision yet.
+const SOURCE_DESC: Record<DecisionSource, { color: string; by: string }> = {
+  [DecisionSource.Reconciled]: { color: "green", by: "reconciled from main" },
+  [DecisionSource.Operator]: { color: "orange", by: "by hand" },
+  [DecisionSource.Supervisor]: { color: "violet", by: "via supervisor" },
+};
+
+// A phase's completion, kept visually distinct by who made the call: reconciled is a
+// solid green ✓; an operator-asserted one an orange ✋ ("by hand"); a supervisor one
+// a violet 🤖. Todo is a gray dot. See docs/completion-model.md.
 function phaseGlyph(p: Phase): { color: string; mark: string; title: string } {
   if (p.status !== PhaseStatus.Done) return { color: "gray", mark: "·", title: PhaseStatus.Todo };
-  if (p.doneSource === DoneSource.Operator)
+  if (p.decisionSource === DecisionSource.Operator)
     return { color: "orange", mark: "✋", title: "marked done by hand — not reconciled from main" };
+  if (p.decisionSource === DecisionSource.Supervisor)
+    return {
+      color: "violet",
+      mark: "🤖",
+      title: "marked done via the supervisor — not reconciled",
+    };
   return { color: "green", mark: "✓", title: "reconciled from a trailer on main" };
 }
 
-/** The plan's phase checklist. When `interactive`, each row carries the
- *  operator-completion controls (the non-reconciled path): mark a todo phase done by
- *  hand, or reopen one you asserted. Reconciled phases are locked — they reflect
- *  `main`, so they're undone by changing `main`, not a button. */
+/** The plan's phase checklist. When `interactive`, each row carries the override
+ *  controls (the non-reconciled path): mark a todo phase done by hand, or reopen one
+ *  an override completed. Reconciled phases are locked — they reflect `main`, so
+ *  they're undone by changing `main`, not a button. */
 export function PhaseList({
   phases,
   interactive = false,
@@ -135,7 +150,9 @@ export function PhaseList({
       {phases.map((p) => {
         const g = phaseGlyph(p);
         const done = p.status === PhaseStatus.Done;
-        const operatorDone = done && p.doneSource === DoneSource.Operator;
+        // An override (operator/supervisor) completion can be reopened; a reconciled
+        // one is locked.
+        const overrideDone = done && p.decisionSource !== DecisionSource.Reconciled;
         return (
           <List.Item
             key={p.id}
@@ -168,7 +185,7 @@ export function PhaseList({
                   </Text>
                 </UnstyledButton>
               )}
-              {interactive && operatorDone && (
+              {interactive && overrideDone && (
                 <UnstyledButton
                   onClick={() => reopenPhase(p.id)}
                   title="Reopen — this was marked done by hand"
@@ -186,44 +203,65 @@ export function PhaseList({
   );
 }
 
-/** Task-level operator completion — the won't-do / out-of-band / phase-less case. A
- *  merged task shows whether it was reconciled or asserted; an operator-merged one
- *  can be reopened. Pending tasks get a "Mark done" that closes the task (and its
- *  phases) by hand. Reconciled completions are read-only here. */
+/** Task-level override decisions — the won't-do / out-of-band / phase-less cases. A
+ *  task closed by an override (merged or cancelled) shows who made the call and can be
+ *  reopened; a reconciled-merged task is read-only (it belongs to `main`). A live
+ *  task gets "Mark done" (close as finished) and "Won't do" (cancel). */
 export function CompleteTaskControl({ task }: { task: Task }) {
-  const { completeTask, reopenTask } = useStore();
-  if (task.status === TaskStatus.Merged) {
-    if (task.doneSource === DoneSource.Operator) {
-      return (
-        <Group gap={6} wrap="nowrap">
-          <Badge
-            size="xs"
-            color="orange"
-            variant="light"
-            title="Closed by hand — not reconciled from main"
-          >
-            done by hand
-          </Badge>
-          <UnstyledButton onClick={() => reopenTask(task.id)} title="Reopen this task">
-            <Text size="xs" c="dimmed">
-              reopen
-            </Text>
-          </UnstyledButton>
-        </Group>
-      );
-    }
-    return null; // reconciled-merged: owned by main, nothing to do here
+  const { completeTask, cancelTask, reopenTask } = useStore();
+  const source = task.decisionSource;
+
+  // Terminal by an override → a provenance badge + reopen. Reconciled-merged is
+  // owned by `main`, so nothing to do here.
+  if (task.status === TaskStatus.Merged || task.status === TaskStatus.Cancelled) {
+    if (!source || source === DecisionSource.Reconciled) return null;
+    const desc = SOURCE_DESC[source];
+    const cancelled = task.status === TaskStatus.Cancelled;
+    const verb = cancelled ? "won't do" : "done"; // lint-allow-string: badge label, not the status value
+    return (
+      <Group gap={6} wrap="nowrap">
+        <Badge
+          size="xs"
+          color={cancelled ? "red" : desc.color}
+          variant="light"
+          title={`${cancelled ? "Cancelled" : "Closed"} ${desc.by} — not reconciled from main`}
+        >
+          {verb} · {desc.by}
+        </Badge>
+        <UnstyledButton onClick={() => reopenTask(task.id)} title="Reopen this task">
+          <Text size="xs" c="dimmed">
+            reopen
+          </Text>
+        </UnstyledButton>
+      </Group>
+    );
   }
+
+  // Live task → close it by hand, as finished or as won't-do.
   return (
-    <Button
-      size="compact-xs"
-      variant="subtle"
-      color="orange"
-      title="Mark this task done by hand — for work that never landed a trailer on main"
-      onClick={() => completeTask(task.id)}
-    >
-      Mark done
-    </Button>
+    <Group gap="xs" wrap="nowrap">
+      <Button
+        size="compact-xs"
+        variant="subtle"
+        color="orange"
+        title="Mark this task done by hand — for work that never landed a trailer on main"
+        onClick={() => completeTask(task.id)}
+      >
+        Mark done
+      </Button>
+      <Button
+        size="compact-xs"
+        variant="subtle"
+        color="red"
+        title="Close as won't-do — terminal, but not counted as done"
+        onClick={() => {
+          if (window.confirm("Close this task as won't-do? It moves to the archive as cancelled."))
+            cancelTask(task.id);
+        }}
+      >
+        Won't do
+      </Button>
+    </Group>
   );
 }
 
