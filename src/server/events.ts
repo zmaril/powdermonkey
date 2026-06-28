@@ -5,21 +5,23 @@
 // the whole point: the watcher knows GitHub, the handlers know tasks/sessions,
 // and neither side imports the other.
 
+import type { CheckRollupState, MergeableState, PrState } from "../shared/types.ts";
+
 /** A pull request a cloud worker opened for a task (branch `pm/task-<id>-<slug>`),
  *  reduced to the fields the supervisor reacts to. */
 export type CloudPr = {
   taskId: number;
   number: number;
   url: string;
-  state: "OPEN" | "CLOSED" | "MERGED";
+  state: PrState;
   isDraft: boolean;
   merged: boolean;
   /** statusCheckRollup state (SUCCESS / FAILURE / PENDING / …), or null when the
    *  head commit has no checks configured. */
-  checks: string | null;
+  checks: CheckRollupState | null;
   /** Whether GitHub can merge this PR cleanly: MERGEABLE / CONFLICTING / UNKNOWN
    *  (GitHub computes it lazily, so UNKNOWN just means "not yet"), or null. */
-  mergeable: string | null;
+  mergeable: MergeableState | null;
   headRefName: string;
   updatedAt: string;
 };

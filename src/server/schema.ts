@@ -1,5 +1,13 @@
 import { boolean, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
-import { PhaseStatus, SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
+import {
+  type CheckRollupState,
+  type MergeableState,
+  PhaseStatus,
+  type PrState,
+  SessionKind,
+  SessionState,
+  TaskStatus,
+} from "../shared/types.ts";
 
 // The plan vocabulary, fully normalized: every entity is its own relation with an
 // auto-assigned integer id and an `archived_at` soft-delete column (null = live).
@@ -126,13 +134,13 @@ export const pullRequests = pgTable("pull_requests", {
   // on the mismatch.
   taskId: integer("task_id").notNull(),
   url: text("url").notNull(),
-  state: text("state").$type<"OPEN" | "CLOSED" | "MERGED">().notNull(),
+  state: text("state").$type<PrState>().notNull(),
   isDraft: boolean("is_draft").notNull().default(false),
   merged: boolean("merged").notNull().default(false),
   // statusCheckRollup state (SUCCESS / FAILURE / PENDING / …), null when none.
-  checks: text("checks"),
+  checks: text("checks").$type<CheckRollupState>(),
   // MERGEABLE / CONFLICTING / UNKNOWN, or null — GitHub computes it lazily.
-  mergeable: text("mergeable"),
+  mergeable: text("mergeable").$type<MergeableState>(),
   headRefName: text("head_ref_name").notNull(),
   // GitHub's own PR updatedAt (ISO string). Named apart from the row's `updatedAt`
   // below, which tracks when *we* last wrote the row.

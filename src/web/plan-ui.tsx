@@ -11,7 +11,14 @@ import {
 } from "@mantine/core";
 import type { CloudPr } from "../server/events.ts";
 import type { Phase, Session, Task } from "../server/schema.ts";
-import { PhaseStatus, SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
+import {
+  CheckRollupState,
+  MergeableState,
+  PhaseStatus,
+  SessionKind,
+  SessionState,
+  TaskStatus,
+} from "../shared/types.ts";
 import { rollup } from "./progress.ts";
 import { useStore } from "./store.ts";
 
@@ -278,12 +285,12 @@ export function LaunchActions({ taskId }: { taskId: number }) {
 }
 
 // GitHub's statusCheckRollup states → a compact CI chip.
-const CHECK_BADGE: Record<string, { label: string; color: string } | undefined> = {
-  SUCCESS: { label: "CI ✓", color: "green" },
-  FAILURE: { label: "CI ✗", color: "red" },
-  ERROR: { label: "CI ✗", color: "red" },
-  PENDING: { label: "CI …", color: "yellow" },
-  EXPECTED: { label: "CI …", color: "yellow" },
+const CHECK_BADGE: Record<CheckRollupState, { label: string; color: string }> = {
+  [CheckRollupState.Success]: { label: "CI ✓", color: "green" },
+  [CheckRollupState.Failure]: { label: "CI ✗", color: "red" },
+  [CheckRollupState.Error]: { label: "CI ✗", color: "red" },
+  [CheckRollupState.Pending]: { label: "CI …", color: "yellow" },
+  [CheckRollupState.Expected]: { label: "CI …", color: "yellow" },
 };
 
 /** Live PR status chips for a task with a tracked PR — draft, merge conflicts, CI.
@@ -291,7 +298,7 @@ const CHECK_BADGE: Record<string, { label: string; color: string } | undefined> 
  *  interval (~10s). Renders nothing when there's nothing noteworthy to show. */
 export function PrStatus({ pr }: { pr: CloudPr }) {
   const ci = pr.checks ? CHECK_BADGE[pr.checks] : undefined;
-  const conflicting = pr.mergeable === "CONFLICTING";
+  const conflicting = pr.mergeable === MergeableState.Conflicting;
   if (!pr.isDraft && !conflicting && !ci) return null;
   return (
     <Group gap={4} wrap="nowrap">
