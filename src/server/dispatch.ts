@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { pullMain } from "./git.ts";
 import { notifyChange } from "./realtime.ts";
@@ -88,6 +89,10 @@ export function buildTaskPrompt(briefs: TaskBrief[]): { prompt: string; trailers
     "Follow the `powdermonkey` skill. As you finish each phase, add its trailer to",
     "the commit that completes it (this is how progress — and this PR — is tied back",
     "to the task, so don't skip them; they're read off the commits once they land on main).",
+    "",
+    "Ask any questions you have, at any time — if something's ambiguous or you hit a",
+    "decision worth the operator's call, post your question on the PR thread rather than",
+    "guessing. The operator watches the thread and will reply there.",
   ].join("\n");
   return { prompt, trailers };
 }
@@ -209,12 +214,17 @@ export async function dispatchTask(taskIds: number | number[]): Promise<Dispatch
   // each task surfaces the shared cloud run. Each task is also marked dispatched.
   const [session] = await db
     .insert(sessions)
-    .values({ kind: "remote", state: "running", url: sessionUrl })
+    .values({ kind: SessionKind.Remote, state: SessionState.Running, url: sessionUrl })
     .returning();
   await linkSessionTasks(session.id, ids);
   await db
     .update(tasks)
-    .set({ sessionUrl, status: "dispatched", sessionState: "running", updatedAt: new Date() })
+    .set({
+      sessionUrl,
+      status: TaskStatus.Dispatched,
+      sessionState: SessionState.Running,
+      updatedAt: new Date(),
+    })
     .where(inArray(tasks.id, ids));
 
   notifyChange();

@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
+import { SessionKind, SessionState } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { lsRemoteHeads } from "./git.ts";
 import { notifyChange } from "./realtime.ts";
@@ -59,7 +60,7 @@ export async function teleportTask(taskId: number): Promise<TeleportResult> {
     .where(
       and(
         eq(sessionTasks.taskId, taskId),
-        eq(sessions.kind, "remote"),
+        eq(sessions.kind, SessionKind.Remote),
         isNull(sessions.archivedAt),
       ),
     );
@@ -96,7 +97,7 @@ export async function teleportTask(taskId: number): Promise<TeleportResult> {
   if (remote) {
     await db
       .update(sessions)
-      .set({ state: "idle", archivedAt: new Date(), updatedAt: new Date() })
+      .set({ state: SessionState.Idle, archivedAt: new Date(), updatedAt: new Date() })
       .where(eq(sessions.id, remote.id));
   }
   await db

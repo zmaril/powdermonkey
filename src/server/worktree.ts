@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { eq, inArray } from "drizzle-orm";
+import { SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { loadTaskPrompt } from "./dispatch.ts";
 import { worktreeAdd, worktreeAddRemote, worktreeRemove } from "./git.ts";
@@ -93,12 +94,12 @@ export async function startLocalSession(
   // task is marked dispatched so the whole batch moves to Active together.
   const [session] = await db
     .insert(sessions)
-    .values({ kind: "local", state: "running", branch, worktreePath })
+    .values({ kind: SessionKind.Local, state: SessionState.Running, branch, worktreePath })
     .returning();
   await linkSessionTasks(session.id, ids);
   await db
     .update(tasks)
-    .set({ status: "dispatched", updatedAt: new Date() })
+    .set({ status: TaskStatus.Dispatched, updatedAt: new Date() })
     .where(inArray(tasks.id, ids));
 
   // Stash the prompt where the startup command can reach it, then bring up the
@@ -140,7 +141,7 @@ export async function landSession(sessionId: number): Promise<LandResult> {
 
   const [updated] = await db
     .update(sessions)
-    .set({ state: "idle", archivedAt: new Date(), updatedAt: new Date() })
+    .set({ state: SessionState.Idle, archivedAt: new Date(), updatedAt: new Date() })
     .where(eq(sessions.id, sessionId))
     .returning();
   notifyChange();
@@ -164,7 +165,7 @@ export async function stopSession(sessionId: number): Promise<StopResult> {
   const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId));
   if (!session) return { ok: false, error: `unknown session "${sessionId}"` };
 
-  if (session.kind === "local") {
+  if (session.kind === SessionKind.Local) {
     // Kill the live agent first, then drop its worktree out from under it. The
     // force-remove can still fail (e.g. the path is already gone); that's logged
     // but never blocks the abort — the point is to stop the agent, not to garbage
@@ -178,7 +179,7 @@ export async function stopSession(sessionId: number): Promise<StopResult> {
 
   const [updated] = await db
     .update(sessions)
-    .set({ state: "stopped", archivedAt: new Date(), updatedAt: new Date() })
+    .set({ state: SessionState.Stopped, archivedAt: new Date(), updatedAt: new Date() })
     .where(eq(sessions.id, sessionId))
     .returning();
 
@@ -190,7 +191,7 @@ export async function stopSession(sessionId: number): Promise<StopResult> {
     await db
       .update(tasks)
       .set({
-        status: "pending",
+        status: TaskStatus.Pending,
         sessionState: null,
         sessionUrl: null,
         updatedAt: new Date(),

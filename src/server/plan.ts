@@ -1,5 +1,6 @@
 import { type Static, Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
+import { PhaseStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { notifyChange } from "./realtime.ts";
 import { goals, milestones, phases, tasks } from "./schema.ts";
@@ -14,7 +15,9 @@ import { goals, milestones, phases, tasks } from "./schema.ts";
 
 const phaseInput = Type.Object({
   name: Type.String({ minLength: 1 }),
-  status: Type.Optional(Type.Union([Type.Literal("todo"), Type.Literal("done")])),
+  status: Type.Optional(
+    Type.Union([Type.Literal(PhaseStatus.Todo), Type.Literal(PhaseStatus.Done)]),
+  ),
 });
 
 const taskInput = Type.Object({
@@ -74,7 +77,7 @@ export async function loadPlan(plan: Plan): Promise<LoadResult> {
               taskPhases.map((p, pi) => ({
                 taskId: t.id,
                 name: p.name,
-                status: p.status ?? ("todo" as const),
+                status: p.status ?? PhaseStatus.Todo,
                 position: pi,
               })),
             );

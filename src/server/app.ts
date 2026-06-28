@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { TSchema } from "@sinclair/typebox";
 import { Elysia, t } from "elysia";
+import { P, match } from "ts-pattern";
 import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
@@ -195,18 +196,31 @@ export const app = new Elysia()
           ws.raw.send(bytes);
         } catch {}
       };
+      // Spawn a fresh shell, register it, and tear the socket down when it exits.
+      const spawnFresh = (cwd: string, startup?: string) => {
+        const proc = spawnShell(cwd, send, startup);
+        ptys.set(ws.raw, { kind: "fresh", proc });
+        ptyExited(proc).then(() => {
+          try {
+            ws.close();
+          } catch {}
+          ptys.delete(ws.raw);
+        });
+      };
 
       // Which durable session to attach to: an explicit ?session=<id>, or — when
       // neither session nor cwd is given — the supervisor's own reserved session.
-      const q = ws.data.query.cwd;
-      let sessionId: number | null = null;
-      if (ws.data.query.session) {
-        const n = Number(ws.data.query.session);
-        if (!Number.isNaN(n)) sessionId = n;
-      } else if (!q) {
-        startSupervisorPty(); // ensure the supervisor's tmux session is live first
-        sessionId = SUPERVISOR_ID;
-      }
+      const { cwd: q, session } = ws.data.query;
+      const sessionId = match({ session, q })
+        .with({ session: P.string.minLength(1) }, ({ session }) => {
+          const n = Number(session);
+          return Number.isNaN(n) ? null : n;
+        })
+        .with({ q: P.union(undefined, "") }, () => {
+          startSupervisorPty(); // ensure the supervisor's tmux session is live first
+          return SUPERVISOR_ID;
+        })
+        .otherwise(() => null);
 
       if (sessionId != null) {
         const detach = attachSessionPty(sessionId, send);
@@ -230,41 +244,38 @@ export const app = new Elysia()
             ),
           );
         }
-        const proc = spawnShell(cwd, send, isSupervisor ? undefined : "");
-        ptys.set(ws.raw, { kind: "fresh", proc });
-        ptyExited(proc).then(() => {
-          try {
-            ws.close();
-          } catch {}
-          ptys.delete(ws.raw);
-        });
+        spawnFresh(cwd, isSupervisor ? undefined : "");
         return;
       }
 
       // ?cwd=<path> → a plain fresh worktree shell.
-      const cwd = q || process.env.PM_REPO_DIR || process.cwd();
-      const proc = spawnShell(cwd, send, "");
-      ptys.set(ws.raw, { kind: "fresh", proc });
-      ptyExited(proc).then(() => {
-        try {
-          ws.close();
-        } catch {}
-        ptys.delete(ws.raw);
-      });
+      spawnFresh(q || process.env.PM_REPO_DIR || process.cwd(), "");
     },
     message(ws, msg) {
       const handle = ptys.get(ws.raw);
       if (!handle) return;
-      if (handle.kind === "attach") {
-        if (msg.type === "resize" && msg.cols && msg.rows)
-          resizeSessionPty(handle.sessionId, msg.cols, msg.rows);
-        else if (msg.type === "input" && msg.data != null)
-          writeSessionPty(handle.sessionId, msg.data);
-      } else {
-        if (msg.type === "resize" && msg.cols && msg.rows)
-          resizePty(handle.proc, msg.cols, msg.rows);
-        else if (msg.type === "input" && msg.data != null) writePty(handle.proc, msg.data);
-      }
+      // The handle is one of two shapes (attach to a shared session PTY, or own a
+      // fresh shell); pick the matching resize/write pair, then apply it once.
+      const [resize, write] = match(handle)
+        .with(
+          { kind: "attach" },
+          (h) =>
+            [
+              (c: number, r: number) => resizeSessionPty(h.sessionId, c, r),
+              (d: string) => writeSessionPty(h.sessionId, d),
+            ] as const,
+        )
+        .with(
+          { kind: "fresh" },
+          (h) =>
+            [
+              (c: number, r: number) => resizePty(h.proc, c, r),
+              (d: string) => writePty(h.proc, d),
+            ] as const,
+        )
+        .exhaustive();
+      if (msg.type === "resize" && msg.cols && msg.rows) resize(msg.cols, msg.rows);
+      else if (msg.type === "input" && msg.data != null) write(msg.data);
     },
     close(ws) {
       const handle = ptys.get(ws.raw);
