@@ -1,6 +1,5 @@
 import { Button, Code, CopyButton, Divider, Group, Stack, Text } from "@mantine/core";
 import { useNotificationPermission } from "./notifications.ts";
-import { useStore } from "./store.ts";
 
 // One command + a copy button. The shell can't reach into the operator's terminal
 // to attach for them — all the UI can do is hand over the exact line to paste.
@@ -64,11 +63,10 @@ function NotifyControl() {
   );
 }
 
-// The Settings pane: cross-cutting toggles and supervisor actions that aren't tied
-// to a particular task — desktop notifications, the tmux "attach" command, and a
-// manual reconcile. Opened from the top bar like any other pane.
+// The Settings pane: cross-cutting controls that aren't tied to a particular task —
+// desktop notifications and the tmux "attach" command. Opened from the top bar like
+// any other pane.
 export function SettingsPane() {
-  const reconcile = useStore((s) => s.reconcile);
   return (
     <div
       style={{ height: "100%", background: "#1a1b1e", display: "flex", flexDirection: "column" }}
@@ -96,22 +94,6 @@ export function SettingsPane() {
           </Text>
           <CommandRow cmd="powdermonkey attach" hint="installed globally (npm i -g powdermonkey)" />
           <CommandRow cmd="bun run attach" hint="from a checkout" />
-        </Stack>
-        <Divider />
-        <Stack gap={6}>
-          <Text size="sm" fw={600}>
-            Maintenance
-          </Text>
-          <Text size="xs" c="dimmed">
-            Reconcile scans <Code style={{ fontSize: 11 }}>main</Code> now for{" "}
-            <Code style={{ fontSize: 11 }}>PM-Phase:</Code> trailers and marks finished phases done.
-            It also runs on a loop — this is just the manual nudge.
-          </Text>
-          <Group>
-            <Button size="compact-sm" variant="default" onClick={reconcile}>
-              Reconcile now
-            </Button>
-          </Group>
         </Stack>
       </Stack>
     </div>

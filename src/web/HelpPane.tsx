@@ -8,7 +8,7 @@ const PANES: { name: string; blurb: string }[] = [
   { name: "Shell", blurb: "A live terminal — the supervisor, or attached to a session's agent." },
   { name: "Browser", blurb: "Load a dev server / preview in an iframe without leaving the app." },
   { name: "Scratch", blurb: "A notepad the supervisor reads when you say “check @notes”." },
-  { name: "Settings", blurb: "Desktop notifications, the tmux attach command, manual reconcile." },
+  { name: "Settings", blurb: "Desktop notifications and the tmux attach command." },
   { name: "About", blurb: "What PowderMonkey is." },
 ];
 
