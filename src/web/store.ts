@@ -42,8 +42,13 @@ type State = {
   // fresh pane opens where you left off. Updated whenever a pane navigates.
   lastBrowserUrl: string;
   rememberBrowserUrl: (url: string) => void;
-  // Bumped each time the operator asks to open the notepad; App watches it.
-  notesReq: number;
+  // Latest request to open (or focus) a singleton pane — the plan views and the
+  // single-instance tool panes (scratch, settings, about, help). App focuses it if
+  // it's already open, else adds it to the active group. `n` makes repeats distinct
+  // so the effect re-fires. (Shell and Browser are multi-instance, so they keep
+  // their own request signals.)
+  paneReq: { id: string; n: number } | null;
+  openPane: (id: string) => void;
   // In-app activity indicators, keyed by dockview panel id (e.g. "active"). True
   // means the pane has changes you haven't seen because its tab wasn't on screen;
   // the tab shows an ambient dot until viewed. Transient — never persisted.
@@ -62,7 +67,6 @@ type State = {
   openTerminal: (cwd?: string) => void;
   openSessionTerminal: (sessionId: number, title: string) => void;
   openBrowser: (url?: string) => void;
-  openNotes: () => void;
   loadSettings: () => Promise<void>;
   openReview: (number: number, title: string) => void;
   closeReview: () => void;
@@ -160,7 +164,8 @@ export const useStore = create<State>()(
       browserReq: null,
       lastBrowserUrl: "http://localhost:3000",
       rememberBrowserUrl: (url) => set({ lastBrowserUrl: url }),
-      notesReq: 0,
+      paneReq: null,
+      openPane: (id) => set((s) => ({ paneReq: { id, n: (s.paneReq?.n ?? 0) + 1 } })),
       tabActivity: {},
       flagTab: (paneId) =>
         set((s) =>
@@ -199,7 +204,6 @@ export const useStore = create<State>()(
         set((s) => ({
           browserReq: { url: url ?? s.lastBrowserUrl, n: (s.browserReq?.n ?? 0) + 1 },
         })),
-      openNotes: () => set((s) => ({ notesReq: s.notesReq + 1 })),
       openReview: (number, title) => set({ review: { number, title } }),
       closeReview: () => set({ review: null }),
       loadSettings: async () => {
