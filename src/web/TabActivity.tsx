@@ -9,19 +9,26 @@ import { type ActivitySnapshot, paneActivity, snapshotActivity } from "./tab-act
 
 // The in-app activity layer: a dot on a dockview tab when its pane has changes you
 // haven't seen (its tab wasn't on screen). The cue clears the instant you look.
-
-// One injected stylesheet for the activity dot.
+//
+// This is deliberately the AMBIENT, glanceable layer, and distinct from the OS web
+// notifications (t39): those reach you when you're away from the app and demand a
+// click; this one only ever whispers from the tab bar while you're already here. So
+// it's a soft pulsing dot, not a hard blink or a count badge — present enough to
+// catch the eye in peripheral vision, quiet enough to ignore until you choose to look.
 const DOT_STYLE_ID = "pm-tab-activity-style";
 function ensureDotStyle(): void {
   if (typeof document === "undefined" || document.getElementById(DOT_STYLE_ID)) return;
   const el = document.createElement("style");
   el.id = DOT_STYLE_ID;
   el.textContent = `
+@keyframes pm-tab-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.78); } }
 .pm-tab-dot {
   width: 7px; height: 7px; border-radius: 50%;
-  background: #4dabf7;
+  background: #4dabf7; box-shadow: 0 0 4px #4dabf7;
   margin-right: 6px; flex: 0 0 auto;
-}`;
+  animation: pm-tab-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) { .pm-tab-dot { animation: none; } }`;
   document.head.appendChild(el);
 }
 
