@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
+import { MIGRATIONS_DIR } from "./paths.ts";
 import * as schema from "./schema.ts";
 import { acquireWriterLock } from "./writer-lock.ts";
 
@@ -28,6 +29,8 @@ let migrated = false;
 /** Apply migrations once at boot. Safe to call repeatedly. */
 export async function ready(): Promise<void> {
   if (migrated) return;
-  await migrate(db, { migrationsFolder: "drizzle" });
+  // Resolved against the package, not the cwd: a global install supervises a
+  // foreign project, where a "drizzle" relative path wouldn't exist.
+  await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   migrated = true;
 }

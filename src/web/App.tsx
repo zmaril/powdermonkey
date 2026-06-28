@@ -302,11 +302,10 @@ function AttachButton() {
       <Popover.Dropdown>
         <Stack gap={8}>
           <Text size="xs" c="dimmed">
-            Open the tmux dashboard in your terminal — one pane per live session, plus the server.
-            Run from the repo:
+            Open the tmux dashboard in your terminal — one pane per live session, plus the server:
           </Text>
-          <CommandRow cmd="pm attach" hint="with bin/pm on your PATH" />
-          <CommandRow cmd="bun run attach" hint="from the repo root" />
+          <CommandRow cmd="pm attach" hint="installed globally (npm i -g powdermonkey)" />
+          <CommandRow cmd="bun run attach" hint="from a checkout" />
         </Stack>
       </Popover.Dropdown>
     </Popover>

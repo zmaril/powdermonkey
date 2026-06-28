@@ -14,6 +14,24 @@ One might reasonably suggest Linear or Jira or any other project management soft
 
 In short, there are many new and exciting software factories out there, but this one is mine. It is not meant to solve enterprise problems, just the problems of an enterprising young man. I've open sourced it because I think others might enjoy using it and have new ideas to add that would make it even better to use. PowderMonkey has solved a lot of my agent coordination isuses and I hope it can do the same for you!
 
+## Install
+
+```bash
+npm install -g powdermonkey   # puts `powdermonkey` (and the short alias `pm`) on PATH
+```
+
+Then, from inside any project you want to drive:
+
+```bash
+pm serve     # launch the supervisor (web app + API) in tmux for THIS project
+pm attach    # watch it all: one tmux pane per live session + the server
+```
+
+`pm` operates on the **current directory** — the project's plan store lives in its
+`data/` — while the code is served from wherever npm installed the package, so one
+global install drives any number of projects. Needs **bun** and **tmux** on PATH
+(macOS/Linux). To hack on PowderMonkey itself, run from a checkout instead (below).
+
 ## Run (dev)
 
 ```bash
@@ -28,12 +46,14 @@ terminal and auto-restarts (with backoff) if it crashes:
 
 ```bash
 bun run serve                              # launch (idempotent); prints attach cmd
-pm attach                                  # watch it all: one tmux pane per session
+bun run attach                             # watch it all: one tmux pane per session
 ```
 
-`pm attach` (or `bun run attach`) opens a tmux dashboard with one pane per live
-session plus the server console — the operator's view onto everything PowderMonkey
-is running. The web UI surfaces the same command behind its **Attach** button.
+`bun run serve` / `bun run attach` are the in-checkout equivalents of `pm serve` /
+`pm attach` (they run the same `bin/pm.ts`). Either way, attach opens a tmux
+dashboard with one pane per live session plus the server console — the operator's
+view onto everything PowderMonkey is running. The web UI surfaces the same command
+behind its **Attach** button.
 
 Load the seed plan (PowderMonkey's own roadmap) so the tree has something to show:
 

@@ -51,10 +51,10 @@ time you run it, so it always matches what's currently live — run it again aft
 starting or landing a session to re-tile. Pass a session name to skip the
 dashboard and attach to just that one.
 
-`pm` is `bin/pm` in the repo; symlink it onto your PATH once
-(`ln -s "$PWD/bin/pm" ~/.local/bin/pm`) and `pm attach` works from anywhere. It's
-a thin wrapper over the `tmux -L powdermonkey attach` commands below — reach for
-those directly whenever you want a specific target or flag.
+`pm` is PowderMonkey's CLI — `npm install -g powdermonkey` puts it on your PATH (in
+a checkout, `bun run attach` runs the same thing). It's a thin wrapper over the
+`tmux -L powdermonkey attach` commands below — reach for those directly whenever you
+want a specific target or flag.
 
 ## Key commands
 
