@@ -39,6 +39,11 @@ type State = {
   };
   loading: boolean;
   error: string | null;
+  // In-flight slow actions, keyed `${action}:${taskId}` (e.g. `dispatch:7`). A button
+  // reads its own key to show a spinner the instant it's clicked — dispatch/start-local
+  // spawn a PTY and take seconds before the task flips to active, so without this the
+  // operator gets no feedback. Never persisted; cleared in a finally so it can't stick.
+  pending: Record<string, boolean>;
   lastStart: StartInfo | null;
   // Latest request to open a shell panel. `session` attaches to a local session's
   // agent PTY; otherwise `cwd` opens a fresh shell ("" = repo dir). `key` dedupes
@@ -76,6 +81,33 @@ type State = {
   dismissStart: () => void;
   setError: (error: string | null) => void;
 };
+
+// A failing runtime route (dispatch/start-local/teleport) replies 400 with a JSON
+// body `{ ok: false, error }`, which Eden surfaces as `error.value`. Pull the human
+// message out of that body so the banner shows the reason instead of "[object Object]".
+function errMsg(error: { value?: unknown; status?: number }): string {
+  const v = error.value;
+  if (v && typeof v === "object" && "error" in v) return String((v as { error: unknown }).error);
+  return String(v ?? error.status);
+}
+
+// Run an action while flagging its `pending` key, so the button that triggered it can
+// show a spinner immediately and clear it once the work (including the refresh) settles.
+async function withPending(
+  set: (fn: (s: State) => Partial<State>) => void,
+  key: string,
+  fn: () => Promise<void>,
+): Promise<void> {
+  set((s) => ({ pending: { ...s.pending, [key]: true } }));
+  try {
+    await fn();
+  } finally {
+    set((s) => {
+      const { [key]: _drop, ...rest } = s.pending;
+      return { pending: rest };
+    });
+  }
+}
 
 // Single-flight: the scratchpad is exactly one note. The first caller that finds
 // no note creates it; concurrent or StrictMode double-calls reuse the same promise
@@ -122,6 +154,7 @@ export const useStore = create<State>()(
       archive: { goals: [], milestones: [], tasks: [], phases: [], sessions: [], sessionTasks: [] },
       loading: false,
       error: null,
+      pending: {},
       lastStart: null,
       shellReq: null,
       notesReq: 0,
@@ -241,34 +274,39 @@ export const useStore = create<State>()(
           await get().refresh(); // revert to server truth on failure
         }
       },
-      startLocal: async (taskId) => {
-        const { data, error } = await api.tasks({ id: taskId })["start-local"].post();
-        if (error) return void set({ error: String(error.value ?? error.status) });
-        if (data && "ok" in data && data.ok) {
-          set({
-            lastStart: {
-              taskId,
-              branch: data.branch,
-              worktreePath: data.worktreePath,
-              prompt: data.prompt,
-              trailers: data.trailers,
-            },
-          });
-        }
-        await get().refresh();
-      },
-      dispatch: async (taskId) => {
-        const { error } = await api.tasks({ id: taskId }).dispatch.post();
-        if (error) set({ error: String(error.value ?? error.status) });
-        await get().refresh();
-      },
+      startLocal: (taskId) =>
+        withPending(set, `start-local:${taskId}`, async () => {
+          const { data, error } = await api.tasks({ id: taskId })["start-local"].post();
+          if (error) return void set({ error: errMsg(error) });
+          if (data && "ok" in data && data.ok) {
+            set({
+              lastStart: {
+                taskId,
+                branch: data.branch,
+                worktreePath: data.worktreePath,
+                prompt: data.prompt,
+                trailers: data.trailers,
+              },
+            });
+          }
+          await get().refresh();
+        }),
+      dispatch: (taskId) =>
+        withPending(set, `dispatch:${taskId}`, async () => {
+          const { error } = await api.tasks({ id: taskId }).dispatch.post();
+          // Bail before refresh() on failure — refresh clears `error`, which is what
+          // used to swallow dispatch failures (the PTY can exit non-zero, so the route
+          // replies ok:false) and leave the button looking like it did nothing.
+          if (error) return void set({ error: errMsg(error) });
+          await get().refresh();
+        }),
       startLocalMany: async (taskIds) => {
         if (taskIds.length === 0) return;
         const [primary, ...rest] = taskIds;
         const { data, error } = await api
           .tasks({ id: primary })
           ["start-local"].post({ taskIds: rest });
-        if (error) return void set({ error: String(error.value ?? error.status) });
+        if (error) return void set({ error: errMsg(error) });
         if (data && "ok" in data && data.ok) {
           set({
             lastStart: {
@@ -286,15 +324,17 @@ export const useStore = create<State>()(
         if (taskIds.length === 0) return;
         const [primary, ...rest] = taskIds;
         const { error } = await api.tasks({ id: primary }).dispatch.post({ taskIds: rest });
-        if (error) set({ error: String(error.value ?? error.status) });
+        // Same as single dispatch: bail before refresh() so a batch failure surfaces.
+        if (error) return void set({ error: errMsg(error) });
         await get().refresh();
       },
-      teleport: async (taskId) => {
-        const { data, error } = await api.tasks({ id: taskId }).teleport.post();
-        if (error) set({ error: String(error.value ?? error.status) });
-        else if (data && "ok" in data && !data.ok) set({ error: data.error });
-        await get().refresh();
-      },
+      teleport: (taskId) =>
+        withPending(set, `teleport:${taskId}`, async () => {
+          const { data, error } = await api.tasks({ id: taskId }).teleport.post();
+          if (error) return void set({ error: errMsg(error) });
+          if (data && "ok" in data && !data.ok) return void set({ error: data.error });
+          await get().refresh();
+        }),
       land: async (sessionId) => {
         const { error } = await api.sessions({ id: sessionId }).land.post();
         if (error) set({ error: String(error.value ?? error.status) });
