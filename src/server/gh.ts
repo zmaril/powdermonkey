@@ -1,24 +1,55 @@
-// The `gh` CLI seam. PowderMonkey shells out to the GitHub CLI for the few writes
-// it needs — there's no persistent server endpoint to hang a webhook off, so a
-// localhost supervisor drives GitHub through the operator's already-authed `gh`.
+// The one place we shell out to the GitHub CLI. There's no persistent server
+// endpoint to hang a webhook off, so a localhost supervisor drives GitHub through
+// the operator's already-authed `gh`.
 //
-// The headline use is the @claude channel: a comment tagging `@claude` on a task's
-// PR thread is how the supervisor talks to a *live cloud session* with no web UI.
-// `claude --remote` workers watch their PR; a tagged comment wakes one and feeds it
-// an instruction (e.g. "rebase"). This module is the write side of that channel;
-// github-watch.ts is the read side (polling PR state).
+// Two readers/writers share this seam: github-watch.ts polls PR state and runs the
+// @claude remote-control channel (a comment tagging `@claude` on a task's PR wakes a
+// live `claude --remote` worker), and pr-review.ts reads diffs/comments and posts
+// inline review comments. Keeping the spawn + repo resolution here means there's a
+// single seam to fake in tests (PM_PR_FIXTURE_DIR, see pr-review.ts) and one
+// definition of "which repo are we talking to".
 
-/** Run `gh <args>`, capturing stdout/stderr. `ok` is exit-code 0. Never throws —
- *  callers decide what a non-ok result means (no `gh`, no auth, network blip). */
-export async function gh(args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "pipe" });
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  const code = await proc.exited;
-  return { ok: code === 0, stdout, stderr };
+export type GhResult = { ok: boolean; stdout: string; stderr: string };
+
+/** Run `gh <args>` and capture stdout/stderr. Never throws — a missing `gh`, no
+ *  auth, or a non-zero exit all come back as `{ ok: false }` for the caller to
+ *  handle (the watcher keeps last-known state; the review routes 502). */
+export async function gh(args: string[]): Promise<GhResult> {
+  try {
+    const proc = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    const code = await proc.exited;
+    return { ok: code === 0, stdout, stderr };
+  } catch (e) {
+    // `gh` not on PATH (e.g. a stripped container) — Bun.spawn throws synchronously.
+    return { ok: false, stdout: "", stderr: e instanceof Error ? e.message : String(e) };
+  }
 }
+
+let repoSlug: { owner: string; name: string } | null = null;
+
+/** owner/name from $PM_GITHUB_REPO, else `gh repo view`. Cached after first hit. */
+export async function resolveRepo(): Promise<{ owner: string; name: string } | null> {
+  if (repoSlug) return repoSlug;
+  let slug = process.env.PM_GITHUB_REPO;
+  if (!slug) {
+    const r = await gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]);
+    if (r.ok) slug = r.stdout.trim();
+  }
+  if (!slug?.includes("/")) return null;
+  const [owner, name] = slug.split("/");
+  repoSlug = { owner, name };
+  return repoSlug;
+}
+
+// ---- the @claude remote-control channel ------------------------------------
+// A comment tagging `@claude` on a task's PR thread is how the supervisor talks to a
+// *live cloud session* with no web UI: `claude --remote` workers watch their PR, and
+// a tagged comment wakes one and feeds it an instruction (e.g. "rebase"). This is the
+// write side of that channel; github-watch.ts is the read side (polling PR state).
 
 /** The `gh pr comment` argv for posting `body` on PR `prNumber`. Pure — split out
  *  so the arg shape (repo flag placement, number stringification) is unit-testable
@@ -37,7 +68,7 @@ export async function commentOnPr(
   prNumber: number,
   body: string,
   repo?: string,
-): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+): Promise<GhResult> {
   return gh(commentArgs(prNumber, body, repo));
 }
 
@@ -54,6 +85,6 @@ export async function askClaude(
   prNumber: number,
   message: string,
   repo?: string,
-): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+): Promise<GhResult> {
   return commentOnPr(prNumber, claudeMessage(message), repo);
 }

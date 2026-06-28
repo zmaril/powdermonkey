@@ -425,6 +425,7 @@ function AgentNarrative({ agent }: { agent: AgentStatus }) {
  *  (summary / next, with the full sticky comment on expand) sits below the row. */
 export function PrRow({ pr }: { pr: CloudPr }) {
   const dot = prDot(pr);
+  const openReview = useStore((s) => s.openReview);
   return (
     <Box>
       <Group gap="xs" wrap="nowrap">
@@ -451,10 +452,47 @@ export function PrRow({ pr }: { pr: CloudPr }) {
         <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
           {pr.title}
         </Text>
+        <Anchor
+          component="button"
+          size="sm"
+          fw={500}
+          onClick={() => openReview(pr.number, pr.title)}
+          title="Review this PR's diff and inline comments in-app"
+          style={{ flexShrink: 0 }}
+        >
+          Review
+        </Anchor>
         {pr.agent && <AgentStateBadge agent={pr.agent} />}
       </Group>
       {pr.agent && <AgentNarrative agent={pr.agent} />}
     </Box>
+  );
+}
+
+/** PR number out of a GitHub PR url (…/pull/123 → 123), or null if it doesn't look
+ *  like one. */
+export function prNumberFromUrl(url: string | null | undefined): number | null {
+  const m = url?.match(/\/pull\/(\d+)/);
+  return m ? Number(m[1]) : null;
+}
+
+/** "Review" affordance for a task whose PR we can review in-app — opens the diff +
+ *  inline-comment pane (ReviewPane) instead of bouncing out to github.com. Renders
+ *  nothing when the task has no parseable PR url. */
+export function ReviewLink({ task }: { task: Task }) {
+  const openReview = useStore((s) => s.openReview);
+  const number = prNumberFromUrl(task.prUrl);
+  if (number == null) return null;
+  return (
+    <Anchor
+      component="button"
+      size="sm"
+      fw={500}
+      onClick={() => openReview(number, task.title)}
+      title="Review this PR's diff and inline comments in-app"
+    >
+      Review
+    </Anchor>
   );
 }
 
@@ -466,6 +504,7 @@ export function TaskLinks({ task }: { task: Task }) {
           session ↗
         </Anchor>
       )}
+      <ReviewLink task={task} />
       {task.prUrl && (
         <Anchor href={task.prUrl} target="_blank" size="sm">
           PR ↗

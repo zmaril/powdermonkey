@@ -17,6 +17,7 @@ import {
 import { models } from "./models.ts";
 import { PUBLIC_DIR } from "./paths.ts";
 import { loadPlan, planSchema } from "./plan.ts";
+import { getPrReview, postPrComment } from "./pr-review.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { reconcile } from "./reconcile.ts";
 import {
@@ -212,6 +213,45 @@ export const app = new Elysia()
       return { autoRebase: isAutoRebaseEnabled() };
     },
     { body: t.Object({ autoRebase: t.Boolean() }) },
+  )
+  // In-app PR review: a PR's diff (parsed into hunks) + its inline review comments,
+  // so review happens here instead of bouncing to github.com. Backed by `gh api`
+  // (or PM_PR_FIXTURE_DIR for offline/demo). 502 when GitHub is unreachable.
+  .get(
+    "/prs/:number/review",
+    async ({ params, set }) => {
+      const result = await getPrReview(Number(params.number));
+      if (!result.ok) {
+        set.status = result.status;
+        return { error: result.error };
+      }
+      return result.review;
+    },
+    { params: t.Object({ number: t.String() }) },
+  )
+  // Post an inline review comment (or a threaded reply). Outward-facing write —
+  // the UI confirms before calling. Echoes the created comment back.
+  .post(
+    "/prs/:number/comments",
+    async ({ params, body, set }) => {
+      const result = await postPrComment(Number(params.number), body);
+      if (!result.ok) {
+        set.status = result.status;
+        return { error: result.error };
+      }
+      return result.comment;
+    },
+    {
+      params: t.Object({ number: t.String() }),
+      body: t.Object({
+        body: t.String(),
+        commitId: t.String(),
+        path: t.String(),
+        line: t.Number(),
+        side: t.Union([t.Literal("LEFT"), t.Literal("RIGHT")]),
+        inReplyTo: t.Optional(t.Number()),
+      }),
+    },
   )
   // Every session↔task link. The browser intersects these with the sessions it
   // already holds to learn which tasks are active and which session each surfaces,

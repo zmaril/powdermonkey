@@ -42,6 +42,9 @@ type State = {
   tabActivity: Record<string, boolean>;
   flagTab: (paneId: string) => void;
   clearTab: (paneId: string) => void;
+  // Latest request to open a PR review panel. `number` is the PR; `n` makes repeats
+  // distinct so the App effect re-fires (and focuses an already-open review).
+  reviewReq: { number: number; title: string; n: number } | null;
   // The serialized dockview layout (api.toJSON()). Persisted so a reload — notably
   // the disconnect→refresh recovery — restores your panes; null means "lay out the
   // default". This is the single source of truth for the dock; layout-changing
@@ -52,6 +55,7 @@ type State = {
   openSessionTerminal: (sessionId: number, title: string) => void;
   openNotes: () => void;
   loadSettings: () => Promise<void>;
+  openReview: (number: number, title: string) => void;
   // The scratchpad is a single note. Returns it, creating the row on first use.
   ensureScratch: () => Promise<Note | null>;
   saveNote: (id: number, values: { title?: string; body?: string }) => Promise<void>;
@@ -145,6 +149,7 @@ export const useStore = create<State>()(
           const { [paneId]: _drop, ...rest } = s.tabActivity;
           return { tabActivity: rest };
         }),
+      reviewReq: null,
       layout: null,
       setLayout: (layout) => set({ layout }),
       openTerminal: (cwd = "") =>
@@ -168,6 +173,8 @@ export const useStore = create<State>()(
           },
         })),
       openNotes: () => set((s) => ({ notesReq: s.notesReq + 1 })),
+      openReview: (number, title) =>
+        set((s) => ({ reviewReq: { number, title, n: (s.reviewReq?.n ?? 0) + 1 } })),
       loadSettings: async () => {
         const { data, error } = await api.settings.get();
         if (error) return;

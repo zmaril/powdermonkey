@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { ActivePane } from "./ActivePane.tsx";
 import { ArchivePane } from "./ArchivePane.tsx";
 import { BacklogPane } from "./BacklogPane.tsx";
+import { ReviewPane } from "./ReviewPane.tsx";
 import { ShellTerminal } from "./ShellTerminal.tsx";
 import { ActivityTab, useTabActivity } from "./TabActivity.tsx";
 import {
@@ -217,12 +218,17 @@ function ScratchPanel() {
   return <ScratchPad />;
 }
 
+function ReviewPanel(props: IDockviewPanelProps<{ number: number }>) {
+  return <ReviewPane number={props.params.number} />;
+}
+
 const dockComponents = {
   shell: ShellPanel,
   active: ActivePanel,
   backlog: BacklogPanel,
   archive: ArchivePanel,
   scratch: ScratchPanel,
+  review: ReviewPanel,
 };
 
 // The dock layout is store state (useStore.layout), persisted by the store's
@@ -447,6 +453,7 @@ export function App() {
   const layoutSubRef = useRef<{ dispose: () => void } | null>(null);
   const shellReq = useStore((s) => s.shellReq);
   const notesReq = useStore((s) => s.notesReq);
+  const reviewReq = useStore((s) => s.reviewReq);
   const setLayout = useStore((s) => s.setLayout);
   const loadSettings = useStore((s) => s.loadSettings);
 
@@ -530,6 +537,26 @@ export function App() {
       position: { referencePanel: "active", direction: "left" },
     });
   }, [notesReq]);
+
+  // Review button → open (or focus) a PR review panel in the main group, keyed by
+  // PR number so the same PR re-focuses instead of stacking duplicate panels.
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!reviewReq || !api) return;
+    const id = `review-${reviewReq.number}`;
+    const existing = api.getPanel(id);
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    api.addPanel({
+      id,
+      component: "review",
+      params: { number: reviewReq.number },
+      title: `Review #${reviewReq.number}`,
+      position: { referencePanel: "active", direction: "within" },
+    });
+  }, [reviewReq]);
 
   const disconnected = useConnectionWatch();
 
