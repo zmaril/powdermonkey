@@ -38,9 +38,12 @@ PrReview { number, title, state, headSha, url, files[], comments[] }
 
 ## Layout
 
-The pane is **one dockview panel** with an internal three-region layout — not
-several panels — because the regions share one PR's selection / scroll / viewed
-state, which would be painful to sync across independent dockview panels:
+Reviewing a PR is a focused, take-over activity, so the pane is a **full-window
+overlay** (`ReviewOverlay` in `App.tsx`: `position: fixed; inset: 0` above
+everything, top bar included) rather than another dockview tab competing for the
+split. It's **one surface** with an internal three-region layout — the regions share
+one PR's selection / scroll / viewed state, which would be painful to sync across
+separate panels:
 
 ```
 ┌ header: REVIEW #n title · [Unified|Split] · Refresh ─────────────────────┐
@@ -52,7 +55,7 @@ state, which would be painful to sync across independent dockview panels:
 ├ footer: Finish review (summary + Approve / Request changes / Comment) ────┤
 ```
 
-The operator still gets a "big pane" by maximizing/floating the dockview tab.
+Esc (when not typing) or the header's **✕ Close** drops back to the workspace.
 
 - **Sidebar — PR description + file tree.** The PR title and description sit top-left
   in their own scroll region, so they stay put while the diff scrolls. Below them is
@@ -130,23 +133,24 @@ intra-line word diffing or move detection. That's deliberate (see the spike's
 "useful over elegant" rationale); if we want better, that's the point where
 `@pierre/diffs` or `react-diff-view` earns its keep.
 
-## Dockview integration
+## Opening / closing it
 
-The Review pane is a first-class dockview panel, sitting alongside the existing
-Active / Backlog / Archive / Scratch / shell panels (`design.md`'s single pane of
-glass):
+The Review pane lives outside the dockview split — it's the one full-window surface,
+so it never competes with the shell / plan tabs for space:
 
-- `dockComponents.review` is registered in `App.tsx`; the panel takes a
-  `{ number }` param (the PR number).
 - A **Review** link (`plan-ui.tsx` `ReviewLink`, parsing the PR number out of
   `task.prUrl`) appears on any task that has a PR, in both the Active and Backlog
-  panes. Clicking it calls `store.openReview(number, title)`.
-- An `App` effect watches `reviewReq` and adds the panel **within the main group**
-  (next to Active/Backlog/Archive), keyed `review-<number>` so reopening the same PR
-  **focuses** the existing tab instead of stacking duplicates. Because it's an
-  ordinary dockview panel, the operator can drag it into a split, float it, or pin
-  it next to a worktree shell — and the layout persists like every other panel
-  (`store.layout`).
+  panes. Clicking it calls `store.openReview(number, title)`, which sets
+  `store.review`.
+- `ReviewOverlay` (`App.tsx`) renders whenever `store.review` is set: a fixed,
+  full-window layer over the whole app hosting `<ReviewPane onClose={closeReview}>`.
+  Esc (ignored while a textarea/input is focused, so it can't eat a comment draft) or
+  the header's **✕ Close** calls `store.closeReview()`.
+- It is **not** persisted in the dockview layout — closing it returns to exactly the
+  workspace you left.
+
+Earlier this was a dockview panel; it was moved to a takeover overlay because review
+is a focused activity, not a tab you leave parked in the split.
 
 ## Future: an editable side-by-side editor pane
 

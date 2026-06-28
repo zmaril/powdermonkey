@@ -544,13 +544,24 @@ function FileView({
   );
 }
 
-// Theme the @pierre/trees shadow-DOM tree to match the app's dark panes. CSS custom
-// properties pierce the shadow boundary, so setting them on the host is enough.
+// Theme the @pierre/trees shadow-DOM tree to match the app's dark panes. The tree's
+// base colours default to a light theme, so set the full `--trees-*-override` set
+// (custom properties pierce the shadow boundary, so the host is enough) — leaving
+// only some overridden makes the tree render mostly white.
 const TREE_VARS: CSSProperties = {
   background: "#1a1b1e",
+  "--trees-bg-override": "#1a1b1e",
+  "--trees-bg-muted-override": "#202225",
   "--trees-fg-override": "#c1c2c5",
+  "--trees-fg-muted-override": "#909296",
   "--trees-border-color-override": "#2c2e33",
+  "--trees-accent-override": "#4dabf7",
   "--trees-selected-bg-override": "#2f3136",
+  "--trees-selected-fg-override": "#ffffff",
+  "--trees-selected-focused-border-color-override": "#4dabf7",
+  "--trees-indent-guide-bg-override": "#2c2e33",
+  "--trees-scrollbar-thumb-override": "#3a3d44",
+  "--trees-focus-ring-color-override": "#4dabf7",
 } as CSSProperties;
 
 /** The review sidebar: the PR title + description (stays put while the diff scrolls)
@@ -632,7 +643,7 @@ function ReviewSidebar({
   );
 }
 
-export function ReviewPane({ number }: { number: number }) {
+export function ReviewPane({ number, onClose }: { number: number; onClose?: () => void }) {
   const [review, setReview] = useState<PrReview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -802,6 +813,17 @@ export function ReviewPane({ number }: { number: number }) {
           <Button size="compact-xs" variant="default" onClick={load} loading={loading}>
             Refresh
           </Button>
+          {onClose && (
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              color="gray"
+              onClick={onClose}
+              title="Close review (Esc)"
+            >
+              ✕ Close
+            </Button>
+          )}
         </Group>
       </Group>
 
