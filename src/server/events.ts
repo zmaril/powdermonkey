@@ -5,7 +5,33 @@
 // the whole point: the watcher knows GitHub, the handlers know tasks/sessions,
 // and neither side imports the other.
 
-import type { CheckRollupState, MergeableState, PrState } from "../shared/types.ts";
+import type { AgentState, CheckRollupState, MergeableState, PrState } from "../shared/types.ts";
+
+/** The agent-authored status, parsed from the sticky `<!-- pm:status -->` comment a
+ *  cloud worker keeps current on its PR (see the powdermonkey skill). `state` is the
+ *  structured signal the UI drives logic from (blocked → needs-you); `body` is the
+ *  raw comment so the panel can show the worker's own narrative, not just the parsed
+ *  fields. Persisted alongside the rest of the PR state in the pull_requests table. */
+export type AgentStatus = {
+  /** The parsed lifecycle state (AgentState), or null when the marker is present but
+   *  the `status:` word is missing or isn't one we recognise — the worker authors it
+   *  as free text, so the parser is the validation seam. The raw line still rides in
+   *  `body`, so an unrecognised status is shown to the operator even with no chip. */
+  state: AgentState | null;
+  summary: string | null;
+  next: string | null;
+  /** A link to the cloud session that authored this comment — the `claude.ai/code/…`
+   *  URL the worker stamps (the same one the harness puts in its `Claude-Session:`
+   *  commit trailer). Maps a status comment straight to its session without going
+   *  through the branch/trailer task resolution — and stays unambiguous if several
+   *  agents ever post status comments on one PR. Null when the worker didn't stamp it. */
+  sessionUrl: string | null;
+  /** The full sticky comment body with the marker line stripped — the human-readable
+   *  glance at what the agent thinks is happening. */
+  body: string;
+  /** When GitHub last saw the comment edited — a freshness hint, or null. */
+  updatedAt: string | null;
+};
 
 /** A pull request a cloud worker opened for a task (branch `pm/task-<id>-<slug>`),
  *  reduced to the fields the supervisor reacts to. */
@@ -25,6 +51,9 @@ export type CloudPr = {
   mergeable: MergeableState | null;
   headRefName: string;
   updatedAt: string;
+  /** The worker's self-reported status, parsed from its sticky `<!-- pm:status -->`
+   *  comment, or null when it hasn't posted one (or the marker can't be found). */
+  agent: AgentStatus | null;
 };
 
 // `initial` marks events from the startup catch-up sync — PRs that already

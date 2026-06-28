@@ -57,6 +57,20 @@
       "when": 1782662620395,
       "tag": "0007_slow_blonde_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1782663532102,
+      "tag": "0008_parallel_butterfly",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1782665947842,
+      "tag": "0009_polite_hardball",
+      "breakpoints": true
     }
   ]
 }

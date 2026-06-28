@@ -65,3 +65,22 @@ export const MergeableState = {
   Unknown: "UNKNOWN",
 } as const;
 export type MergeableState = ValueOf<typeof MergeableState>;
+
+/**
+ * A cloud worker's self-reported lifecycle state, parsed from the sticky
+ * `<!-- pm:status -->` comment it keeps on its PR. UNLIKE the enums above this is
+ * NOT GitHub's own vocabulary — it's authored as free text by the remote worker —
+ * so the parser (github-watch.parseStatusComment) is the validation seam: a status
+ * word outside this set resolves to null rather than a typed state. Keep these in
+ * sync with the status protocol in the powdermonkey skill
+ * (.claude/skills/powdermonkey/SKILL.md), which is what tells the worker which words
+ * to write. `Blocked` is the one the UI acts on — it drives the needs-you flag on
+ * the Active panel.
+ */
+export const AgentState = {
+  Starting: "starting",
+  Working: "working",
+  Blocked: "blocked",
+  Done: "done",
+} as const;
+export type AgentState = ValueOf<typeof AgentState>;

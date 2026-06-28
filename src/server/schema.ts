@@ -1,5 +1,6 @@
 import { boolean, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import {
+  type AgentState,
   type CheckRollupState,
   type MergeableState,
   PhaseStatus,
@@ -146,6 +147,20 @@ export const pullRequests = pgTable("pull_requests", {
   // GitHub's own PR updatedAt (ISO string). Named apart from the row's `updatedAt`
   // below, which tracks when *we* last wrote the row.
   ghUpdatedAt: text("gh_updated_at").notNull(),
+  // The worker's self-reported status, parsed from its sticky `<!-- pm:status -->`
+  // PR comment (see github-watch.parseStatusComment + the powdermonkey skill). Cache
+  // columns like the GitHub state above — overwritten every tick, null when the PR
+  // has no status comment. `agentState` is the typed lifecycle (AgentState) or null
+  // for an unrecognised word; `agentBody` is the raw comment kept for the UI's
+  // human-readable glance; `agentUpdatedAt` is the comment's GitHub edit time.
+  agentState: text("agent_state").$type<AgentState>(),
+  agentSummary: text("agent_summary"),
+  agentNext: text("agent_next"),
+  // The cloud session that authored the status comment (the worker-stamped
+  // `claude.ai/code/…` link) — a direct PR→session map, see events.ts AgentStatus.
+  agentSessionUrl: text("agent_session_url"),
+  agentBody: text("agent_body"),
+  agentUpdatedAt: text("agent_updated_at"),
   // The ledger: when set, we've already asked @claude to rebase this conflict
   // episode; cleared when the PR goes MERGEABLE (or leaves the board) so a later,
   // distinct conflict re-asks. Survives restarts — that's the point of this table.
