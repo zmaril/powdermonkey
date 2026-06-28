@@ -15,7 +15,7 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import type { DockviewPanelApi } from "dockview-react";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { Goal, Milestone, Phase, Task } from "../server/schema.ts";
 import { SessionKind, TaskStatus } from "../shared/types.ts";
 import { partitionTasks } from "./active.ts";
@@ -231,6 +231,7 @@ function BacklogCard({
       withBorder
       radius="md"
       padding="sm"
+      data-pm-card={task.id}
       bg={checked ? "dark.5" : undefined}
       style={{ boxShadow: checked ? SELECTED_SHADOW : undefined }}
       onMouseDown={(e) => {
@@ -368,6 +369,7 @@ function BacklogRow({
     <Box
       px="sm"
       py={8}
+      data-pm-card={task.id}
       style={{
         borderBottom: "1px solid #2c2e33",
         background: checked ? "#25262b" : undefined,
@@ -482,11 +484,87 @@ function StartPanel() {
 
 type View = "flat" | "grouped";
 
+/** A card's top within the scroll content — summed offsets up to the scroller. This is
+ *  scroll-invariant AND transform-invariant (offsetTop ignores the transforms
+ *  auto-animate applies while a re-sort is in flight), so it reads a card's true resting
+ *  place even mid-animation. The scroller is `position: relative` so the walk ends there. */
+function contentTop(node: HTMLElement, scroller: HTMLElement): number {
+  let y = 0;
+  let el: HTMLElement | null = node;
+  while (el && el !== scroller && scroller.contains(el)) {
+    y += el.offsetTop;
+    el = el.offsetParent as HTMLElement | null;
+  }
+  return y;
+}
+
+/** The topmost card still on screen (across every group) and how far below the top edge
+ *  it sits — the thing the operator is looking at, expressed scroll-invariantly so we
+ *  can put it back. Cards carry `data-pm-card` (their task id) as the handle. */
+function topAnchor(scroller: HTMLElement): { key: string; offset: number } | null {
+  const top = scroller.scrollTop;
+  let best: HTMLElement | null = null;
+  let bestTop = Number.POSITIVE_INFINITY;
+  for (const node of scroller.querySelectorAll<HTMLElement>("[data-pm-card]")) {
+    const ct = contentTop(node, scroller);
+    if (ct + node.offsetHeight <= top + 1) continue; // scrolled above the top edge
+    if (ct < bestTop) {
+      bestTop = ct;
+      best = node;
+    }
+  }
+  return best ? { key: best.dataset.pmCard ?? "", offset: contentTop(best, scroller) - top } : null;
+}
+
+/** Keep your place across a star-driven re-sort. With the browser's scroll anchoring off
+ *  (see the scroll Box), a re-sort leaves scrollTop alone but still shifts the content —
+ *  the card you were reading slides as the starred card floats above it. So we hold it:
+ *  track the topmost on-screen card as you scroll, and after a re-sort put it back at the
+ *  same offset by nudging scrollTop. The re-sort then slides the other cards around your
+ *  anchor instead of moving you. It's scroll math, not animation, so it holds with motion
+ *  off too. We track on `scroll` (not just on render) because scrolling fires no React
+ *  render — the anchor must be current at the instant a star lands. */
+function usePreserveScrollAcrossResort(scrollRef: React.RefObject<HTMLDivElement | null>) {
+  const anchor = useRef<{ key: string; offset: number } | null>(null);
+
+  // Keep the anchor fresh as the operator scrolls.
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const track = () => {
+      anchor.current = topAnchor(scroller);
+    };
+    track();
+    scroller.addEventListener("scroll", track, { passive: true });
+    return () => scroller.removeEventListener("scroll", track);
+  }, [scrollRef]);
+
+  // After every render — including a re-sort — restore the anchor card to its remembered
+  // offset, then refresh the anchor from the settled position. When nothing moved this is
+  // a no-op (it resolves to the current scrollTop); when a star re-sorted, it undoes the
+  // shift.
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const a = anchor.current;
+    if (a) {
+      const sel = `[data-pm-card="${a.key.replace(/["\\]/g, "\\$&")}"]`;
+      const node = scroller.querySelector<HTMLElement>(sel);
+      if (node) {
+        const want = contentTop(node, scroller) - a.offset;
+        if (Math.abs(scroller.scrollTop - want) > 0.5) scroller.scrollTop = want;
+      }
+    }
+    anchor.current = topAnchor(scroller);
+  });
+}
+
 export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
   const { idx, activeIds, loading } = usePlanData();
   const [view, setView] = useState<View>("grouped");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const scroll = usePaneScroll("backlog", api);
+  usePreserveScrollAcrossResort(scroll.ref);
 
   // Backlog = everything to-be-worked: not active (no live session) and not merged.
   const allTasks = [...idx.tasksByMilestone.values()].flat();
@@ -542,7 +620,8 @@ export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
         // anchoring chases the card that floated to the top and yanks the whole list up
         // to it (scrollTop → 0), losing your place. Turn it off so a re-sort leaves the
         // scroll where it is; usePreserveScrollAcrossResort then holds your exact spot.
-        style={{ flex: 1, overflowY: "auto", overflowAnchor: "none" }}
+        // position relative anchors contentTop's offset walk (see the helper).
+        style={{ flex: 1, overflowY: "auto", overflowAnchor: "none", position: "relative" }}
         px={view === "grouped" ? "md" : 0}
         py={4}
       >
