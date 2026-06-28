@@ -22,12 +22,11 @@ PrReview { number, title, state, headSha, url, files[], comments[] }
 - **`src/server/gh.ts`** — the single seam to the GitHub CLI (spawn + repo
   resolution), shared with `github-watch.ts`. Never throws; a missing `gh`/auth
   comes back as `{ ok: false }`.
-- **`src/server/diff.ts`** — `parsePatch(patch)` turns one file's unified `patch`
-  (the `patch` field of `pulls/:n/files`) into `Hunk[]`, each line carrying both its
-  old and new line numbers. Pure, dependency-free, unit-tested
-  (`tests/diff.test.ts`).
 - **`src/server/pr-review.ts`** — `getPrReview` (three `gh api` calls in parallel)
   and `postPrComment` (inline comment, or a threaded reply when `inReplyTo` is set).
+  GitHub's per-file `patch` is hunks-only; `fullPatch()` prepends a
+  `diff --git`/`---`/`+++` header (with `/dev/null` for add/remove) so it's a
+  complete single-file patch — what @pierre/diffs' `PatchDiff` expects.
   **Offline seam:** set `PM_PR_FIXTURE_DIR` to a directory of JSON dumps
   (`pr-<n>.json`, `pr-<n>-files.json`, `pr-<n>-comments.json`, in raw GitHub REST
   shape) and the read path serves those instead of calling `gh` — how the
@@ -75,29 +74,35 @@ above, so each panel reads its slice live.
   (we map GitHub's per-file `status` → its `gitStatus`). It renders in a shadow root,
   themed by the full `--trees-*-override` set on the host (they pierce the shadow
   boundary — a *partial* set leaves it rendering light). Selecting a file scrolls the
-  diff to it (`onSelectionChange` → a registered ref's `scrollIntoView`). This is the
-  one place we took a Pierre package — the diff renderer is still hand-rolled (see
-  the spike); a tree is enough of its own thing, and virtualization helps a big PR.
-- **Viewed / unviewed.** Each file header has a **Viewed** checkbox (GitHub's
-  mechanic): ticking it collapses the file and bumps the sidebar's `n/m viewed`
-  count. State is per-file, persisted to `localStorage` keyed by PR number + head
-  sha, so it survives a reload (and resets when the PR gets new commits). You can
-  still expand a viewed file manually with its ▾.
+  diff to it (`onSelectionChange` → a registered ref's `scrollIntoView`).
+- **Diff rendering — `@pierre/diffs`.** Each file is rendered by `PatchDiff`
+  (`@pierre/diffs/react`) from the full patch: Shiki syntax highlighting, split or
+  unified (`options.diffStyle`), collapsed unchanged-context regions, virtualization.
+  It runs on the main thread (`disableWorkerPool`) and renders in a shadow root,
+  themed with a dark Shiki theme (`github-dark`). We keep our own file header above it
+  (name · status · +/- · **Viewed**).
+- **Viewed / unviewed.** That **Viewed** checkbox (GitHub's mechanic) collapses the
+  file's diff and bumps the sidebar's `n/m viewed` count. State is per-file, persisted
+  to `localStorage` keyed by PR number + head sha, so it survives a reload (and resets
+  when the PR gets new commits).
 
-## The pane
+## Comments — @pierre/diffs annotations
 
-`ReviewPane` renders the diff off the payload — no diff *library* (the file tree is
-the one third-party piece), matching the rest of the app's hand-rolled Mantine panes.
+Comment threads are injected into the diff via @pierre/diffs' **annotation framework**
+rather than rendered by us between lines:
 
-- **Comment anchoring.** A diff line anchors a comment to `RIGHT`/new-line for added
-  or context lines, `LEFT`/old-line for removed — the same model GitHub's
-  `pulls/:n/comments` uses. `keyOf(path, {side, line})` keys both the rendered
-  threads and the open composer, so a comment lands back under the exact line it was
-  written on.
-- **Threads.** Top-level comments render under their line; replies
-  (`in_reply_to_id`) nest beneath their root, with a `↳ reply` composer.
-- **Composer.** Hovering a line reveals a `+`; clicking it opens an inline textarea.
-  New line comments are **added to a draft** (see below), not posted one-by-one.
+- **Anchoring.** A comment anchors to `RIGHT`/new-line (added or context lines) or
+  `LEFT`/old-line (removed) — GitHub's model. We map that to the lib's
+  `additions`/`deletions` side and pass one `DiffLineAnnotation` per anchored line
+  (`{ side, lineNumber, metadata }`) in `lineAnnotations`; `renderAnnotation` returns
+  the React node for that line — the posted **Thread** (+ `↳ reply`), any **pending**
+  drafts, and the open **Composer**. `keyOf(path, {side, line})` ties them together.
+- **Starting a comment.** Clicking a **line number** (or the gutter **+** on hover)
+  fires the lib's `onLineNumberClick` / `onGutterUtilityClick`, which opens the
+  composer for that line. New comments are **added to a draft** (see below), not
+  posted one-by-one.
+- **Replies** to an existing thread post immediately (the reviews API can't express a
+  reply); everything else batches.
 
 ## Batched review: approve / request changes / one event
 
@@ -125,24 +130,9 @@ deliberate small exception to the batch model.
 
 ## Side-by-side (split) layout
 
-The pane has a **Unified / Split** toggle. Unified interleaves +/- in one column;
-split renders old-on-left, new-on-right.
-
-The pairing is `toSplitRows(hunk)`:
-
-- a **context** line aligns on both sides (same text left and right);
-- a run of **removals** is zipped row-by-row against the **additions** that follow
-  it, so a typical edit lines up old-vs-new; leftover removals (left-only) or
-  additions (right-only) get an empty cell on the other side.
-
-Comment anchoring is unchanged — each non-empty cell resolves the same
-`anchorOf(line)`, so threads and the composer work identically in either layout, and
-a thread renders full-width beneath the row it belongs to.
-
-This is a pragmatic alignment, not a Myers-grade side-by-side: it doesn't do
-intra-line word diffing or move detection. That's deliberate (see the spike's
-"useful over elegant" rationale); if we want better, that's the point where
-`@pierre/diffs` or `react-diff-view` earns its keep.
+The header's **Unified / Split** toggle just sets `@pierre/diffs`' `options.diffStyle`
+(`"unified"` | `"split"`) — the library handles the alignment (and intra-line
+highlighting), and our annotations render the same way in either layout.
 
 ## Opening / closing it
 

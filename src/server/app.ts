@@ -214,7 +214,7 @@ export const app = new Elysia()
     },
     { body: t.Object({ autoRebase: t.Boolean() }) },
   )
-  // In-app PR review: a PR's diff (parsed into hunks) + its inline review comments,
+  // In-app PR review: a PR's diff (raw patch per file) + its inline review comments,
   // so review happens here instead of bouncing to github.com. Backed by `gh api`
   // (or PM_PR_FIXTURE_DIR for offline/demo). 502 when GitHub is unreachable.
   .get(

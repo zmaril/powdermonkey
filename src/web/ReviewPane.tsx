@@ -10,6 +10,8 @@ import {
   Text,
   Textarea,
 } from "@mantine/core";
+import type { DiffLineAnnotation } from "@pierre/diffs/react";
+import { PatchDiff } from "@pierre/diffs/react";
 import type { GitStatus } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import {
@@ -30,7 +32,6 @@ import {
   useRef,
   useState,
 } from "react";
-import type { DiffLine, Hunk } from "../server/diff.ts";
 import type { PrReview, ReviewComment, ReviewEvent, ReviewFile } from "../server/pr-review.ts";
 import { api } from "./client.ts";
 
@@ -75,22 +76,13 @@ type DraftComment = {
 type Side = "LEFT" | "RIGHT";
 type LineAnchor = { side: Side; line: number };
 
-const COL = {
-  add: "#12331f",
-  del: "#3a1518",
-  gutter: "#787f87",
-  context: "transparent",
-} as const;
-
-/** Where a diff line carries a comment: the new side for added/context lines, the
- *  old side for removed lines. Null when the relevant line number is missing. */
-function anchorOf(line: DiffLine): LineAnchor | null {
-  if (line.type === "del")
-    return line.oldLine != null ? { side: "LEFT", line: line.oldLine } : null;
-  return line.newLine != null ? { side: "RIGHT", line: line.newLine } : null;
-}
-
 const keyOf = (path: string, a: LineAnchor) => `${path}::${a.side}::${a.line}`;
+
+// @pierre/diffs anchors annotations by 'additions' (new/right) | 'deletions'
+// (old/left); map to/from our LEFT/RIGHT comment sides.
+type ASide = "additions" | "deletions";
+const toASide = (s: Side): ASide => (s === "LEFT" ? "deletions" : "additions");
+const fromASide = (s: ASide): Side => (s === "deletions" ? "LEFT" : "RIGHT");
 
 /** Index comments by anchor (top-level only) and by parent (replies), so each line
  *  can find its threads and each thread its replies. */
@@ -278,159 +270,71 @@ function PendingCard({ draft, onRemove }: { draft: DraftComment; onRemove: () =>
   );
 }
 
-// A rendered cell in either layout: a diff line plus the column it sits in (unified
-// rows have one cell; split rows have an optional left and right).
-type Cell = { line: DiffLine | null };
+// Shiki theme @pierre/diffs renders the diff with — a dark one to match the panes.
+const DIFF_THEME = "github-dark";
 
-/** Pair a hunk's lines into split rows: context aligns on both sides, and a run of
- *  removals is zipped against the following run of additions (leftovers stand
- *  alone) so a typical edit lines up old-vs-new. */
-function toSplitRows(hunk: Hunk): { left: Cell; right: Cell }[] {
-  const rows: { left: Cell; right: Cell }[] = [];
-  const lines = hunk.lines;
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (line.type === "context") {
-      rows.push({ left: { line }, right: { line } });
-      i++;
-      continue;
+type AnnMeta = { path: string; line: number; side: Side };
+
+/** Parse a comment anchor key (`path::SIDE::line`) back into its parts. Filenames
+ *  don't contain "::", so the trailing `::SIDE::line` is unambiguous. */
+function parseKey(key: string): AnnMeta | null {
+  const m = key.match(/^(.*)::(LEFT|RIGHT)::(\d+)$/);
+  return m ? { path: m[1], side: m[2] as Side, line: Number(m[3]) } : null;
+}
+
+/** One file's diff, rendered by @pierre/diffs' PatchDiff (Shiki highlighting,
+ *  split/unified, virtualized) from the raw GitHub patch. Inline comment threads,
+ *  pending drafts, and the composer are injected via its annotation framework; the
+ *  gutter "+" opens the composer for a line. */
+function FilePatch({ file }: { file: ReviewFile }) {
+  const {
+    review,
+    view,
+    draftByKey,
+    removeDraft,
+    composeKey,
+    onAdd,
+    onCancelCompose,
+    onSubmitCompose,
+    onReply,
+    posting,
+  } = useReviewCtx();
+  const { topByAnchor, repliesByParent } = indexComments(review.comments, file.filename);
+
+  // Every line that needs an annotation row: posted threads, pending drafts, and the
+  // open composer — deduped to one annotation per (side, line).
+  const annotations = useMemo(() => {
+    const seen = new Set<string>();
+    const out: DiffLineAnnotation<AnnMeta>[] = [];
+    const add = (side: Side, line: number) => {
+      const k = keyOf(file.filename, { side, line });
+      if (seen.has(k)) return;
+      seen.add(k);
+      out.push({
+        side: toASide(side),
+        lineNumber: line,
+        metadata: { path: file.filename, line, side },
+      });
+    };
+    for (const c of review.comments)
+      if (c.path === file.filename && c.inReplyToId == null && c.line != null)
+        add(c.side ?? "RIGHT", c.line);
+    for (const [, drafts] of draftByKey) {
+      const d = drafts[0];
+      if (d?.path === file.filename) add(d.side, d.line);
     }
-    const dels: DiffLine[] = [];
-    const adds: DiffLine[] = [];
-    while (i < lines.length && lines[i].type === "del") dels.push(lines[i++]);
-    while (i < lines.length && lines[i].type === "add") adds.push(lines[i++]);
-    const n = Math.max(dels.length, adds.length);
-    for (let j = 0; j < n; j++) {
-      rows.push({ left: { line: dels[j] ?? null }, right: { line: adds[j] ?? null } });
-    }
-  }
-  return rows;
-}
+    const target = composeKey ? parseKey(composeKey) : null;
+    if (target?.path === file.filename) add(target.side, target.line);
+    return out;
+  }, [file.filename, review.comments, draftByKey, composeKey]);
 
-function bg(line: DiffLine | null): string {
-  if (!line) return "#161718";
-  return line.type === "add" ? COL.add : line.type === "del" ? COL.del : COL.context;
-}
-
-const mono = {
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-  fontSize: 12,
-  lineHeight: "18px",
-} as const;
-
-/** A line's content cell with a hover "+" that opens the composer for that line. */
-function LineContent({
-  line,
-  num,
-  onAdd,
-}: {
-  line: DiffLine | null;
-  num: number | null;
-  onAdd: (() => void) | null;
-}) {
-  const [hover, setHover] = useState(false);
-  return (
-    <Box
-      style={{ display: "flex", background: bg(line), minHeight: 18, position: "relative" }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-    >
-      <Box
-        style={{
-          width: 40,
-          flexShrink: 0,
-          textAlign: "right",
-          paddingRight: 8,
-          color: COL.gutter,
-          userSelect: "none",
-          ...mono,
-        }}
-      >
-        {num ?? ""}
-      </Box>
-      {onAdd && hover && (
-        <Box
-          component="button"
-          onClick={onAdd}
-          title="Comment on this line"
-          style={{
-            position: "absolute",
-            left: 44,
-            top: 0,
-            height: 18,
-            width: 16,
-            border: "none",
-            cursor: "pointer",
-            background: "#2f6fd1",
-            color: "#fff",
-            borderRadius: 3,
-            padding: 0,
-            ...mono,
-          }}
-        >
-          +
-        </Box>
-      )}
-      <Box
-        style={{ flex: 1, whiteSpace: "pre-wrap", wordBreak: "break-all", paddingLeft: 8, ...mono }}
-      >
-        <Text span style={{ color: COL.gutter, userSelect: "none" }}>
-          {line ? (line.type === "add" ? "+" : line.type === "del" ? "-" : " ") : ""}
-        </Text>
-        {line?.content}
-      </Box>
-    </Box>
-  );
-}
-
-function FileView({
-  file,
-  comments,
-  draftByKey,
-  onRemoveDraft,
-  view,
-  viewed,
-  onToggleViewed,
-  onAdd,
-  onReply,
-  composerKey,
-  onCancelCompose,
-  onSubmitCompose,
-  posting,
-}: {
-  file: ReviewFile;
-  comments: ReviewComment[];
-  draftByKey: Map<string, DraftComment[]>;
-  onRemoveDraft: (id: number) => void;
-  view: "unified" | "split";
-  viewed: boolean;
-  onToggleViewed: () => void;
-  onAdd: (path: string, a: LineAnchor) => void;
-  onReply: (inReplyTo: number, body: string) => Promise<void>;
-  composerKey: string | null;
-  onCancelCompose: () => void;
-  onSubmitCompose: (body: string) => void;
-  posting: boolean;
-}) {
-  const [open, setOpen] = useState(true);
-  // Marking a file viewed collapses it (GitHub's mechanic); unviewing re-expands.
-  // The operator can still toggle ▾ manually in between.
-  useEffect(() => setOpen(!viewed), [viewed]);
-  const { topByAnchor, repliesByParent } = indexComments(comments, file.filename);
-
-  // The posted thread, drafted (pending) comments, and the open composer for a given
-  // line — shared by both layouts. Returns the attachments stacked beneath the row.
-  const attachments = (line: DiffLine | null) => {
-    if (!line) return null;
-    const a = anchorOf(line);
-    if (!a) return null;
-    const k = keyOf(file.filename, a);
+  const renderAnnotation = (ann: DiffLineAnnotation<AnnMeta>) => {
+    const { side, line } = ann.metadata;
+    const k = keyOf(file.filename, { side, line });
     const roots = topByAnchor.get(k);
     const drafts = draftByKey.get(k);
-    const composing = composerKey === k;
     return (
-      <>
+      <Box style={{ borderTop: "1px solid #2c2e33", borderBottom: "1px solid #2c2e33" }}>
         {roots && roots.length > 0 && (
           <Thread
             roots={roots}
@@ -440,28 +344,52 @@ function FileView({
           />
         )}
         {drafts?.map((d) => (
-          <PendingCard key={d.id} draft={d} onRemove={() => onRemoveDraft(d.id)} />
+          <PendingCard key={d.id} draft={d} onRemove={() => removeDraft(d.id)} />
         ))}
-        {composing && (
+        {composeKey === k && (
           <Composer onSubmit={onSubmitCompose} onCancel={onCancelCompose} posting={posting} />
         )}
-      </>
+      </Box>
     );
   };
 
+  // Open the composer for a line. Both affordances route here: the gutter "+" (hover)
+  // and clicking the line number — whichever the operator reaches for.
+  const addAt = (side: ASide | undefined, line: number) =>
+    onAdd(file.filename, { side: fromASide(side ?? "additions"), line });
+
+  return (
+    <PatchDiff<AnnMeta>
+      patch={file.patch}
+      disableWorkerPool
+      options={{
+        diffStyle: view === "split" ? "split" : "unified",
+        theme: DIFF_THEME,
+        themeType: "dark",
+        disableFileHeader: true,
+        enableGutterUtility: true,
+        // The hover "+" in the gutter — passes the clicked line/side directly.
+        onGutterUtilityClick: (range: { start: number; side?: ASide }) =>
+          addAt(range.side, range.start),
+        // Clicking a line number also starts a comment (reliable, GitHub-like).
+        onLineNumberClick: (props: { lineNumber: number; annotationSide?: ASide }) =>
+          addAt(props.annotationSide, props.lineNumber),
+      }}
+      lineAnnotations={annotations}
+      renderAnnotation={renderAnnotation}
+    />
+  );
+}
+
+/** One file in the diff list: our header (name · status · +/- · Viewed) over the
+ *  PatchDiff. Marking it viewed collapses the diff (GitHub's mechanic). */
+function FileBlock({ file }: { file: ReviewFile }) {
+  const { viewed, toggleViewed } = useReviewCtx();
+  const isViewed = viewed.has(file.filename);
   return (
     <Box style={{ border: "1px solid #2c2e33", borderRadius: 6, overflow: "hidden" }}>
-      <Group
-        justify="space-between"
-        px="sm"
-        py={6}
-        style={{ background: "#202225", cursor: "pointer" }}
-        onClick={() => setOpen((o) => !o)}
-      >
+      <Group justify="space-between" px="sm" py={6} style={{ background: "#202225" }}>
         <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
-          <Text size="xs" c="dimmed">
-            {open ? "▾" : "▸"}
-          </Text>
           <Text size="sm" ff="monospace" truncate>
             {file.previousFilename ? `${file.previousFilename} → ` : ""}
             {file.filename}
@@ -477,85 +405,22 @@ function FileView({
           <Text size="xs" c="red">
             -{file.deletions}
           </Text>
-          {/* Stop the header's collapse toggle from firing when ticking Viewed. */}
-          <Box onClick={(e) => e.stopPropagation()}>
-            <Checkbox
-              size="xs"
-              label="Viewed"
-              checked={viewed}
-              onChange={onToggleViewed}
-              styles={{ label: { fontSize: 11, color: "#909296", paddingLeft: 6 } }}
-            />
-          </Box>
+          <Checkbox
+            size="xs"
+            label="Viewed"
+            checked={isViewed}
+            onChange={() => toggleViewed(file.filename)}
+            styles={{ label: { fontSize: 11, color: "#909296", paddingLeft: 6 } }}
+          />
         </Group>
       </Group>
-
-      {open &&
-        (file.hunks.length === 0 ? (
+      {!isViewed &&
+        (file.patch ? (
+          <FilePatch file={file} />
+        ) : (
           <Text size="xs" c="dimmed" px="md" py="sm">
             No textual diff (binary, rename, or too large to display).
           </Text>
-        ) : (
-          file.hunks.map((hunk) => (
-            <Box key={hunk.header}>
-              <Box px="md" py={2} style={{ background: "#191b1f", ...mono, color: "#5b8fb0" }}>
-                {hunk.header}
-              </Box>
-              {view === "unified"
-                ? hunk.lines.map((line, idx) => {
-                    const a = anchorOf(line);
-                    const num = line.type === "del" ? line.oldLine : line.newLine;
-                    return (
-                      <Box key={`${hunk.header}-${idx}`}>
-                        <LineContent
-                          line={line}
-                          num={num}
-                          onAdd={a ? () => onAdd(file.filename, a) : null}
-                        />
-                        {attachments(line)}
-                      </Box>
-                    );
-                  })
-                : toSplitRows(hunk).map((row, idx) => (
-                    <Box key={`${hunk.header}-s-${idx}`}>
-                      <Box style={{ display: "flex" }}>
-                        <Box style={{ flex: 1, minWidth: 0, borderRight: "1px solid #2c2e33" }}>
-                          <LineContent
-                            line={row.left.line}
-                            num={row.left.line?.oldLine ?? null}
-                            onAdd={
-                              row.left.line && anchorOf(row.left.line)
-                                ? () =>
-                                    onAdd(
-                                      file.filename,
-                                      anchorOf(row.left.line as DiffLine) as LineAnchor,
-                                    )
-                                : null
-                            }
-                          />
-                        </Box>
-                        <Box style={{ flex: 1, minWidth: 0 }}>
-                          <LineContent
-                            line={row.right.line}
-                            num={row.right.line?.newLine ?? null}
-                            onAdd={
-                              row.right.line && anchorOf(row.right.line)
-                                ? () =>
-                                    onAdd(
-                                      file.filename,
-                                      anchorOf(row.right.line as DiffLine) as LineAnchor,
-                                    )
-                                : null
-                            }
-                          />
-                        </Box>
-                      </Box>
-                      {attachments(row.left.line)}
-                      {attachments(row.right.line)}
-                    </Box>
-                  ))}
-            </Box>
-          ))
         ))}
     </Box>
   );
@@ -721,23 +586,9 @@ function FileTreeColumn() {
   );
 }
 
-/** The scrollable diff column (inside the Files panel). */
+/** The scrollable diff column (inside the Files panel): one FileBlock per file. */
 function DiffColumn() {
-  const {
-    review,
-    view,
-    draftByKey,
-    removeDraft,
-    composeKey,
-    onAdd,
-    onCancelCompose,
-    onSubmitCompose,
-    onReply,
-    posting,
-    viewed,
-    toggleViewed,
-    registerFileEl,
-  } = useReviewCtx();
+  const { review, registerFileEl } = useReviewCtx();
   return (
     <Box style={{ flex: 1, overflowY: "auto", minWidth: 0 }} px="sm" py={4}>
       {review.files.length === 0 ? (
@@ -751,21 +602,7 @@ function DiffColumn() {
               key={file.filename}
               ref={(el: HTMLDivElement | null) => registerFileEl(file.filename, el)}
             >
-              <FileView
-                file={file}
-                comments={review.comments}
-                draftByKey={draftByKey}
-                onRemoveDraft={removeDraft}
-                view={view}
-                viewed={viewed.has(file.filename)}
-                onToggleViewed={() => toggleViewed(file.filename)}
-                composerKey={composeKey}
-                onAdd={onAdd}
-                onCancelCompose={onCancelCompose}
-                onSubmitCompose={onSubmitCompose}
-                onReply={onReply}
-                posting={posting}
-              />
+              <FileBlock file={file} />
             </Box>
           ))}
         </Stack>

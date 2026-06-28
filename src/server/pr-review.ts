@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import { type Hunk, parsePatch } from "./diff.ts";
 import { gh, resolveRepo } from "./gh.ts";
 
 // Review a PR from inside PowderMonkey instead of bouncing to github.com: pull a
@@ -20,7 +19,10 @@ export type ReviewFile = {
   additions: number;
   deletions: number;
   previousFilename: string | null;
-  hunks: Hunk[];
+  /** The raw unified `patch` GitHub returns for this file (with a reconstructed
+   *  `diff --git`/`---`/`+++` header) — fed straight to @pierre/diffs' PatchDiff for
+   *  rendering. Empty for binary/too-large files. */
+  patch: string;
 };
 
 export type ReviewComment = {
@@ -86,6 +88,21 @@ async function ghApiJson(path: string, paginate = false): Promise<Json | null> {
   }
 }
 
+/** GitHub's `files[].patch` is hunks-only (`@@ …`). @pierre/diffs' PatchDiff needs a
+ *  complete single-file patch, so prepend the `diff --git` / `---` / `+++` header
+ *  (with /dev/null for add/remove, the previous name for a rename). parsePatch is
+ *  unaffected — it skips everything before the first `@@`. */
+function fullPatch(f: Json): string {
+  const hunks: string = f.patch ?? "";
+  if (!hunks) return "";
+  const name: string = f.filename;
+  const status: string = f.status ?? "modified";
+  const old = status === "renamed" ? (f.previous_filename ?? name) : name;
+  const oldPath = status === "added" ? "/dev/null" : `a/${old}`;
+  const newPath = status === "removed" ? "/dev/null" : `b/${name}`;
+  return `diff --git a/${old} b/${name}\n--- ${oldPath}\n+++ ${newPath}\n${hunks}`;
+}
+
 function mapFiles(raw: Json[]): ReviewFile[] {
   return raw.map((f) => ({
     filename: f.filename,
@@ -93,7 +110,7 @@ function mapFiles(raw: Json[]): ReviewFile[] {
     additions: f.additions ?? 0,
     deletions: f.deletions ?? 0,
     previousFilename: f.previous_filename ?? null,
-    hunks: parsePatch(f.patch),
+    patch: fullPatch(f),
   }));
 }
 

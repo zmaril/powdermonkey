@@ -15,23 +15,24 @@
   comments — and [`@pierre/trees`](https://www.npmjs.com/package/@pierre/trees), a
   virtualized file-tree component. So Pierre is **more than design inspiration**:
   there's reusable code, with caveats.
-- For the **diff renderer** we deliberately **did not** pull in `@pierre/diffs` (or
-  any diff library). The diffs we review are our own small `pm/task-*` PRs, the app
-  is "useful over elegant / short shelf life" (see `design.md`), and the hand-rolled
-  diff+comment renderer matches the rest of the app's panes. A Shiki-in-a-worker
-  virtualized renderer is the right move only if/when we start reviewing large
-  diffs; the seam is clean enough to swap later (see "If we outgrow this").
-- For the **file tree** we *did* adopt `@pierre/trees` (operator's call) — a tree is
-  enough of its own thing that hand-rolling buys little, virtualization helps a long
-  file list, and it ships file-type icons + git-status colouring for free. It's the
-  one third-party piece in the pane (~0.5 MB to the bundle, preact-based, themed via
-  `--trees-*` CSS vars through its shadow root).
-- What shipped (302/303 + follow-ups): a `Review` pane in the dockview split — a
-  left sidebar (PR title + description + `@pierre/trees` file tree), a scrollable diff
-  (parsed from `gh api .../pulls/{n}/files`) with threaded inline comments and a
-  Unified/Split toggle, per-file **Viewed** collapse, and a footer that submits a
-  **batched** review with an Approve / Request changes / Comment verdict (one webhook
-  event, not one per comment). See `docs/pr-review.md`.
+- **We adopted both Pierre packages** (operator's call). `@pierre/diffs`' `PatchDiff`
+  renders each file's diff (Shiki highlighting, split/unified, collapsed context,
+  virtualization), with inline comment threads injected through its **annotation
+  framework**; `@pierre/trees` renders the file tree (icons + git-status colours).
+  The first cut hand-rolled the diff renderer (the rationale below still records *why*
+  that was a reasonable default); we then swapped it for `@pierre/diffs` once the
+  operator wanted richer rendering. The cost is bundle size — Shiki pulls the web
+  bundle to ~13 MB — which is acceptable for a localhost single-operator tool.
+- What we own around the Pierre components: all GitHub I/O via `gh` (fetch files,
+  read/post `pulls/:n/comments`, submit reviews), the patch-header reconstruction
+  (`fullPatch`), the comment draft/batch model, the dark theming, the viewed mechanic,
+  and the dockview/overlay shell.
+- What shipped: a full-window `Review` overlay hosting its own dockview — a
+  Description panel (markdown PR title + body) and a Diff panel (`@pierre/trees` tree +
+  `@pierre/diffs` diff), threaded inline comments + a per-line composer, per-file
+  **Viewed** collapse, and a footer that submits a **batched** review with an
+  Approve / Request changes / Comment verdict (one webhook event, not one per
+  comment). See `docs/pr-review.md`.
 
 ## What Pierre is, and its status
 
@@ -91,50 +92,50 @@ shape against the package `.d.ts` before committing to it.
 
 ## Decision
 
-**Diff renderer: parse the patches ourselves, no library. File tree:
-`@pierre/trees`.** Rationale, weighed against `design.md`'s non-goals ("short shelf
-life", "useful over elegant", single operator):
+**Use both Pierre packages: `@pierre/diffs` for the diff, `@pierre/trees` for the
+file tree.** How we got here:
 
-- The diffs in scope are our own `pm/task-*` PRs — small, text, a handful of files.
-  Virtualization and worker-thread highlighting solve a problem the *diff* doesn't
-  have. The parser is ~80 lines, pure, and unit-tested (`src/server/diff.ts`,
-  `tests/diff.test.ts`); the renderer is plain Mantine/JSX that matches the app
-  (themeAbyss dockview, dark panes) with nothing to keep in sync with a fast-moving
-  upstream.
-- A **file tree** is the exception: hand-rolling a nested, collapsible,
-  icon-decorated tree buys little over `@pierre/trees`, which is Apache-2.0, ships
-  file-type icons + git-status colouring, virtualizes a long list, and exposes a
-  clean `useFileTree`/`<FileTree>` React API. It cost ~0.5 MB (preact-based) and a
-  bit of shadow-DOM theming via `--trees-*` CSS vars — a fair trade for the
-  navigation it gives. (This was the operator's call; the symmetry of using a Pierre
-  package where it earns its keep, and skipping one where it doesn't, is the point.)
+- **First cut — hand-rolled diff (then swapped).** The initial version parsed the
+  patches ourselves (`parsePatch`) and rendered plain Mantine/JSX, on the reasoning
+  that our `pm/task-*` PRs are small, text, a handful of files — so virtualization and
+  worker-thread highlighting solve a problem the *diff* didn't have, and a ~80-line
+  pure parser matched the app with nothing to track upstream. Reasonable as a default,
+  and it kept the swap point small.
+- **Then we adopted `@pierre/diffs`** (operator's call) for richer rendering: Shiki
+  syntax highlighting, collapsed unchanged-context regions, and library-grade
+  split/unified — things the hand-rolled renderer didn't do. Crucially, comments slot
+  into its **annotation framework** (`lineAnnotations` + `renderAnnotation`), so our
+  thread/draft/composer components render *inside* the diff. The swap was contained:
+  the server payload already carried the raw `patch` per file, and the rendering was
+  isolated. Cost: Shiki pulls the web bundle to ~13 MB — fine for a localhost
+  single-operator tool; if that ever bites, `react-diff-view` (MIT, lighter, no Shiki)
+  is the fallback.
+- **`@pierre/trees`** for the file tree — Apache-2.0, file-type icons + git-status
+  colouring, virtualized, clean `useFileTree`/`<FileTree>` API; hand-rolling a nested
+  collapsible tree buys little.
 - The GitHub I/O for review goes through the same `gh` seam as `github-watch.ts`, so
   the architecture stays uniform.
 
-**If we outgrow this** (we start reviewing large/external diffs, or want syntax
-highlighting): the swap point is small. `src/server/pr-review.ts` already returns a
-clean `{ files, comments, headSha }` payload; the file/hunk rendering in
-`ReviewPane.tsx` is isolated in `FileView`. Replacing `FileView`'s hand-rolled hunk
-loop with `@pierre/diffs`' `PatchDiff` + `DiffLineAnnotation` (feeding it the raw
-`patch` and our comments) is a contained change — keep the server payload, swap the
-renderer. `react-diff-view` is the MIT fallback if Pierre's maintenance stalls.
+What we still **own** around the Pierre components: all `gh` I/O, the patch-header
+reconstruction (`fullPatch`), the comment draft/batch-review model, dark theming, the
+viewed mechanic, and the dockview/overlay shell. What we **borrow as inspiration**,
+not code: the side-by-side/unified toggle and "review lives in one focused surface."
 
-What we **borrow from Pierre as inspiration**, not code: the side-by-side/unified
-toggle, threading comments inline under the anchored line, and "review lives in one
-surface" rather than a separate tab per file.
-
-## What shipped (302 / 303)
+## What shipped
 
 - `src/server/gh.ts` — the shared `gh` wrapper + repo resolution (extracted so
-  `github-watch.ts` and the review routes share one seam).
-- `src/server/diff.ts` — pure unified-`patch` → hunks parser (`parsePatch`).
-- `src/server/pr-review.ts` — `getPrReview` (diff + comments, via `gh api`) and
-  `postPrComment` (inline comment / threaded reply). Offline/demo seam:
-  `PM_PR_FIXTURE_DIR` serves JSON dumps instead of calling `gh`.
-- Routes: `GET /prs/:number/review`, `POST /prs/:number/comments` (`app.ts`).
-- `src/web/ReviewPane.tsx` — the pane: file/hunk rendering, comment threads +
-  composer, Unified/Split toggle. Opened as a dockview panel (`review`), reachable
-  from a `Review` link on any task that has a PR (`plan-ui.tsx`, Active + Backlog).
+  `github-watch.ts` and the review routes share one seam) + stdin support for the
+  batched-review POST.
+- `src/server/pr-review.ts` — `getPrReview` (diff + comments, via `gh api`),
+  `postPrComment` (inline comment / threaded reply), `submitReview` (batched review +
+  verdict), and `fullPatch` (reconstruct a complete single-file patch for PatchDiff).
+  Offline/demo seam: `PM_PR_FIXTURE_DIR` serves JSON dumps instead of calling `gh`.
+- Routes: `GET /prs/:number/review`, `POST /prs/:number/comments`,
+  `POST /prs/:number/review-submit` (`app.ts`).
+- `src/web/ReviewPane.tsx` — the full-window review overlay: a dockview with a
+  Description panel (markdown) and a Diff panel (`@pierre/trees` tree + `@pierre/diffs`
+  `PatchDiff`), inline comments via the annotation framework, a per-line composer,
+  per-file Viewed collapse, and the batched Approve / Request changes / Comment footer.
+  Opened from a `Review` link on any task/PR (`plan-ui.tsx`, Active + Backlog).
 
-See `docs/pr-review.md` for the runtime architecture and the side-by-side/dockview
-notes (phase 303).
+See `docs/pr-review.md` for the runtime architecture and layout.
