@@ -1,7 +1,7 @@
 import "@mantine/core/styles.css";
 import { MantineProvider, createTheme } from "@mantine/core";
 import { createRoot } from "react-dom/client";
-import { App } from "./App.tsx";
+import { App } from "./app/App.tsx";
 
 const theme = createTheme({});
 
