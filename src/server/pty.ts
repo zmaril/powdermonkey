@@ -40,6 +40,35 @@ export function spawnShell(
   return Bun.spawn([SHELL, "-l", "-c", launch], options);
 }
 
+// Spawn an arbitrary command in a PTY (no login shell wrapper, no fall-through to
+// an interactive shell): the command IS the session, so when it exits the PTY
+// closes. Used by the SSH front-end to run the TUI directly as the connection's
+// program — same native-PTY plumbing as spawnShell, just without the shell scaffold.
+export function spawnPty(
+  argv: string[],
+  opts: {
+    cwd?: string;
+    env?: Record<string, string | undefined>;
+    cols?: number;
+    rows?: number;
+    onData: (bytes: Uint8Array) => void;
+  },
+): Pty {
+  const options = {
+    cwd: opts.cwd,
+    env: { TERM: "xterm-256color", ...process.env, ...opts.env },
+    terminal: {
+      cols: opts.cols ?? 80,
+      rows: opts.rows ?? 24,
+      data(_term: unknown, d: unknown) {
+        opts.onData(typeof d === "string" ? new TextEncoder().encode(d) : (d as Uint8Array));
+      },
+    },
+    // biome-ignore lint/suspicious/noExplicitAny: native PTY option not typed yet.
+  } as any;
+  return Bun.spawn(argv, options);
+}
+
 export function writePty(proc: Pty, data: string): void {
   proc.terminal?.write(data);
 }

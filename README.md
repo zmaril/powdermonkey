@@ -90,6 +90,22 @@ first boot. To change the schema, edit `src/server/schema.ts`, then
 `bun run db:generate` (drizzle-kit writes a migration into `drizzle/`, applied at
 next boot). Run the tests with `bun test`.
 
+### SSH front-end (spike)
+
+The supervisor also speaks SSH — `ssh` in and you get a text mirror of the web
+single pane of glass: the live plan tree, active sessions, and notes, with the
+ability to drop straight into an agent's shell (the *same* tmux session the web
+Shell pane uses).
+
+```bash
+ssh -p 4522 127.0.0.1          # the dashboard TUI
+ssh -p 4522 127.0.0.1 status   # a one-shot snapshot (no TTY)
+powdermonkey tui               # the same dashboard, locally, against $PM_URL
+```
+
+Loopback + no auth (single-operator, per design.md) — don't expose the port.
+Toggle with `PM_SSH=0`; see `docs/ssh-frontend.md` for the design.
+
 ### Dispatching to the cloud
 
 A dispatched task runs as a `claude --remote` cloud session in an **isolated
