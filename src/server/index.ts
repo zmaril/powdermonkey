@@ -7,6 +7,7 @@ import { startGithubWatch } from "./github-watch.ts";
 import { reconcile } from "./reconcile.ts";
 import { startSupervisorPty } from "./session-pty.ts";
 import { loadSettings } from "./settings.ts";
+import { startSshServer } from "./ssh.ts";
 
 const PORT = Number(process.env.PORT ?? 4500);
 
@@ -76,5 +77,10 @@ if (RECONCILE_MS > 0) {
 // to subscribers that set task.prUrl and wake reconcile on merge. Catches up on
 // PRs opened before boot on its first tick. Disable with PM_GITHUB_WATCH_INTERVAL_MS=0.
 startGithubWatch();
+
+// SSH front-end: `ssh -p 4522 localhost` drops into the PowderMonkey TUI (a text
+// mirror of the web app). A spike — loopback, no auth (design.md). Opt out with
+// PM_SSH=0. Never fatal: a bind failure just disables the front-end.
+startSshServer();
 
 console.log(`supervisor listening on http://localhost:${app.server?.port}`);
