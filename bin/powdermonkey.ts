@@ -30,6 +30,7 @@ usage:
                                 the project in the current directory; idempotent
   powdermonkey attach           open the tmux dashboard: one pane per session + server
   powdermonkey attach <target>  attach to one named session (e.g. pm-server, pm-session-7)
+  powdermonkey tui              open the text dashboard (the SSH front-end, locally)
   powdermonkey alias [dir]      symlink a short \`pm\` alongside powdermonkey (opt-in)
   powdermonkey --version        print the version
 
@@ -103,6 +104,11 @@ switch (cmd) {
     break;
   case "__server":
     await import("../src/server/index.ts");
+    break;
+  // The text dashboard — the same TUI the SSH front-end serves, run locally against
+  // a supervisor on $PM_URL (default localhost:4500). Importing it runs it.
+  case "tui":
+    await import("../src/tui/main.ts");
     break;
   case "alias":
     process.exit(installAlias(rest[0]));
