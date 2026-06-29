@@ -173,6 +173,11 @@ export const pullRequests = pgTable("pull_requests", {
   agentSessionUrl: text("agent_session_url"),
   agentBody: text("agent_body"),
   agentUpdatedAt: text("agent_updated_at"),
+  // The agent's newest PR comment (footer/marker stripped) — shown live on the worker
+  // card. Cache column like the rest; overwritten each poll, null until it speaks.
+  lastComment: text("last_comment"),
+  lastCommentAt: text("last_comment_at"),
+  lastCommentUrl: text("last_comment_url"),
   // The ledger: when set, we've already asked @claude to rebase this conflict
   // episode; cleared when the PR goes MERGEABLE (or leaves the board) so a later,
   // distinct conflict re-asks. Survives restarts — that's the point of this table.

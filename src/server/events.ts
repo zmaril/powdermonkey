@@ -73,6 +73,13 @@ export type CloudPr = {
   /** Follow-ups the worker handed back via `<!-- pm:followup -->` comments — one per
    *  marked comment, empty when there are none. Turned into proposals by the watcher. */
   followups: FollowupComment[];
+  /** The agent's newest PR comment (its own — carrying the Claude Code footer, not our
+   *  @claude asks), footer/marker stripped, or null. Surfaced live on the worker card. */
+  lastComment: string | null;
+  /** When GitHub last saw that comment (ISO string) — a freshness stamp, or null. */
+  lastCommentAt: string | null;
+  /** Link straight to that comment on GitHub, or null. */
+  lastCommentUrl: string | null;
 };
 
 // `initial` marks events from the startup catch-up sync — PRs that already

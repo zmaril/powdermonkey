@@ -41,6 +41,9 @@ function rowToCloudPr(r: PullRequestRow): CloudPr {
     // Follow-ups are ephemeral — turned into proposals the tick they appear and never
     // persisted on the PR row — so a reconstructed-from-DB PR carries none.
     followups: [],
+    lastComment: r.lastComment,
+    lastCommentAt: r.lastCommentAt,
+    lastCommentUrl: r.lastCommentUrl,
   };
 }
 
@@ -75,6 +78,9 @@ export async function upsertPrState(pr: CloudPr): Promise<void> {
     agentSessionUrl: pr.agent?.sessionUrl ?? null,
     agentBody: pr.agent?.body ?? null,
     agentUpdatedAt: pr.agent?.updatedAt ?? null,
+    lastComment: pr.lastComment,
+    lastCommentAt: pr.lastCommentAt,
+    lastCommentUrl: pr.lastCommentUrl,
     updatedAt: new Date(),
   };
   await db
