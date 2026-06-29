@@ -1,4 +1,5 @@
 import { Anchor, Box, Group, Text, UnstyledButton } from "@mantine/core";
+import { IconExternalLink } from "@tabler/icons-react";
 import { useState } from "react";
 import type { AgentStatus } from "../../server/events.ts";
 
@@ -11,8 +12,8 @@ export function AgentNarrative({ agent }: { agent: AgentStatus }) {
   if (!agent.summary && !agent.next && !agent.body) return null;
   const hasBody = agent.body.trim().length > 0;
   return (
-    <Box pl={16}>
-      <Group gap={6} wrap="nowrap" align="baseline">
+    <Box pl="md">
+      <Group gap="snug" wrap="nowrap" align="baseline">
         <Box style={{ flex: 1, minWidth: 0 }}>
           {agent.summary && (
             <Text size="xs" c="dimmed" title={agent.summary} truncate={!open}>
@@ -31,10 +32,10 @@ export function AgentNarrative({ agent }: { agent: AgentStatus }) {
             target="_blank"
             size="xs"
             fw={500}
-            style={{ flex: "0 0 auto" }}
+            style={{ flex: "0 0 auto", display: "inline-flex", alignItems: "center", gap: 3 }}
             title="The cloud session that authored this status"
           >
-            session ↗
+            session <IconExternalLink size={13} />
           </Anchor>
         )}
         {hasBody && (
@@ -47,14 +48,22 @@ export function AgentNarrative({ agent }: { agent: AgentStatus }) {
       </Group>
       {open && hasBody && (
         <Box
-          mt={4}
-          p={8}
-          style={{ border: "1px solid #2c2e33", borderRadius: 4, background: "#141517" }}
+          mt="tight"
+          p="cozy"
+          style={{
+            border: "1px solid var(--pm-hairline)",
+            borderRadius: 4,
+            background: "var(--pm-page-bg)",
+          }}
         >
           <Text
             size="xs"
             c="dimmed"
-            style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "monospace" }}
+            style={{
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              fontFamily: "var(--mantine-font-family-monospace)",
+            }}
           >
             {agent.body}
           </Text>

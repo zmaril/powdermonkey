@@ -1,4 +1,5 @@
 import { Button, Group, Stack, Text, Title } from "@mantine/core";
+import { IconExternalLink } from "@tabler/icons-react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { SessionState } from "../../shared/types.ts";
 import { sessionTasksCollection, sessionsCollection, tasksCollection } from "../collections.ts";
@@ -9,7 +10,7 @@ import { useStore } from "../store.ts";
 // dead terminal the operator gets a clear end-state and a way out: close the pane,
 // open a fresh shell (at the session's worktree if it still exists, else the repo —
 // the server falls back), or jump to the PR. PR / worktree are looked up from the
-// store by session id; the session↔task join is returned for archived sessions too,
+// store by session id; the session<->task join is returned for archived sessions too,
 // so the PR link survives the session being archived on land/merge.
 export function SessionEndedOverlay({
   sessionId,
@@ -62,8 +63,9 @@ export function SessionEndedOverlay({
               component="a"
               href={prUrl}
               target="_blank"
+              rightSection={<IconExternalLink size={14} />}
             >
-              View PR ↗
+              View PR
             </Button>
           )}
         </Group>

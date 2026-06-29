@@ -1,4 +1,5 @@
 import { Anchor, Badge, Box, Checkbox, Group, Text, UnstyledButton } from "@mantine/core";
+import { IconChevronDown } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { reasonLabel } from "../../../server/generated.ts";
 import type { ReviewFile } from "../../../server/pr-review.ts";
@@ -52,27 +53,26 @@ export function FileBlock({ file }: { file: ReviewFile }) {
   };
 
   return (
-    <Box style={{ border: "1px solid #2c2e33", borderRadius: 6, overflow: "hidden" }}>
-      <Group justify="space-between" px="sm" py={6} style={{ background: "#202225" }}>
-        <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+    <Box style={{ border: "1px solid var(--pm-hairline)", borderRadius: 6, overflow: "hidden" }}>
+      <Group justify="space-between" px="sm" py="snug" style={{ background: "var(--pm-surface)" }}>
+        <Group gap="cozy" wrap="nowrap" style={{ minWidth: 0 }}>
           <UnstyledButton
             onClick={() => setCollapsed((c) => !c)}
             title={collapsed ? "Expand file" : "Collapse file"}
             aria-label={collapsed ? "Expand file" : "Collapse file"}
             aria-expanded={!collapsed}
-            style={{ display: "flex", alignItems: "center", flexShrink: 0, color: "#909296" }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              flexShrink: 0,
+              color: "var(--pm-dim-text)",
+            }}
           >
-            <Text
-              size="sm"
-              c="dimmed"
-              style={{
-                lineHeight: 1,
-                transition: "transform 120ms ease",
-                transform: collapsed ? "rotate(-90deg)" : "none",
-              }}
-            >
-              ▾
-            </Text>
+            <IconChevronDown
+              size={14}
+              className="pm-rotate"
+              style={{ transform: collapsed ? "rotate(-90deg)" : "none" }}
+            />
           </UnstyledButton>
           <Text size="sm" ff="monospace" truncate>
             {file.previousFilename ? `${file.previousFilename} → ` : ""}
@@ -92,7 +92,7 @@ export function FileBlock({ file }: { file: ReviewFile }) {
             </Badge>
           )}
         </Group>
-        <Group gap={10} wrap="nowrap">
+        <Group gap="xs" wrap="nowrap">
           <Text size="xs" c="green">
             +{file.additions}
           </Text>
@@ -115,7 +115,9 @@ export function FileBlock({ file }: { file: ReviewFile }) {
             label="Viewed"
             checked={isViewed}
             onChange={() => toggleViewed(file.filename)}
-            styles={{ label: { fontSize: 11, color: "#909296", paddingLeft: 6 } }}
+            styles={{
+              label: { fontSize: "0.6875rem", color: "var(--pm-dim-text)", paddingLeft: 6 },
+            }}
           />
         </Group>
       </Group>

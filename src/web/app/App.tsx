@@ -1,14 +1,9 @@
 import "dockview-core/dist/styles/dockview.css";
-import {
-  type DockviewApi,
-  DockviewReact,
-  type DockviewReadyEvent,
-  themeAbyss,
-} from "dockview-react";
+import { type DockviewApi, DockviewReact, type DockviewReadyEvent } from "dockview-react";
 import { useEffect, useRef } from "react";
 import { ActivityTab, useTabActivity } from "../TabActivity.tsx";
 import { useNeedsInputNotifications } from "../notifications.ts";
-import { useStore } from "../store.ts";
+import { useActiveTheme, useStore } from "../store.ts";
 import { DisconnectBanner } from "./DisconnectBanner.tsx";
 import { ReviewOverlay } from "./ReviewOverlay.tsx";
 import { TopBar } from "./TopBar.tsx";
@@ -137,17 +132,23 @@ export function App() {
   }, [paneReq]);
 
   const disconnected = useConnectionWatch();
+  // The dock chrome follows the selected editor theme (store state). Switching it in
+  // Settings swaps dockview's theme live, alongside the Mantine re-skin in main.tsx.
+  const editor = useActiveTheme();
+  // One Dark has no native dockview theme — it rides Abyss, re-skinned in theme.css.
+  // The wrapper class scopes that re-skin so the native Abyss theme stays untouched.
+  const skinClass = editor.key === "one-dark" ? "pm-skin-onedark" : undefined;
 
   return (
     <div style={{ height: "100vh", width: "100vw", display: "flex", flexDirection: "column" }}>
       {disconnected && <DisconnectBanner />}
       <TopBar />
-      <div style={{ flex: 1, minHeight: 0 }}>
+      <div className={skinClass} style={{ flex: 1, minHeight: 0 }}>
         <DockviewReact
           components={dockComponents}
           defaultTabComponent={ActivityTab}
           onReady={onReady}
-          theme={themeAbyss}
+          theme={editor.dockTheme}
         />
       </div>
       <ReviewOverlay />

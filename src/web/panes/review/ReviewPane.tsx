@@ -1,8 +1,10 @@
 import { Anchor, Box, Button, Group, SegmentedControl, Text } from "@mantine/core";
-import { DockviewReact, type DockviewReadyEvent, themeAbyss } from "dockview-react";
+import { IconExternalLink, IconX } from "@tabler/icons-react";
+import { DockviewReact, type DockviewReadyEvent } from "dockview-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PrReview, ReviewEvent } from "../../../server/pr-review.ts";
 import { api } from "../../client.ts";
+import { useActiveTheme } from "../../store.ts";
 import { DescriptionPanel } from "./DescriptionPanel.tsx";
 import { FilesPanel } from "./FilesPanel.tsx";
 import { ReviewBar } from "./ReviewBar.tsx";
@@ -49,6 +51,9 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<"unified" | "split">("unified");
   const [posting, setPosting] = useState(false);
+  // The review hosts its own nested dockview; theme it with the active editor theme
+  // so the review surface matches the rest of the app instead of a fixed dark dock.
+  const dockTheme = useActiveTheme().dockTheme;
   // The line currently being commented on: `${path}::${side}::${line}`, plus the
   // resolved anchor so we know what to draft.
   const [compose, setCompose] = useState<{
@@ -221,10 +226,15 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
 
   return (
     <Box
-      style={{ height: "100%", display: "flex", flexDirection: "column", background: "#1a1b1e" }}
+      style={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--pm-pane-bg)",
+      }}
     >
-      <Group justify="space-between" px="md" py={8} style={{ flex: "0 0 auto" }} wrap="nowrap">
-        <Group gap={8} style={{ minWidth: 0 }}>
+      <Group justify="space-between" px="md" py="cozy" style={{ flex: "0 0 auto" }} wrap="nowrap">
+        <Group gap="cozy" style={{ minWidth: 0 }}>
           <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5, flexShrink: 0 }}>
             REVIEW
           </Text>
@@ -235,15 +245,14 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
             <Anchor
               href={review.url}
               target="_blank"
-              size="xs"
               c="dimmed"
-              style={{ flexShrink: 0 }}
+              style={{ flexShrink: 0, display: "inline-flex", lineHeight: 1 }}
             >
-              ↗
+              <IconExternalLink size={14} />
             </Anchor>
           )}
         </Group>
-        <Group gap={8} wrap="nowrap">
+        <Group gap="cozy" wrap="nowrap">
           <SegmentedControl
             size="xs"
             value={view}
@@ -263,8 +272,9 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
               color="gray"
               onClick={onClose}
               title="Close review (Esc)"
+              leftSection={<IconX size={14} />}
             >
-              ✕ Close
+              Close
             </Button>
           )}
         </Group>
@@ -287,11 +297,7 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
       ) : (
         <ReviewCtx.Provider value={ctx}>
           <Box style={{ flex: 1, minHeight: 0 }}>
-            <DockviewReact
-              components={REVIEW_DOCK}
-              onReady={buildReviewLayout}
-              theme={themeAbyss}
-            />
+            <DockviewReact components={REVIEW_DOCK} onReady={buildReviewLayout} theme={dockTheme} />
           </Box>
           <ReviewBar
             draft={draft}

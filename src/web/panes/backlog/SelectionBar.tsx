@@ -13,7 +13,7 @@ export function SelectionBar({ ids, clear }: { ids: number[]; clear: () => void 
       style={{
         flex: "0 0 auto",
         borderTop: "2px solid var(--mantine-color-blue-5)",
-        background: "#1b2434",
+        background: "var(--pm-surface)",
         boxShadow: "0 -4px 22px 2px rgba(59,130,246,0.5)",
       }}
     >

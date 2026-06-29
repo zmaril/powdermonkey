@@ -1,4 +1,5 @@
 import { Button, Card, Group, Text } from "@mantine/core";
+import { IconAlertTriangle } from "@tabler/icons-react";
 import { useState } from "react";
 import type { Phase, Task } from "../../../server/schema.ts";
 import { Decision, ProposalOp } from "../../../shared/types.ts";
@@ -43,7 +44,7 @@ export function BacklogCard({
   phaseGhosts?: Ghost[];
   phaseEdits?: EntityEdit[];
   /** Told when this card enters/leaves edit mode, so the list can suspend its animation
-   *  (the card↔editor swap shouldn't morph for 300ms — editing should feel instant). */
+   *  (the card<->editor swap shouldn't morph for 300ms — editing should feel instant). */
   onEditingChange?: (editing: boolean) => void;
 }) {
   const { busy, conflict, decide } = useDecide();
@@ -87,7 +88,7 @@ export function BacklogCard({
         }
       }}
     >
-      <Group justify="space-between" wrap="nowrap" mb={6}>
+      <Group justify="space-between" wrap="nowrap" mb="snug">
         <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
           <StarToggle task={task} />
           <IdTag prefix="t" id={task.id} />
@@ -117,7 +118,7 @@ export function BacklogCard({
       {/* A proposed delete strikes the whole task — title and every phase. */}
       <PhaseList phases={phases} struck={archiveProposed} />
       {!selection.active && (
-        <Group justify="flex-end" mt={8}>
+        <Group justify="flex-end" mt="cozy">
           <TaskActions ids={[task.id]} />
         </Group>
       )}
@@ -149,8 +150,9 @@ export function BacklogCard({
         ),
       )}
       {conflict && (
-        <Group mt={6}>
-          <span style={{ fontSize: 12, color: "var(--mantine-color-orange-4)" }}>⚠ {conflict}</span>
+        <Group mt="snug" gap="tight" wrap="nowrap" c="orange.4">
+          <IconAlertTriangle size={14} style={{ flexShrink: 0 }} />
+          <Text size="xs">{conflict}</Text>
         </Group>
       )}
     </Card>

@@ -13,7 +13,7 @@ export function GhostHeader({ ghost }: { ghost: Ghost }) {
   const { busy, decide } = useDecide();
   return (
     <Card withBorder radius="md" padding="sm" style={{ border: GHOST_BORDER }}>
-      <Text fw={600} truncate mb={6}>
+      <Text fw={600} truncate mb="snug">
         {ghost.title}
       </Text>
       <ProposedStrip

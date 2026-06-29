@@ -15,7 +15,7 @@ export function TaskBadges({
   // and only fall back to the task field when there's no live session attached.
   const state = session?.state ?? task.sessionState;
   return (
-    <Group gap={6} wrap="nowrap">
+    <Group gap="snug" wrap="nowrap">
       {session?.needsInput && (
         <Badge color="yellow" variant="filled">
           needs you

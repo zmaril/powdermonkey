@@ -1,9 +1,9 @@
 import { Button, Popover, Stack, Text, Textarea } from "@mantine/core";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 
-/** A launch button (💻▶ / ☁️▶) that opens a popover to attach an optional note for
- *  this run before launching — the note rides into the worker's prompt. Just hit the
- *  confirm (or ⌘/Ctrl+Enter) to launch with no note. [prototype] */
+/** A launch button (laptop/cloud + play) that opens a popover to attach an optional
+ *  note for this run before launching — the note rides into the worker's prompt. Just
+ *  hit the confirm (or Cmd/Ctrl+Enter) to launch with no note. [prototype] */
 export function LaunchButton({
   icon,
   label,
@@ -12,7 +12,7 @@ export function LaunchButton({
   disabled,
   onRun,
 }: {
-  icon: string;
+  icon: ReactNode;
   label: string;
   color?: string;
   loading: boolean;

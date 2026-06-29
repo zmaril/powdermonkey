@@ -57,13 +57,20 @@ export function ActivePane({ api }: { api?: DockviewPanelApi }) {
   const localCount = [...activeSessions.values()].filter(
     (s) => s.kind === SessionKind.Local,
   ).length;
+  const RemoteIcon = KIND_ICON[SessionKind.Remote];
+  const LocalIcon = KIND_ICON[SessionKind.Local];
 
   return (
     <Box
-      style={{ height: "100%", display: "flex", flexDirection: "column", background: "#1a1b1e" }}
+      style={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--pm-pane-bg)",
+      }}
     >
-      <Group justify="space-between" px="md" py={8} style={{ flex: "0 0 auto" }}>
-        <Group gap={8}>
+      <Group justify="space-between" px="md" py="cozy" style={{ flex: "0 0 auto" }}>
+        <Group gap="cozy">
           <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
             ACTIVE
           </Text>
@@ -72,16 +79,18 @@ export function ActivePane({ api }: { api?: DockviewPanelApi }) {
             variant="light"
             color={cloudCount > 0 ? "blue" : "gray"}
             title="cloud sessions"
+            leftSection={<RemoteIcon size={12} />}
           >
-            {KIND_ICON[SessionKind.Remote]} {cloudCount}
+            {cloudCount}
           </Badge>
           <Badge
             size="sm"
             variant="light"
             color={localCount > 0 ? "blue" : "gray"}
             title="local sessions"
+            leftSection={<LocalIcon size={12} />}
           >
-            {KIND_ICON[SessionKind.Local]} {localCount}
+            {localCount}
           </Badge>
         </Group>
         <Group gap="md" wrap="nowrap">
@@ -97,7 +106,9 @@ export function ActivePane({ api }: { api?: DockviewPanelApi }) {
               onChange={(e) => setAutoRebase(e.currentTarget.checked)}
               label="auto-rebase"
               labelPosition="left"
-              styles={{ label: { fontSize: "var(--mantine-font-size-xs)", color: "#909296" } }}
+              styles={{
+                label: { fontSize: "var(--mantine-font-size-xs)", color: "var(--pm-dim-text)" },
+              }}
             />
           </Tooltip>
           <SegmentedControl

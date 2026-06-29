@@ -13,7 +13,7 @@ import type { Selection, View } from "./types.ts";
 
 // The Backlog pane is the launchpad — everything to-be-worked (not active),
 // grouped goal → milestone as cards (or one flat star-first list). Every card
-// carries the same action cluster (TaskActions): launch it 💻/☁️ or close it
+// carries the same action cluster (TaskActions): launch it local/remote or close it
 // (DONE / WONTDO). Shift-click a card to add it to a multi-selection; while a
 // selection is live the per-card actions hide and one batch bar drives the whole
 // set as ONE launch — so it's clear they move together. Goals and milestones have
@@ -126,10 +126,15 @@ export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
 
   return (
     <Box
-      style={{ height: "100%", display: "flex", flexDirection: "column", background: "#1a1b1e" }}
+      style={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--pm-pane-bg)",
+      }}
     >
-      <Group justify="space-between" px="md" py={8} style={{ flex: "0 0 auto" }}>
-        <Group gap={8}>
+      <Group justify="space-between" px="md" py="cozy" style={{ flex: "0 0 auto" }}>
+        <Group gap="cozy">
           <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
             BACKLOG
           </Text>
@@ -160,7 +165,7 @@ export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
         // position relative anchors contentTop's offset walk (see the helper).
         style={{ flex: 1, overflowY: "auto", overflowAnchor: "none", position: "relative" }}
         px={view === "grouped" ? "md" : 0}
-        py={4}
+        py="tight"
       >
         <Box px={view === "grouped" ? 0 : "md"}>
           <StartPanel />

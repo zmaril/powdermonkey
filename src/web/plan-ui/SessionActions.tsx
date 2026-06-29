@@ -1,4 +1,5 @@
 import { Anchor, Button, Group } from "@mantine/core";
+import { IconExternalLink } from "@tabler/icons-react";
 import type { Session } from "../../server/schema.ts";
 import { SessionKind } from "../../shared/types.ts";
 import { useStore } from "../store.ts";
@@ -14,14 +15,20 @@ export function SessionActions({ session, taskId }: { session: Session; taskId: 
   const isRemote = session.kind === SessionKind.Remote;
   const teleporting = pending[`teleport:${taskId}`] ?? false;
   // No kind/branch badge here — the worker card's header already shows the kind
-  // icon and running state, so repeating "☁ remote" next to it was pure noise.
+  // icon and running state, so repeating "remote" next to it was pure noise.
   return (
     <Group gap="xs" wrap="nowrap">
       {isRemote ? (
         <>
           {session.url && (
-            <Anchor href={session.url} target="_blank" size="sm" fw={500}>
-              session ↗
+            <Anchor
+              href={session.url}
+              target="_blank"
+              size="sm"
+              fw={500}
+              style={{ display: "inline-flex", alignItems: "center", gap: 3 }}
+            >
+              session <IconExternalLink size={13} />
             </Anchor>
           )}
           <Button

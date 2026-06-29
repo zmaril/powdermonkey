@@ -21,7 +21,7 @@ export function ProposedStrip({
     <Group
       gap="xs"
       wrap="nowrap"
-      mt={8}
+      mt="cozy"
       style={{ borderTop: "1px dashed var(--mantine-color-teal-7)", paddingTop: 8 }}
     >
       <Text size="xs" c="teal.3" truncate style={{ flex: 1, minWidth: 0 }} title={hint}>

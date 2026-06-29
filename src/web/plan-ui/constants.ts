@@ -1,3 +1,4 @@
+import { type Icon, IconCloud, IconDeviceLaptop } from "@tabler/icons-react";
 import { SessionKind, SessionState, TaskStatus } from "../../shared/types.ts";
 
 // Shared lookup maps for the task/session badges rendered across the panes
@@ -19,10 +20,10 @@ export const SESSION_BADGE: Record<SessionState, { label: string; color: string 
   [SessionState.Stopped]: { label: "stopped", color: "red" }, // lint-allow-string: UI label
 };
 
-// Glyph per session kind. Typed as Record<SessionKind, …> so adding a kind is a
+// Icon per session kind. Typed as Record<SessionKind, Icon> so adding a kind is a
 // compile error here until it has an icon — the same total-coverage guarantee the
-// status/badge maps rely on.
-export const KIND_ICON: Record<SessionKind, string> = {
-  [SessionKind.Local]: "💻",
-  [SessionKind.Remote]: "☁️",
+// status/badge maps rely on. Consumers render the component (e.g. `<Icon size={14} />`).
+export const KIND_ICON: Record<SessionKind, Icon> = {
+  [SessionKind.Local]: IconDeviceLaptop,
+  [SessionKind.Remote]: IconCloud,
 };

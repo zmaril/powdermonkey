@@ -21,7 +21,7 @@ export function AgentStateBadge({ agent }: { agent: AgentStatus }) {
   const blocked = agent.state === AgentState.Blocked;
   const color = AGENT_BADGE[agent.state].color;
   return (
-    <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
+    <Group gap="tight" wrap="nowrap" style={{ flexShrink: 0 }}>
       <Badge
         size="xs"
         variant={blocked ? "filled" : "light"}

@@ -20,10 +20,15 @@ export function ArchivePane({ api }: { api?: DockviewPanelApi }) {
 
   return (
     <Box
-      style={{ height: "100%", display: "flex", flexDirection: "column", background: "#1a1b1e" }}
+      style={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--pm-pane-bg)",
+      }}
     >
-      <Group justify="space-between" px="md" py={8} style={{ flex: "0 0 auto" }}>
-        <Group gap={8}>
+      <Group justify="space-between" px="md" py="cozy" style={{ flex: "0 0 auto" }}>
+        <Group gap="cozy">
           <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
             ARCHIVE
           </Text>
@@ -47,7 +52,7 @@ export function ArchivePane({ api }: { api?: DockviewPanelApi }) {
         onScroll={scroll.onScroll}
         style={{ flex: 1, overflowY: "auto" }}
         px={view === "grouped" ? "md" : 0}
-        py={4}
+        py="tight"
       >
         {tasks.length === 0 ? (
           <Text c="dimmed" size="sm" px="md" py="lg">

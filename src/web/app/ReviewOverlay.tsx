@@ -26,7 +26,7 @@ export function ReviewOverlay() {
         position: "fixed",
         inset: 0,
         zIndex: 1000,
-        background: "#1a1b1e",
+        background: "var(--pm-pane-bg)",
         display: "flex",
         flexDirection: "column",
       }}

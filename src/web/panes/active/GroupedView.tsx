@@ -22,13 +22,13 @@ export function GroupedView({ activeIds, idx }: { activeIds: Set<number>; idx: I
     <Stack gap="lg">
       {sections.map(({ goal, milestone, groups }) => (
         <Box key={milestone.id}>
-          <Group gap={6} wrap="nowrap" align="baseline">
+          <Group gap="snug" wrap="nowrap" align="baseline">
             <IdTag prefix="g" id={goal.id} />
             <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
               {goal.title}
             </Text>
           </Group>
-          <Group gap={8} wrap="nowrap" align="baseline" mb={6}>
+          <Group gap="cozy" wrap="nowrap" align="baseline" mb="snug">
             <IdTag prefix="m" id={milestone.id} />
             <Title order={5}>{milestone.title}</Title>
           </Group>
