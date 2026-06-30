@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import type { Session, Task } from "../src/server/schema.ts";
 import {
   PANE_SESSIONS,
-  PANE_ARCHIVE,
   PANE_TASKS,
   paneActivity,
   snapshotActivity,
@@ -35,15 +34,14 @@ test("an already-known, unchanged session lights up nothing", () => {
 });
 
 test("task status routes to the pane it moved toward", () => {
-  const prev = snapshotActivity([], [task(1, "pending"), task(2, "dispatched"), task(3, "pending")]);
-  const next = snapshotActivity(
+  const prev = snapshotActivity(
     [],
-    [task(1, "dispatched"), task(2, "merged"), task(3, "pending")],
+    [task(1, "pending"), task(2, "dispatched"), task(3, "pending")],
   );
+  const next = snapshotActivity([], [task(1, "dispatched"), task(2, "merged"), task(3, "pending")]);
   const panes = paneActivity(prev, next);
   expect(panes.has(PANE_SESSIONS)).toBe(true); // 1: pending → dispatched (Sessions)
-  expect(panes.has(PANE_ARCHIVE)).toBe(true); // 2: dispatched → merged
-  expect(panes.has(PANE_TASKS)).toBe(false); // 3: unchanged
+  expect(panes.has(PANE_TASKS)).toBe(true); // 2: dispatched → merged (done lives in Tasks now)
 });
 
 test("a task rolled back to pending lights up Tasks", () => {

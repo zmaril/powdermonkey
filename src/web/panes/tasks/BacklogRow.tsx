@@ -1,11 +1,12 @@
 import { Box, Group, Text } from "@mantine/core";
 import type { Phase, Task } from "../../../server/schema.ts";
-import { Decision, ProposalOp } from "../../../shared/types.ts";
+import { Decision, ProposalOp, TaskStatus } from "../../../shared/types.ts";
 import { type EntityEdit, type Ghost, editLabel } from "../../ghosts.ts";
 import type { Indexes } from "../../plan-data.ts";
 import { IdTag, ProgressPill, StarToggle } from "../../plan-ui";
 import { ProposedStrip } from "./ProposedStrip.tsx";
 import { TaskActions } from "./TaskActions.tsx";
+import { TaskOutcome } from "./TaskOutcome.tsx";
 import { GHOST_BORDER_COLOR, SELECTED_SHADOW } from "./constants.ts";
 import type { Selection } from "./types.ts";
 import { useDecide } from "./useDecide.ts";
@@ -77,6 +78,12 @@ export function BacklogRow({
   const phases = idx.phasesByTask.get(task.id) ?? [];
   const checked = selection.selected.has(task.id);
   const archiveProposed = edits.some((e) => e.op === ProposalOp.Archive);
+  // A finished / won't-do / archived task shows its outcome (badge + reopen + links)
+  // in place of the launch actions — the old Archive row, folded in.
+  const terminal =
+    task.status === TaskStatus.Merged ||
+    task.status === TaskStatus.Cancelled ||
+    task.archivedAt != null;
   return (
     <Box
       px="sm"
@@ -120,7 +127,8 @@ export function BacklogRow({
           )}
         </Box>
         {phases.length > 0 && <ProgressPill phases={phases} />}
-        {!selection.active && <TaskActions ids={[task.id]} />}
+        {!selection.active &&
+          (terminal ? <TaskOutcome task={task} /> : <TaskActions ids={[task.id]} />)}
       </Group>
       {edits.map((e) =>
         strip(

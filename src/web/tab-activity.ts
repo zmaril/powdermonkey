@@ -10,7 +10,6 @@ import { TaskStatus } from "../shared/types.ts";
 // Pane ids — these match the dockview panel ids built in App's default layout.
 export const PANE_SESSIONS = "sessions";
 export const PANE_TASKS = "tasks";
-export const PANE_ARCHIVE = "archive"; // lint-allow-string: dockview pane id, not an enum value
 
 /** The slice of state the indicators react to, reduced to plain maps so two
  *  snapshots can be diffed cheaply. */
@@ -33,7 +32,8 @@ export function snapshotActivity(sessions: Session[], tasks: Task[]): ActivitySn
  *   • a new live session (dispatch / start-local / teleport) → Sessions
  *   • a needs-you transition (needs_input false→true)        → Sessions
  *   • a task status change                                   → the pane it moved
- *     toward: merged → Archive, dispatched → Sessions, pending → Tasks. */
+ *     toward: merged/pending → Tasks (done & backlog both live there now that the
+ *     Archive tab is folded into a status filter), dispatched → Sessions. */
 export function paneActivity(prev: ActivitySnapshot, next: ActivitySnapshot): Set<string> {
   const panes = new Set<string>();
   const prevSessions = new Set(prev.sessionIds);
@@ -47,7 +47,7 @@ export function paneActivity(prev: ActivitySnapshot, next: ActivitySnapshot): Se
     const id = Number(idStr);
     const before = prev.taskStatus[id];
     if (before === undefined || before === status) continue;
-    if (status === TaskStatus.Merged) panes.add(PANE_ARCHIVE);
+    if (status === TaskStatus.Merged) panes.add(PANE_TASKS);
     else if (status === TaskStatus.Dispatched) panes.add(PANE_SESSIONS);
     else if (status === TaskStatus.Pending) panes.add(PANE_TASKS);
   }
