@@ -15,6 +15,7 @@ import {
   scopeOptions,
   scopeValue,
 } from "../filters.ts";
+import { useWindow } from "../use-window.ts";
 import { FlatView } from "./FlatView.tsx";
 import { GoalGroup } from "./GoalGroup.tsx";
 import { SelectionBar } from "./SelectionBar.tsx";
@@ -137,6 +138,10 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
   const visibleTasks = allTasks.filter((t) => matchTask(t, idx, activeIds, filter));
   const visible = new Set(visibleTasks.map((t) => t.id));
   const goals = [...idx.goals].sort((a, b) => a.id - b.id);
+  // The flat view can run long (every task, any status), so window it; the grouped view
+  // is already chunked by goal/milestone headers. The full set stays live underneath.
+  const win = useWindow(visibleTasks.length, `${view}:${JSON.stringify(filter)}`, scroll.ref);
+  const shownTasks = visibleTasks.slice(0, win.limit);
 
   const toggle = (id: number) =>
     setSelected((prev) => {
@@ -226,13 +231,22 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
               No tasks match.
             </Text>
           ) : (
-            <FlatView
-              tasks={visibleTasks}
-              idx={idx}
-              selection={selection}
-              ghosts={ghosts}
-              edits={edits}
-            />
+            <>
+              <FlatView
+                tasks={shownTasks}
+                idx={idx}
+                selection={selection}
+                ghosts={ghosts}
+                edits={edits}
+              />
+              {win.hasMore && (
+                <div ref={win.sentinelRef}>
+                  <Text c="dimmed" size="xs" ta="center" py="sm">
+                    loading more… ({shownTasks.length} of {visibleTasks.length})
+                  </Text>
+                </div>
+              )}
+            </>
           )
         ) : (
           <Stack gap="xl">

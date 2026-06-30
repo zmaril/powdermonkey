@@ -19,6 +19,7 @@ import {
   scopeOptions,
   scopeValue,
 } from "../filters.ts";
+import { useWindow } from "../use-window.ts";
 import { WorkerCard } from "./WorkerCard.tsx";
 
 // The status buckets the operator filters on (default Running = live). Values are the
@@ -67,6 +68,10 @@ export function SessionsPane({ api }: { api?: DockviewPanelApi }) {
   const visible = ordered.filter((s) =>
     matchSession(s, idx.tasksBySession.get(s.id) ?? [], idx, filter),
   );
+  // Window the (potentially long) history so the DOM stays small; the full list is still
+  // live underneath. The filter signature resets the window to the first page.
+  const win = useWindow(visible.length, JSON.stringify(filter), scroll.ref);
+  const shown = visible.slice(0, win.limit);
   const live = ordered.filter((s) => s.archivedAt == null);
   const cloudCount = live.filter((s) => s.kind === SessionKind.Remote).length;
   const localCount = live.filter((s) => s.kind === SessionKind.Local).length;
@@ -162,7 +167,7 @@ export function SessionsPane({ api }: { api?: DockviewPanelApi }) {
           </Text>
         ) : (
           <Stack gap="xs">
-            {visible.map((s) => (
+            {shown.map((s) => (
               <WorkerCard
                 key={s.id}
                 session={s}
@@ -171,6 +176,13 @@ export function SessionsPane({ api }: { api?: DockviewPanelApi }) {
                 showContext
               />
             ))}
+            {win.hasMore && (
+              <div ref={win.sentinelRef}>
+                <Text c="dimmed" size="xs" ta="center" py="sm">
+                  loading more… ({shown.length} of {visible.length})
+                </Text>
+              </div>
+            )}
           </Stack>
         )}
       </Box>
