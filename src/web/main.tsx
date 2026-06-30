@@ -1,3 +1,7 @@
+// First import, before react-dom: the opt-in re-render diagnostic (off unless
+// ?scan / localStorage flag is set) must patch React's hook before react-dom
+// registers its renderer, or it sees nothing. See react-scan.ts.
+import "./react-scan.ts";
 import "@mantine/core/styles.css";
 import { MantineProvider, createTheme } from "@mantine/core";
 import { createRoot } from "react-dom/client";

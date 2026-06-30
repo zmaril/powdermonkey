@@ -19,6 +19,7 @@
     "serve": "bun run bin/powdermonkey.ts serve",
     "attach": "bun run bin/powdermonkey.ts attach",
     "build:web": "bun build src/web/main.tsx --outdir public/assets --target browser",
+    "build:web:scan": "NODE_ENV=development bun build src/web/main.tsx --outdir public/assets --target browser --define 'process.env.NODE_ENV=\"development\"'",
     "build:compile": "bun run build:web && rm -rf dist && mkdir -p dist && bun build --compile bin/powdermonkey.ts --outfile dist/powdermonkey && cp -r public drizzle dist/ && cp node_modules/@electric-sql/pglite/dist/postgres.wasm node_modules/@electric-sql/pglite/dist/postgres.data dist/",
     "db:generate": "drizzle-kit generate",
     "check": "biome check src && bun run scripts/lint-strings.ts",
@@ -59,6 +60,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "drizzle-kit": "^0.30.0",
-    "playwright-core": "^1.61.1"
+    "playwright-core": "^1.61.1",
+    "react-scan": "^0.5.7"
   }
 }
