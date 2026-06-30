@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { Session, Task } from "../src/server/schema.ts";
 import {
-  PANE_ACTIVE,
+  PANE_SESSIONS,
   PANE_ARCHIVE,
   PANE_BACKLOG,
   paneActivity,
@@ -16,16 +16,16 @@ const session = (id: number, needsInput = false) =>
 const task = (id: number, status: Task["status"]) =>
   ({ id, milestoneId: 1, title: `t${id}`, status }) as Task;
 
-test("a new live session lights up Active", () => {
+test("a new live session lights up Sessions", () => {
   const prev = snapshotActivity([], []);
   const next = snapshotActivity([session(1)], []);
-  expect([...paneActivity(prev, next)]).toEqual([PANE_ACTIVE]);
+  expect([...paneActivity(prev, next)]).toEqual([PANE_SESSIONS]);
 });
 
-test("a needs-you transition lights up Active", () => {
+test("a needs-you transition lights up Sessions", () => {
   const prev = snapshotActivity([session(1, false)], []);
   const next = snapshotActivity([session(1, true)], []);
-  expect([...paneActivity(prev, next)]).toEqual([PANE_ACTIVE]);
+  expect([...paneActivity(prev, next)]).toEqual([PANE_SESSIONS]);
 });
 
 test("an already-known, unchanged session lights up nothing", () => {
@@ -41,7 +41,7 @@ test("task status routes to the pane it moved toward", () => {
     [task(1, "dispatched"), task(2, "merged"), task(3, "pending")],
   );
   const panes = paneActivity(prev, next);
-  expect(panes.has(PANE_ACTIVE)).toBe(true); // 1: pending → dispatched
+  expect(panes.has(PANE_SESSIONS)).toBe(true); // 1: pending → dispatched (Sessions)
   expect(panes.has(PANE_ARCHIVE)).toBe(true); // 2: dispatched → merged
   expect(panes.has(PANE_BACKLOG)).toBe(false); // 3: unchanged
 });

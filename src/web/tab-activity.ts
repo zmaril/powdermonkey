@@ -8,7 +8,7 @@ import { TaskStatus } from "../shared/types.ts";
 // be unit-tested. The rendering + clear-on-view live in TabActivity.tsx.
 
 // Pane ids — these match the dockview panel ids built in App's default layout.
-export const PANE_ACTIVE = "active";
+export const PANE_SESSIONS = "sessions";
 export const PANE_BACKLOG = "backlog";
 export const PANE_ARCHIVE = "archive"; // lint-allow-string: dockview pane id, not an enum value
 
@@ -30,17 +30,17 @@ export function snapshotActivity(sessions: Session[], tasks: Task[]): ActivitySn
 
 /** Which panes should light up given the change from prev→next. Pure; the caller
  *  suppresses flags for whichever tab is already on screen. The triggers:
- *   • a new live session (dispatch / start-local / teleport) → Active
- *   • a needs-you transition (needs_input false→true)        → Active
+ *   • a new live session (dispatch / start-local / teleport) → Sessions
+ *   • a needs-you transition (needs_input false→true)        → Sessions
  *   • a task status change                                   → the pane it moved
- *     toward: merged → Archive, dispatched → Active, pending → Backlog. */
+ *     toward: merged → Archive, dispatched → Sessions, pending → Backlog. */
 export function paneActivity(prev: ActivitySnapshot, next: ActivitySnapshot): Set<string> {
   const panes = new Set<string>();
   const prevSessions = new Set(prev.sessionIds);
 
   for (const id of next.sessionIds) {
-    if (!prevSessions.has(id)) panes.add(PANE_ACTIVE); // a session appeared
-    if (next.needsInput[id] && !prev.needsInput[id]) panes.add(PANE_ACTIVE); // needs you now
+    if (!prevSessions.has(id)) panes.add(PANE_SESSIONS); // a session appeared
+    if (next.needsInput[id] && !prev.needsInput[id]) panes.add(PANE_SESSIONS); // needs you now
   }
 
   for (const [idStr, status] of Object.entries(next.taskStatus)) {
@@ -48,7 +48,7 @@ export function paneActivity(prev: ActivitySnapshot, next: ActivitySnapshot): Se
     const before = prev.taskStatus[id];
     if (before === undefined || before === status) continue;
     if (status === TaskStatus.Merged) panes.add(PANE_ARCHIVE);
-    else if (status === TaskStatus.Dispatched) panes.add(PANE_ACTIVE);
+    else if (status === TaskStatus.Dispatched) panes.add(PANE_SESSIONS);
     else if (status === TaskStatus.Pending) panes.add(PANE_BACKLOG);
   }
 

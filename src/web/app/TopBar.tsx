@@ -40,7 +40,7 @@ export function TopBar() {
           )}
         </Group>
         <Group gap="hair" wrap="nowrap">
-          <PaneButton label="Active" onClick={() => openPane("active")} />
+          <PaneButton label="Sessions" onClick={() => openPane("sessions")} />
           <PaneButton label="Backlog" onClick={() => openPane("backlog")} />
           <PaneButton
             label="Archive"

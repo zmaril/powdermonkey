@@ -1,8 +1,9 @@
 import { Badge, Box, Group, SegmentedControl, Stack, Text } from "@mantine/core";
 import type { DockviewPanelApi } from "dockview-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { TaskStatus } from "../../../shared/types.ts";
 import { usePaneScroll } from "../../pane-scroll.ts";
-import { useArchiveData } from "../../plan-data.ts";
+import { useFullData } from "../../plan-data.ts";
 import { FlatView } from "./FlatView.tsx";
 import { GroupedView } from "./GroupedView.tsx";
 
@@ -14,7 +15,12 @@ import { GroupedView } from "./GroupedView.tsx";
 type View = "flat" | "grouped";
 
 export function ArchivePane({ api }: { api?: DockviewPanelApi }) {
-  const { idx, tasks } = useArchiveData();
+  const { idx, tasks: allTasks } = useFullData();
+  // The book of work: everything finished (merged) or archived.
+  const tasks = useMemo(
+    () => allTasks.filter((t) => t.archivedAt != null || t.status === TaskStatus.Merged),
+    [allTasks],
+  );
   const [view, setView] = useState<View>("flat");
   const scroll = usePaneScroll("archive", api); // lint-allow-string: pane scroll key, not an enum value
 

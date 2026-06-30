@@ -11,9 +11,9 @@ import { TopBar } from "./TopBar.tsx";
 import { PANE_TITLES, buildDefaultLayout, dockComponents } from "./layout.ts";
 import { useConnectionWatch } from "./useConnectionWatch.ts";
 
-// The single pane of glass. The plan is split into three panels — a live ACTIVE
-// monitor, a launchpad BACKLOG editor, and the ARCHIVE book of work — alongside
-// the scratchpad and the supervisor shell. Every panel renders off TanStack DB
+// The single pane of glass. The plan is split into three panels — a SESSIONS
+// monitor (every run of work, live + history), a launchpad BACKLOG editor, and the
+// ARCHIVE book of work — alongside the scratchpad and the supervisor shell. Every panel renders off TanStack DB
 // collections (collections.ts) that sync themselves live from PGlite over /sync —
 // no store data, no poll, no refetch (see plan-data.ts).
 //
@@ -102,7 +102,7 @@ export function App() {
   // Browser button → add a new browser pane (an iframe on a dev server / preview).
   // Each request opens a distinct panel (keyed by `n`) so you can watch several
   // previews at once; the loaded URL rides in the panel params so it persists with
-  // the layout. Added in the main group, alongside Active/Backlog/Archive.
+  // the layout. Added in the main group, alongside Sessions/Backlog/Archive.
   useEffect(() => {
     const api = apiRef.current;
     if (!browserReq) return;
@@ -111,12 +111,12 @@ export function App() {
       component: "browser",
       params: { url: browserReq.url },
       title: "Browser",
-      position: { referencePanel: "active", direction: "within" },
+      position: { referencePanel: "sessions", direction: "within" },
     });
   }, [browserReq]);
 
   // A pane-launcher button → focus the singleton pane if it's already open, else add
-  // it. New panes land "within" the main group (next to Active/Backlog/Archive) when
+  // it. New panes land "within" the main group (next to Sessions/Backlog/Archive) when
   // that anchor exists, otherwise wherever dockview puts a group-less panel — so a
   // launcher always brings the pane up even if the default layout was torn apart.
   useEffect(() => {
@@ -127,7 +127,7 @@ export function App() {
       existing.api.setActive();
       return;
     }
-    const anchor = api.getPanel("active") ? "active" : api.panels[0]?.id;
+    const anchor = api.getPanel("sessions") ? "sessions" : api.panels[0]?.id;
     api.addPanel({
       id: paneReq.id,
       component: paneReq.id,

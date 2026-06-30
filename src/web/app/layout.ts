@@ -1,20 +1,20 @@
 import type { DockviewApi } from "dockview-react";
 import { AboutPanel } from "./AboutPanel.tsx";
-import { ActivePanel } from "./ActivePanel.tsx";
 import { ArchivePanel } from "./ArchivePanel.tsx";
 import { BacklogPanel } from "./BacklogPanel.tsx";
 import { BrowserPanel } from "./BrowserPanel.tsx";
 import { HelpPanel } from "./HelpPanel.tsx";
 import { ScratchPanel } from "./ScratchPanel.tsx";
+import { SessionsPanel } from "./SessionsPanel.tsx";
 import { SettingsPanel } from "./SettingsPanel.tsx";
 import { ShellPanel } from "./ShellPanel.tsx";
 
 // The dockview component registry: each panel id maps to the component that renders
-// it. The list panes (Active/Backlog/Archive) and Browser take their panel api/params
+// it. The list panes (Sessions/Backlog/Archive) and Browser take their panel api/params
 // through a thin wrapper; the prop-less panes render directly.
 export const dockComponents = {
   shell: ShellPanel,
-  active: ActivePanel,
+  sessions: SessionsPanel,
   backlog: BacklogPanel,
   archive: ArchivePanel,
   scratch: ScratchPanel,
@@ -27,7 +27,7 @@ export const dockComponents = {
 // Tab titles for the singleton panes opened by the top-bar launchers (openPane →
 // paneReq). Component name and panel id are the same string as the pane id.
 export const PANE_TITLES: Record<string, string> = {
-  active: "Active",
+  sessions: "Sessions",
   backlog: "Backlog",
   archive: "Archive",
   scratch: "Scratch",
@@ -37,27 +37,27 @@ export const PANE_TITLES: Record<string, string> = {
 };
 
 // The default arrangement, built from scratch when there's no saved layout (or a
-// saved one we couldn't restore): Active/Backlog/Archive tabs in the main group,
-// the scratchpad over the supervisor shell on the left.
+// saved one we couldn't restore): Sessions/Backlog/Archive tabs in the main group, the
+// scratchpad over the supervisor shell on the left.
 export function buildDefaultLayout(api: DockviewApi) {
-  const active = api.addPanel({ id: "active", component: "active", title: "Active" });
+  const sessions = api.addPanel({ id: "sessions", component: "sessions", title: "Sessions" });
   api.addPanel({
     id: "backlog",
     component: "backlog",
     title: "Backlog",
-    position: { direction: "within", referencePanel: "active" },
+    position: { direction: "within", referencePanel: "sessions" },
   });
   api.addPanel({
     id: "archive", // lint-allow-string: dockview panel id, not an enum value
     component: "archive", // lint-allow-string: dockview component name, not an enum value
     title: "Archive",
-    position: { direction: "within", referencePanel: "active" },
+    position: { direction: "within", referencePanel: "sessions" },
   });
   api.addPanel({
     id: "scratch",
     component: "scratch",
     title: "Scratch",
-    position: { direction: "left", referencePanel: "active" },
+    position: { direction: "left", referencePanel: "sessions" },
   });
   api.addPanel({
     id: "shell-0",
@@ -66,6 +66,6 @@ export function buildDefaultLayout(api: DockviewApi) {
     title: "supervisor", // lint-allow-string: shell panel title, not the decision source
     position: { direction: "below", referencePanel: "scratch" },
   });
-  // Show Active first (adding Backlog "within" would otherwise leave it focused).
-  active.api.setActive();
+  // Show Sessions first (adding Backlog "within" would otherwise leave it focused).
+  sessions.api.setActive();
 }
