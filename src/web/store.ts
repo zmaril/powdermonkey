@@ -3,7 +3,10 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Note } from "../server/schema.ts";
 import type { Decision } from "../shared/types.ts";
+import { DEFAULT_DENSITY, DEFAULT_FONT_SCALE } from "./appearance.ts";
 import { api } from "./client.ts";
+import { DEFAULT_MOTION } from "./motion.ts";
+import { DEFAULT_THEME, type EditorTheme, getTheme } from "./themes.ts";
 
 // UI + action store. All *plan/session data* now lives in TanStack DB collections
 // (collections.ts), synced live from PGlite — so this store no longer holds or
@@ -21,6 +24,21 @@ export type StartInfo = {
 };
 
 type State = {
+  // The selected code-editor theme (a key into themes.ts THEMES). Drives the whole
+  // app — the Mantine palette, the dockview chrome, the terminal — and is read
+  // app-wide (useActiveTheme / the `--pm-*` CSS vars). Persisted so it sticks.
+  theme: string;
+  setTheme: (key: string) => void;
+  // Two appearance controls, independent of the theme and of each other (see
+  // theme.ts / appearance.ts). `density` scales the spacing tokens (how tight the
+  // layout is); `fontScale` scales all text via the root font size. Persisted.
+  density: string;
+  setDensity: (key: string) => void;
+  fontScale: string;
+  setFontScale: (key: string) => void;
+  // How much the UI animates (full / subtle / off) — see motion.ts. Persisted.
+  motion: string;
+  setMotion: (key: string) => void;
   // Operator toggle: whether the watcher auto-asks @claude to rebase conflicting PRs.
   // Server runtime state (not a synced table), loaded via loadSettings.
   autoRebase: boolean;
@@ -179,6 +197,14 @@ function ensureScratch(setError: (e: string) => void): Promise<Note | null> {
 export const useStore = create<State>()(
   persist(
     (set, get) => ({
+      theme: DEFAULT_THEME,
+      setTheme: (key) => set({ theme: key }),
+      density: DEFAULT_DENSITY,
+      setDensity: (key) => set({ density: key }),
+      fontScale: DEFAULT_FONT_SCALE,
+      setFontScale: (key) => set({ fontScale: key }),
+      motion: DEFAULT_MOTION,
+      setMotion: (key) => set({ motion: key }),
       autoRebase: true,
       error: null,
       pending: {},
@@ -406,7 +432,19 @@ export const useStore = create<State>()(
         layout: s.layout,
         autoRebase: s.autoRebase,
         lastBrowserUrl: s.lastBrowserUrl,
+        theme: s.theme,
+        density: s.density,
+        fontScale: s.fontScale,
+        motion: s.motion,
       }),
     },
   ),
 );
+
+// The resolved EditorTheme for the current selection — for any component that wants
+// the palette directly (e.g. the terminal's background). Most UI should lean on the
+// Mantine theme (var(--mantine-color-*) / useMantineTheme) and the `--pm-*` vars,
+// which this same selection already drives.
+export function useActiveTheme(): EditorTheme {
+  return getTheme(useStore((s) => s.theme));
+}

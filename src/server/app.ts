@@ -460,7 +460,7 @@ export const app = new Elysia()
       }),
     },
   )
-  // Every session↔task link. The browser intersects these with the sessions it
+  // Every session<->task link. The browser intersects these with the sessions it
   // already holds to learn which tasks are active and which session each surfaces,
   // so one flat list serves both the live panes and the archive view.
   .get("/session-tasks", () => listSessionTasks())

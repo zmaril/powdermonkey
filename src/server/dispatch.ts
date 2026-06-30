@@ -54,7 +54,7 @@ function taskSection(task: Task, taskPhases: Phase[]): string {
  *  section with its own phases + trailers, and the worker stamps whichever phase
  *  it just finished. `trailers` is the flat list across every task (the union of
  *  all phases), in task-then-phase order. We don't dictate a branch name — the
- *  PR↔task link comes from the PM-Phase trailers, not the branch. */
+ *  PR<->task link comes from the PM-Phase trailers, not the branch. */
 export function buildTaskPrompt(
   briefs: TaskBrief[],
   comment?: string,
@@ -82,7 +82,7 @@ export function buildTaskPrompt(
     "",
     // We don't dictate the branch name. The cloud workspace puts the worker on its
     // own harness branch (e.g. `claude/…`) and they stay on it; a local worker is
-    // already on its worktree branch. Either way the PR↔task link comes from the
+    // already on its worktree branch. Either way the PR<->task link comes from the
     // PM-Phase trailers above — the same trailers reconciliation reads — not the
     // branch name. (The workspace handles push/PR auth via the Claude GitHub App;
     // see README.) So just: do the work and open a PR.

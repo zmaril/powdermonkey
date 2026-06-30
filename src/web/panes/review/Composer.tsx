@@ -19,9 +19,9 @@ export function Composer({
 }) {
   const [draft, setDraft] = useState("");
   return (
-    <Box px="md" py={6} style={{ background: "#1c1d20" }}>
+    <Box px="md" py="snug" style={{ background: "var(--pm-surface)" }}>
       {hint && (
-        <Text size="xs" c="dimmed" mb={4}>
+        <Text size="xs" c="dimmed" mb="tight">
           {hint}
         </Text>
       )}
@@ -34,7 +34,7 @@ export function Composer({
         onChange={(e) => setDraft(e.currentTarget.value)}
         autoFocus
       />
-      <Group gap={6} mt={4}>
+      <Group gap="snug" mt="tight">
         <Button
           size="compact-xs"
           loading={posting}

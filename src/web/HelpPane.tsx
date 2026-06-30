@@ -17,9 +17,14 @@ const PANES: { name: string; blurb: string }[] = [
 export function HelpPane() {
   return (
     <div
-      style={{ height: "100%", background: "#1a1b1e", display: "flex", flexDirection: "column" }}
+      style={{
+        height: "100%",
+        background: "var(--pm-pane-bg)",
+        display: "flex",
+        flexDirection: "column",
+      }}
     >
-      <Group px="md" py={8} style={{ flex: "0 0 auto" }}>
+      <Group px="md" py="cozy" style={{ flex: "0 0 auto" }}>
         <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
           HELP
         </Text>
@@ -31,7 +36,7 @@ export function HelpPane() {
         maw={620}
         style={{ flex: 1, minHeight: 0, overflowY: "auto" }}
       >
-        <Stack gap={6}>
+        <Stack gap="snug">
           <Text size="sm" fw={600}>
             The pane system
           </Text>
@@ -42,13 +47,13 @@ export function HelpPane() {
             and Browser open a fresh pane each time; the rest have a single instance.
           </Text>
         </Stack>
-        <Stack gap={6}>
+        <Stack gap="snug">
           <Text size="sm" fw={600}>
             The panes
           </Text>
-          <Stack gap={8}>
+          <Stack gap="cozy">
             {PANES.map((p) => (
-              <Group key={p.name} gap={8} wrap="nowrap" align="baseline">
+              <Group key={p.name} gap="cozy" wrap="nowrap" align="baseline">
                 <Text size="sm" fw={600} style={{ flex: "0 0 76px" }}>
                   {p.name}
                 </Text>

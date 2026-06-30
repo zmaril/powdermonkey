@@ -18,7 +18,7 @@ export function GhostCardBody({ ghost }: { ghost: Ghost }) {
   );
   return (
     <Card withBorder radius="md" padding="sm" style={{ border: GHOST_BORDER }}>
-      <Text fw={500} truncate mb={6}>
+      <Text fw={500} truncate mb="snug">
         {ghost.title}
       </Text>
       <PhaseList phases={ghostPhases} />

@@ -10,7 +10,7 @@ import { SELECTED_SHADOW } from "./constants.ts";
 import type { Selection } from "./types.ts";
 import { useDecide } from "./useDecide.ts";
 
-const ROW_BORDER = "1px solid #2c2e33";
+const ROW_BORDER = "1px solid var(--pm-hairline)";
 const GHOST_BORDER = "2px solid var(--mantine-color-teal-7)";
 
 /** How a proposed edit on one of a task's phases reads — with the phase's own name. */
@@ -58,7 +58,7 @@ export function BacklogRow({
 
   if (ghost) {
     return (
-      <Box px="sm" py={8} style={{ borderBottom: ROW_BORDER, borderLeft: GHOST_BORDER }}>
+      <Box px="sm" py="cozy" style={{ borderBottom: ROW_BORDER, borderLeft: GHOST_BORDER }}>
         <Text size="sm" fw={500} truncate>
           {ghost.title}
         </Text>
@@ -80,11 +80,11 @@ export function BacklogRow({
   return (
     <Box
       px="sm"
-      py={8}
+      py="cozy"
       data-pm-card={task.id}
       style={{
-        borderBottom: ROW_BORDER,
-        background: checked ? "#25262b" : undefined,
+        borderBottom: "1px solid var(--pm-hairline)",
+        background: checked ? "var(--pm-surface)" : undefined,
         boxShadow: checked ? SELECTED_SHADOW : undefined,
       }}
       onMouseDown={(e) => {
@@ -100,7 +100,7 @@ export function BacklogRow({
       <Group gap="sm" wrap="nowrap" align="center">
         <StarToggle task={task} />
         <Box style={{ flex: 1, minWidth: 0 }}>
-          <Group gap={6} wrap="nowrap">
+          <Group gap="snug" wrap="nowrap">
             <IdTag prefix="t" id={task.id} />
             <Text
               size="sm"

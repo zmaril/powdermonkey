@@ -1,0 +1,83 @@
+/* The single home for ALL animation in the app — transitions and keyframes. Every rule
+ * reads the `--pm-dur-*` / `--pm-ease` variables that motion.ts sets from the user's
+ * motion setting, so motion softens (Subtle) or stops (Off) from one control. Nothing
+ * else in src/web may declare a transition / animation / @keyframes — enforced by
+ * scripts/lint-motion.ts. To add an animation, add it here against the duration tokens.
+ *
+ * Fallbacks below are the "Full" defaults, used until motion.ts runs. */
+
+:root {
+  --pm-dur-fast: 120ms;
+  --pm-dur-base: 200ms;
+  --pm-dur-slow: 300ms;
+  --pm-dur-pulse: 1600ms;
+  --pm-ease: ease;
+}
+
+/* Hover/state transitions (the selectors' colors live in theme.css; the motion is here). */
+.mantine-Card-root {
+  transition: border-color var(--pm-dur-base) var(--pm-ease), background-color var(--pm-dur-base)
+    var(--pm-ease);
+}
+.dv-tab {
+  transition: color var(--pm-dur-fast) var(--pm-ease), background-color var(--pm-dur-fast)
+    var(--pm-ease);
+}
+.mantine-Button-root[data-variant="default"] {
+  transition: border-color var(--pm-dur-fast) var(--pm-ease), color var(--pm-dur-fast)
+    var(--pm-ease), background-color var(--pm-dur-fast) var(--pm-ease);
+}
+.mantine-Button-root[data-variant="light"],
+.mantine-ActionIcon-root[data-variant="light"] {
+  transition: border-color var(--pm-dur-fast) var(--pm-ease), background-color var(--pm-dur-fast)
+    var(--pm-ease);
+}
+
+/* A caret that rotates as a section expands/collapses (the rotation itself is inline). */
+.pm-rotate {
+  transition: transform var(--pm-dur-fast) var(--pm-ease);
+}
+
+/* The dockview tab activity dot — a gentle attention pulse. At "Off" the duration is 0,
+ * so it sits static (no pulse). */
+@keyframes pm-tab-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.78);
+  }
+}
+.pm-tab-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--pm-accent);
+  box-shadow: 0 0 4px var(--pm-accent);
+  margin-right: 6px;
+  flex: 0 0 auto;
+  animation: pm-tab-pulse var(--pm-dur-pulse) ease-in-out infinite;
+}
+
+/* "Off" also stops animation we don't own (Mantine popovers, dockview, …). */
+[data-pm-motion="off"] *,
+[data-pm-motion="off"] *::before,
+[data-pm-motion="off"] *::after {
+  transition-duration: 0ms !important;
+  animation-duration: 0ms !important;
+  animation-iteration-count: 1 !important;
+}
+
+/* Always honor the OS "reduce motion" preference, whatever the setting. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

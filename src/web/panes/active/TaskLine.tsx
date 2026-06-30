@@ -10,7 +10,7 @@ export function TaskLine({ task, context }: { task: Task; context?: string }) {
     <Group gap="sm" wrap="nowrap" align="flex-start">
       <StarToggle task={task} />
       <Box style={{ flex: 1, minWidth: 0 }}>
-        <Group gap={6} wrap="nowrap">
+        <Group gap="snug" wrap="nowrap">
           <IdTag prefix="t" id={task.id} />
           <Text size="sm" fw={500} truncate>
             {task.title}

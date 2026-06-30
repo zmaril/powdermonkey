@@ -1,4 +1,5 @@
 import { Anchor, Box, Card, Group, Stack, Text } from "@mantine/core";
+import { IconExternalLink } from "@tabler/icons-react";
 import type { Session, Task } from "../../../server/schema.ts";
 import { Markdown } from "../../markdown.tsx";
 import type { Indexes } from "../../plan-data.ts";
@@ -44,14 +45,13 @@ export function WorkerCard({
   const prs = workerPrs(tasks, idx);
   // The PR carrying the agent's freshest comment (usually the worker has one PR).
   const commentPr = prs.find((p) => p.lastComment);
+  const KindIcon = KIND_ICON[session.kind];
   return (
-    <Card withBorder radius="md" padding="sm" bg="#1f2023">
+    <Card withBorder radius="md" padding="sm" bg="dark.5">
       {/* Top: session status + controls, full width. */}
-      <Group justify="space-between" wrap="nowrap" align="flex-start" mb={10}>
+      <Group justify="space-between" wrap="nowrap" align="flex-start" mb="xs">
         <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-          <Text size="sm" title={session.kind}>
-            {KIND_ICON[session.kind]}
-          </Text>
+          <KindIcon size={15} title={session.kind} style={{ flexShrink: 0 }} />
           <SessionStateBadge session={session} />
           {sharedContext && (
             <Text size="xs" c="dimmed" truncate>
@@ -64,8 +64,8 @@ export function WorkerCard({
 
       {/* Bottom: left half = tasks + PRs, right half = the agent's last comment. */}
       <Group align="flex-start" grow wrap="nowrap" gap="lg">
-        <Stack gap={10} style={{ minWidth: 0 }}>
-          <Stack gap={6}>
+        <Stack gap="xs" style={{ minWidth: 0 }}>
+          <Stack gap="snug">
             <ColumnLabel>Tasks</ColumnLabel>
             {tasks.map((t) => (
               <TaskLine
@@ -75,7 +75,7 @@ export function WorkerCard({
               />
             ))}
           </Stack>
-          <Stack gap={6}>
+          <Stack gap="snug">
             <ColumnLabel>PRs</ColumnLabel>
             {prs.length === 0 ? (
               <Text size="xs" c="dimmed">
@@ -86,18 +86,18 @@ export function WorkerCard({
             )}
           </Stack>
         </Stack>
-        <Stack gap={6} style={{ minWidth: 0 }}>
-          <Group gap={6} justify="space-between" wrap="nowrap">
-            <Group gap={6} wrap="nowrap">
+        <Stack gap="snug" style={{ minWidth: 0 }}>
+          <Group gap="snug" justify="space-between" wrap="nowrap">
+            <Group gap="snug" wrap="nowrap">
               <ColumnLabel>Agent Status</ColumnLabel>
               {commentPr?.lastCommentUrl && (
                 <Anchor
                   href={commentPr.lastCommentUrl}
                   target="_blank"
-                  size="xs"
                   title="View on GitHub"
+                  style={{ display: "inline-flex", lineHeight: 1 }}
                 >
-                  ↗
+                  <IconExternalLink size={14} />
                 </Anchor>
               )}
             </Group>

@@ -1,4 +1,5 @@
 import { Badge, Box, Group, Text } from "@mantine/core";
+import { IconArchive, IconBan, IconCircleCheck } from "@tabler/icons-react";
 import type { Task } from "../../../server/schema.ts";
 import { TaskStatus } from "../../../shared/types.ts";
 import { CompleteTaskControl, IdTag, STATUS_COLOR, TaskLinks } from "../../plan-ui";
@@ -10,7 +11,12 @@ export function ArchiveRow({ task, context }: { task: Task; context?: string }) 
   const merged = task.status === TaskStatus.Merged;
   const cancelled = task.status === TaskStatus.Cancelled;
   const terminal = merged || cancelled;
-  const icon = merged ? "✅" : cancelled ? "🚫" : "🗄️";
+  const StateIcon = merged ? IconCircleCheck : cancelled ? IconBan : IconArchive;
+  const iconColor = merged
+    ? "var(--mantine-color-green-5)"
+    : cancelled
+      ? "var(--mantine-color-red-5)"
+      : "var(--mantine-color-dimmed)";
   // hover tooltip text, not the TaskStatus value
   const stateLabel = merged ? "merged" : cancelled ? "cancelled" : "archived"; // lint-allow-string: tooltip
   return (
@@ -18,14 +24,12 @@ export function ArchiveRow({ task, context }: { task: Task; context?: string }) 
       gap="sm"
       wrap="nowrap"
       px="sm"
-      py={6}
-      style={{ borderBottom: "1px solid #2c2e33", minHeight: 38 }}
+      py="snug"
+      style={{ borderBottom: "1px solid var(--pm-hairline)", minHeight: 38 }}
     >
-      <Text size="sm" title={stateLabel}>
-        {icon}
-      </Text>
+      <StateIcon size={16} title={stateLabel} color={iconColor} style={{ flexShrink: 0 }} />
       <Box style={{ flex: 1, minWidth: 0 }}>
-        <Group gap={6} wrap="nowrap">
+        <Group gap="snug" wrap="nowrap">
           <IdTag prefix="t" id={task.id} />
           <Text size="sm" fw={500} c="dimmed" truncate>
             {task.title}

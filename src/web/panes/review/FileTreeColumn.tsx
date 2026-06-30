@@ -9,19 +9,19 @@ import { mapGitStatus } from "./helpers.ts";
 // (custom properties pierce the shadow boundary, so the host is enough) — leaving
 // only some overridden makes the tree render mostly white.
 const TREE_VARS: CSSProperties = {
-  background: "#1a1b1e",
-  "--trees-bg-override": "#1a1b1e",
-  "--trees-bg-muted-override": "#202225",
-  "--trees-fg-override": "#c1c2c5",
-  "--trees-fg-muted-override": "#909296",
-  "--trees-border-color-override": "#2c2e33",
-  "--trees-accent-override": "#4dabf7",
-  "--trees-selected-bg-override": "#2f3136",
-  "--trees-selected-fg-override": "#ffffff",
-  "--trees-selected-focused-border-color-override": "#4dabf7",
-  "--trees-indent-guide-bg-override": "#2c2e33",
-  "--trees-scrollbar-thumb-override": "#3a3d44",
-  "--trees-focus-ring-color-override": "#4dabf7",
+  background: "var(--pm-pane-bg)",
+  "--trees-bg-override": "var(--pm-pane-bg)",
+  "--trees-bg-muted-override": "var(--pm-surface)",
+  "--trees-fg-override": "var(--pm-text)",
+  "--trees-fg-muted-override": "var(--pm-dim-text)",
+  "--trees-border-color-override": "var(--pm-hairline)",
+  "--trees-accent-override": "var(--pm-accent)",
+  "--trees-selected-bg-override": "var(--pm-surface)",
+  "--trees-selected-fg-override": "var(--pm-text)",
+  "--trees-selected-focused-border-color-override": "var(--pm-accent)",
+  "--trees-indent-guide-bg-override": "var(--pm-hairline)",
+  "--trees-scrollbar-thumb-override": "var(--pm-scroll-thumb)",
+  "--trees-focus-ring-color-override": "var(--pm-accent)",
 } as CSSProperties;
 
 /** The @pierre/trees file tree column (inside the Files panel). Selecting a file
@@ -66,13 +66,13 @@ export function FileTreeColumn() {
       style={{
         width: 250,
         flexShrink: 0,
-        borderRight: "1px solid #2c2e33",
+        borderRight: "1px solid var(--pm-hairline)",
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
       }}
     >
-      <Group justify="space-between" px="md" py={6} style={{ flexShrink: 0 }}>
+      <Group justify="space-between" px="md" py="snug" style={{ flexShrink: 0 }}>
         <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
           FILES
         </Text>
@@ -80,7 +80,7 @@ export function FileTreeColumn() {
           {viewed.size}/{files.length} viewed
         </Text>
       </Group>
-      <Box px="sm" pb={6} style={{ flexShrink: 0 }}>
+      <Box px="sm" pb="snug" style={{ flexShrink: 0 }}>
         <TextInput
           size="xs"
           placeholder="Filter files…"

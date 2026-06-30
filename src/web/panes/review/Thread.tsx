@@ -18,11 +18,11 @@ export function Thread({
   const [replyTo, setReplyTo] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   return (
-    <Stack gap={6} px="md" py={6} style={{ background: "#1c1d20" }}>
+    <Stack gap="snug" px="md" py="snug" style={{ background: "var(--pm-surface)" }}>
       {roots.map((root) => {
         const replies = repliesByParent.get(root.id) ?? [];
         return (
-          <Stack key={root.id} gap={4}>
+          <Stack key={root.id} gap="tight">
             <CommentCard comment={root} />
             {replies.map((r) => (
               <Box key={r.id} pl="md">
@@ -39,7 +39,7 @@ export function Thread({
                   value={draft}
                   onChange={(e) => setDraft(e.currentTarget.value)}
                 />
-                <Group gap={6} mt={4}>
+                <Group gap="snug" mt="tight">
                   <Button
                     size="compact-xs"
                     loading={posting}

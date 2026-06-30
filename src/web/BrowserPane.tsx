@@ -1,4 +1,5 @@
 import { ActionIcon, Button, Group, Text, TextInput, Tooltip } from "@mantine/core";
+import { IconExternalLink, IconRefresh } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import { normalizeUrl } from "./browser-url.ts";
 
@@ -16,8 +17,8 @@ import { normalizeUrl } from "./browser-url.ts";
 // Iframe caveat: many sites refuse to be embedded (X-Frame-Options / CSP
 // frame-ancestors) and will show up blank or as a browser error — there's no
 // reliable cross-origin way to detect that from here, so we surface a dismissable
-// hint and always keep "Open ↗" handy. localhost dev servers almost always embed
-// fine, which is the case this pane is for.
+// hint and always keep an "Open" (new-tab) button handy. localhost dev servers
+// almost always embed fine, which is the case this pane is for.
 export function BrowserPane({
   url,
   onNavigate,
@@ -57,11 +58,11 @@ export function BrowserPane({
   return (
     <div style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column" }}>
       <Group
-        gap={6}
+        gap="snug"
         wrap="nowrap"
         px="xs"
-        py={6}
-        style={{ flex: "0 0 auto", background: "#1a1b1e" }}
+        py="snug"
+        style={{ flex: "0 0 auto", background: "var(--pm-pane-bg)" }}
       >
         <Tooltip label="Reload" withArrow openDelay={400}>
           <ActionIcon
@@ -71,7 +72,7 @@ export function BrowserPane({
             onClick={() => setNonce((n) => n + 1)}
             disabled={!current}
           >
-            ↻
+            <IconRefresh size={16} />
           </ActionIcon>
         </Tooltip>
         <form
@@ -89,7 +90,7 @@ export function BrowserPane({
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
-            styles={{ input: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" } }}
+            styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)" } }}
           />
         </form>
         <Button
@@ -100,21 +101,26 @@ export function BrowserPane({
           target="_blank"
           rel="noopener noreferrer"
           disabled={!current}
+          rightSection={<IconExternalLink size={13} />}
         >
-          Open ↗
+          Open
         </Button>
       </Group>
       {showHint && (
         <Group
-          gap={6}
+          gap="snug"
           wrap="nowrap"
           px="xs"
-          py={4}
-          style={{ flex: "0 0 auto", background: "#25262b", borderTop: "1px solid #2c2e33" }}
+          py="tight"
+          style={{
+            flex: "0 0 auto",
+            background: "var(--pm-surface)",
+            borderTop: "1px solid var(--pm-hairline)",
+          }}
         >
           <Text size="xs" c="dimmed" style={{ flex: 1 }}>
-            Some sites block embedding (X-Frame-Options / CSP) and show up blank — use Open ↗.
-            localhost dev servers usually work.
+            Some sites block embedding (X-Frame-Options / CSP) and show up blank — use the Open
+            button. localhost dev servers usually work.
           </Text>
           <Button
             size="compact-xs"
@@ -126,7 +132,13 @@ export function BrowserPane({
           </Button>
         </Group>
       )}
-      <div style={{ flex: 1, minHeight: 0, background: "#fff" }}>
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          background: "#fff", // lint-allow-color: neutral white backdrop behind an arbitrary embedded page, not app chrome
+        }}
+      >
         {current ? (
           <iframe
             key={`${current}#${nonce}`}
@@ -141,7 +153,7 @@ export function BrowserPane({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              background: "#1a1b1e",
+              background: "var(--pm-pane-bg)",
             }}
           >
             <Text size="sm" c="dimmed">

@@ -1,10 +1,9 @@
-import { useAutoAnimate } from "@formkit/auto-animate/react";
 import type { Task } from "../../../server/schema.ts";
 import { VocabKind } from "../../../shared/types.ts";
 import { type EntityEdit, type GroupedGhosts, entityKey } from "../../ghosts.ts";
 import { type Indexes, starFirst } from "../../plan-data.ts";
+import { useListAnimation } from "../../use-list-animation.ts";
 import { BacklogRow } from "./BacklogRow.tsx";
-import { ANIM_OPTS } from "./constants.ts";
 import type { Selection } from "./types.ts";
 
 /** Flat backlog: every to-be-worked task in one dense list, starred first, each carrying
@@ -23,7 +22,7 @@ export function FlatView({
   ghosts: GroupedGhosts;
   edits: Map<string, EntityEdit[]>;
 }) {
-  const [listRef] = useAutoAnimate(ANIM_OPTS);
+  const [listRef] = useListAnimation();
   const taskGhosts = [...ghosts.tasksByMilestone.values()].flat();
   return (
     <div ref={listRef}>

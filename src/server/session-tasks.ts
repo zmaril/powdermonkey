@@ -23,7 +23,7 @@ export async function taskIdsForSession(sessionId: number): Promise<number[]> {
   return rows.map((r) => r.taskId);
 }
 
-/** Every session↔task link (both kinds, live and archived sessions). The client
+/** Every session<->task link (both kinds, live and archived sessions). The client
  *  resolves liveness itself by intersecting with the sessions it holds, so this
  *  serves both the live panes and the archive view from one list. */
 export async function listSessionTasks(): Promise<{ sessionId: number; taskId: number }[]> {

@@ -1,13 +1,28 @@
 import { Button, Group } from "@mantine/core";
+import { IconCloud, IconDeviceLaptop, IconPlayerPlayFilled } from "@tabler/icons-react";
 import { useState } from "react";
 import { SessionKind } from "../../../shared/types.ts";
 import { useStore } from "../../store.ts";
 import { LaunchButton } from "./LaunchButton.tsx";
 
+// Icon clusters for the launch buttons: target (laptop / cloud) + a play glyph.
+const LOCAL_ICON = (
+  <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+    <IconDeviceLaptop size={15} />
+    <IconPlayerPlayFilled size={10} />
+  </span>
+);
+const REMOTE_ICON = (
+  <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+    <IconCloud size={15} />
+    <IconPlayerPlayFilled size={10} />
+  </span>
+);
+
 /** The shared action cluster for a backlog task (or a whole multi-selection): launch
- *  local 💻▶ / remote ☁️▶ (each with an optional run note), or close it (DONE / WONTDO).
- *  Works on one or many ids — the solo card passes `[task.id]`, the batch bar passes the
- *  selection. `onDone` lets the batch bar clear the selection after an action. */
+ *  local (laptop) / remote (cloud) — each with an optional run note — or close it
+ *  (DONE / WONTDO). Works on one or many ids — the solo card passes `[task.id]`, the
+ *  batch bar passes the selection. `onDone` clears the selection after an action. */
 export function TaskActions({ ids, onDone }: { ids: number[]; onDone?: () => void }) {
   const { startLocalMany, dispatchMany, completeTask, cancelTask } = useStore();
   const [running, setRunning] = useState<SessionKind | null>(null);
@@ -42,14 +57,14 @@ export function TaskActions({ ids, onDone }: { ids: number[]; onDone?: () => voi
   return (
     <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
       <LaunchButton
-        icon="💻 ▶"
+        icon={LOCAL_ICON}
         label="Start local"
         loading={running === SessionKind.Local}
         disabled={busy}
         onRun={(c) => launch(SessionKind.Local, c)}
       />
       <LaunchButton
-        icon="☁️ ▶"
+        icon={REMOTE_ICON}
         label="Dispatch remote"
         color="cyan"
         loading={running === SessionKind.Remote}

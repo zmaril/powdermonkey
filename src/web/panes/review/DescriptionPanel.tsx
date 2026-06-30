@@ -7,11 +7,15 @@ import { useReviewCtx } from "./context.ts";
 export function DescriptionPanel(_props: IDockviewPanelProps) {
   const { review } = useReviewCtx();
   return (
-    <Box style={{ height: "100%", overflowY: "auto", background: "#1a1b1e" }} px="md" py={10}>
-      <Box style={{ fontWeight: 600, fontSize: 15, color: "#e9ecef" }}>
+    <Box
+      style={{ height: "100%", overflowY: "auto", background: "var(--pm-pane-bg)" }}
+      px="md"
+      py="xs"
+    >
+      <Box style={{ fontWeight: 600, fontSize: "0.9375rem", color: "var(--pm-text)" }}>
         <Markdown source={review.title} inline />
       </Box>
-      <Text size="xs" c="dimmed" mt={2} mb={10}>
+      <Text size="xs" c="dimmed" mt="hair" mb="xs">
         #{review.number} · {review.state}
       </Text>
       {review.body ? (

@@ -3,6 +3,8 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef } from "react";
+import { fontScaleOption } from "./appearance.ts";
+import { useActiveTheme, useStore } from "./store.ts";
 
 // xterm.js wired to the /pty WebSocket. Server sends binary PTY output; we send
 // JSON input/resize frames back. Pass `session` to attach to a local session's
@@ -25,18 +27,33 @@ export function ShellTerminal({
   // Keep the latest onEnded without re-running the socket effect on every render.
   const onEndedRef = useRef(onEnded);
   onEndedRef.current = onEnded;
+  // The terminal background follows the active editor theme. Read it through a ref so
+  // changing themes updates the live terminal (separate effect below) without
+  // re-running the socket effect — that owns the PTY WebSocket and must stay stable.
+  const terminalBg = useActiveTheme().terminalBg;
+  const bgRef = useRef(terminalBg);
+  bgRef.current = terminalBg;
+  // The terminal font follows the font-size control (13px base × the scale factor),
+  // updated live below without re-running the socket effect.
+  const fontPx = Math.round(13 * fontScaleOption(useStore((s) => s.fontScale)).factor);
+  const fontRef = useRef(fontPx);
+  fontRef.current = fontPx;
+  const termRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
 
     const term = new Terminal({
-      fontSize: 13,
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-      theme: { background: "#1a1b1e" },
+      fontSize: fontRef.current,
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", // lint-allow-font: xterm renders to a canvas and needs a literal font stack, not a CSS var
+      theme: { background: bgRef.current },
       cursorBlink: true,
     });
+    termRef.current = term;
     const fit = new FitAddon();
+    fitRef.current = fit;
     term.loadAddon(fit);
     // Detect URLs in the output and render them as clickable links. Clicking
     // opens the URL in a new tab; noopener/noreferrer keeps the opened page
@@ -151,8 +168,22 @@ export function ShellTerminal({
       el.removeEventListener("drop", onDrop);
       ws.close();
       term.dispose();
+      termRef.current = null;
+      fitRef.current = null;
     };
   }, [cwd, session]);
+
+  // Re-skin / re-size the live terminal when the theme or font scale changes, without
+  // touching the socket. Refit after a font-size change so the grid matches the pane.
+  useEffect(() => {
+    if (termRef.current) termRef.current.options.theme = { background: terminalBg };
+  }, [terminalBg]);
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    term.options.fontSize = fontPx;
+    fitRef.current?.fit();
+  }, [fontPx]);
 
   return <div ref={ref} style={{ height: "100%", width: "100%" }} />;
 }

@@ -60,7 +60,7 @@ export function GoalGroup({
   return (
     <Stack gap="md">
       <div>
-        <Group gap={8} wrap="nowrap" align="center">
+        <Group gap="cozy" wrap="nowrap" align="center">
           <Caret
             collapsed={collapsed}
             onToggle={() => setCollapsed((c) => !c)}
@@ -76,7 +76,12 @@ export function GoalGroup({
           </Title>
         </Group>
         {!collapsed && goal.objective && (
-          <Text c="dimmed" size="sm" mt={4} ml={26}>
+          <Text
+            c="dimmed"
+            size="sm"
+            mt="tight"
+            ml={26} // lint-allow-spacing: alignment offset under the caret + id, not a density step
+          >
             {goal.objective}
           </Text>
         )}

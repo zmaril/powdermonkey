@@ -1,4 +1,5 @@
 import { Button, Group, Text } from "@mantine/core";
+import { IconBell, IconBellOff } from "@tabler/icons-react";
 import { useNotificationPermission } from "../../notifications.ts";
 
 // Opt into OS web notifications. Browsers only grant permission on a user gesture,
@@ -13,13 +14,14 @@ export function NotifyControl() {
       </Text>
     );
   }
-  const label =
-    permission === "granted" ? "🔔 On" : permission === "denied" ? "🔕 Blocked" : "🔔 Enable";
+  const label = permission === "granted" ? "On" : permission === "denied" ? "Blocked" : "Enable";
+  const icon = permission === "denied" ? <IconBellOff size={15} /> : <IconBell size={15} />;
   return (
     <Group gap="sm" wrap="nowrap">
       <Button
         size="compact-sm"
         variant="default"
+        leftSection={icon}
         onClick={request}
         disabled={permission !== "default"}
       >

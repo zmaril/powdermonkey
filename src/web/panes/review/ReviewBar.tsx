@@ -22,8 +22,14 @@ export function ReviewBar({
   const [open, setOpen] = useState(false);
   const n = draft.length;
   return (
-    <Box style={{ flex: "0 0 auto", borderTop: "1px solid #2c2e33", background: "#202225" }}>
-      <Group justify="space-between" px="md" py={8} wrap="nowrap">
+    <Box
+      style={{
+        flex: "0 0 auto",
+        borderTop: "1px solid var(--pm-hairline)",
+        background: "var(--pm-surface)",
+      }}
+    >
+      <Group justify="space-between" px="md" py="cozy" wrap="nowrap">
         <Text size="xs" c="dimmed">
           {n === 0 ? "No pending comments" : `${n} pending comment${n === 1 ? "" : "s"}`}
         </Text>
@@ -44,7 +50,7 @@ export function ReviewBar({
         </Button>
       </Group>
       {open && (
-        <Box px="md" pb={8}>
+        <Box px="md" pb="cozy">
           <Textarea
             autosize
             minRows={2}
@@ -53,7 +59,7 @@ export function ReviewBar({
             value={summary}
             onChange={(e) => setSummary(e.currentTarget.value)}
           />
-          <Group gap={6} mt={6}>
+          <Group gap="snug" mt="snug">
             <Button
               size="compact-xs"
               color="green"

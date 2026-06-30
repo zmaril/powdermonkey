@@ -69,7 +69,12 @@ export function FilePatch({
     const roots = topByAnchor.get(k);
     const drafts = draftByKey.get(k);
     return (
-      <Box style={{ borderTop: "1px solid #2c2e33", borderBottom: "1px solid #2c2e33" }}>
+      <Box
+        style={{
+          borderTop: "1px solid var(--pm-hairline)",
+          borderBottom: "1px solid var(--pm-hairline)",
+        }}
+      >
         {roots && roots.length > 0 && (
           <Thread
             roots={roots}

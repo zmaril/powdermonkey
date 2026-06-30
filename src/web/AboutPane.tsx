@@ -5,9 +5,14 @@ import { Anchor, Group, Stack, Text, Title } from "@mantine/core";
 export function AboutPane() {
   return (
     <div
-      style={{ height: "100%", background: "#1a1b1e", display: "flex", flexDirection: "column" }}
+      style={{
+        height: "100%",
+        background: "var(--pm-pane-bg)",
+        display: "flex",
+        flexDirection: "column",
+      }}
     >
-      <Group px="md" py={8} style={{ flex: "0 0 auto" }}>
+      <Group px="md" py="cozy" style={{ flex: "0 0 auto" }}>
         <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
           ABOUT
         </Text>

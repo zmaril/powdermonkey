@@ -61,9 +61,14 @@ export function ScratchPad() {
 
   return (
     <div
-      style={{ height: "100%", display: "flex", flexDirection: "column", background: "#1a1b1e" }}
+      style={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--pm-pane-bg)",
+      }}
     >
-      <Group justify="space-between" px="sm" py={6} style={{ flex: "0 0 auto" }}>
+      <Group justify="space-between" px="sm" py="snug" style={{ flex: "0 0 auto" }}>
         <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
           SCRATCH
         </Text>
@@ -82,11 +87,11 @@ export function ScratchPad() {
           resize: "none",
           border: "none",
           outline: "none",
-          background: "#1a1b1e",
-          color: "#c1c2c5",
+          background: "var(--pm-pane-bg)",
+          color: "var(--pm-text)",
           padding: "4px 12px 12px",
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-          fontSize: 13,
+          fontFamily: "var(--mantine-font-family-monospace)",
+          fontSize: "0.8125rem",
           lineHeight: 1.5,
         }}
       />

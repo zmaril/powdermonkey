@@ -17,22 +17,8 @@ import { type ActivitySnapshot, paneActivity, snapshotActivity } from "./tab-act
 // click; this one only ever whispers from the tab bar while you're already here. So
 // it's a soft pulsing dot, not a hard blink or a count badge — present enough to
 // catch the eye in peripheral vision, quiet enough to ignore until you choose to look.
-const DOT_STYLE_ID = "pm-tab-activity-style";
-function ensureDotStyle(): void {
-  if (typeof document === "undefined" || document.getElementById(DOT_STYLE_ID)) return;
-  const el = document.createElement("style");
-  el.id = DOT_STYLE_ID;
-  el.textContent = `
-@keyframes pm-tab-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.78); } }
-.pm-tab-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: #4dabf7; box-shadow: 0 0 4px #4dabf7;
-  margin-right: 6px; flex: 0 0 auto;
-  animation: pm-tab-pulse 1.6s ease-in-out infinite;
-}
-@media (prefers-reduced-motion: reduce) { .pm-tab-dot { animation: none; } }`;
-  document.head.appendChild(el);
-}
+// The dot's style and pulse live in motion.css (.pm-tab-dot), so the motion setting
+// controls it like every other animation.
 
 /** Custom dockview tab = the default tab (title + close) prefixed with an activity
  *  dot when this pane is flagged. Clears its own flag the moment the tab is viewed
@@ -41,8 +27,6 @@ export function ActivityTab(props: IDockviewPanelHeaderProps) {
   const id = props.api.id;
   const flagged = useStore((s) => !!s.tabActivity[id]);
   const clearTab = useStore((s) => s.clearTab);
-
-  useEffect(() => ensureDotStyle(), []);
 
   useEffect(() => {
     const clearIfVisible = () => {

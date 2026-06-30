@@ -28,7 +28,7 @@ export function CompleteTaskControl({ task }: { task: Task }) {
     const cancelled = task.status === TaskStatus.Cancelled;
     const verb = cancelled ? "won't do" : "done"; // lint-allow-string: badge label, not the status value
     return (
-      <Group gap={6} wrap="nowrap">
+      <Group gap="snug" wrap="nowrap">
         <Badge
           size="xs"
           color={cancelled ? "red" : desc.color}

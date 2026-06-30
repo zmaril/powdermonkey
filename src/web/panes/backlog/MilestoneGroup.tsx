@@ -1,4 +1,3 @@
-import { useAutoAnimate } from "@formkit/auto-animate/react";
 import { Button, Group, Stack, Title } from "@mantine/core";
 import { useRef, useState } from "react";
 import type { Milestone, Task } from "../../../server/schema.ts";
@@ -7,11 +6,11 @@ import { type EntityEdit, type GroupedGhosts, editLabel, entityKey } from "../..
 import type { Indexes } from "../../plan-data.ts";
 import { IdTag } from "../../plan-ui";
 import { useStore } from "../../store.ts";
+import { useListAnimation } from "../../use-list-animation.ts";
 import { BacklogCard } from "./BacklogCard.tsx";
 import { CardEditor } from "./CardEditor.tsx";
 import { Caret } from "./Caret.tsx";
 import { ProposedStrip } from "./ProposedStrip.tsx";
-import { ANIM_OPTS } from "./constants.ts";
 import type { Selection } from "./types.ts";
 import { useDecide } from "./useDecide.ts";
 
@@ -38,23 +37,23 @@ export function MilestoneGroup({
   const [adding, setAdding] = useState(false);
   const { createTaskWithPhases } = useStore();
   const { busy, decide } = useDecide();
-  const [listRef, enableAnim] = useAutoAnimate(ANIM_OPTS);
-  // Suspend the list animation while a card is being edited, so the card↔editor swap (and
-  // the save back) is instant instead of morphing for 300ms. Re-enable a frame later so
-  // the closing swap isn't animated either.
+  const [listRef, suspendAnim] = useListAnimation();
+  // Suspend the list animation while a card is being edited, so the card<->editor swap (and
+  // the save back) is instant instead of morphing. Re-enable a frame later so the closing
+  // swap isn't animated either. (suspendAnim composes with the motion setting.)
   const editingIds = useRef(new Set<number>());
   const setCardEditing = (id: number, on: boolean) => {
     if (on) {
       editingIds.current.add(id);
-      enableAnim(false);
+      suspendAnim(true);
     } else {
       editingIds.current.delete(id);
-      if (editingIds.current.size === 0) requestAnimationFrame(() => enableAnim(true));
+      if (editingIds.current.size === 0) requestAnimationFrame(() => suspendAnim(false));
     }
   };
   // Adding a task opens the same editor in the list — suspend the animation for it too,
   // via a sentinel id (real task ids are positive), so "+ Add task" → editor → save is
-  // instant, not a 300ms morph.
+  // instant, not a morph.
   const ADDING = -1;
   const startAdding = () => {
     setCardEditing(ADDING, true);
@@ -69,8 +68,8 @@ export function MilestoneGroup({
   const taskGhosts = ghosts.tasksByMilestone.get(milestone.id) ?? [];
 
   return (
-    <Stack gap="xs" ml={20}>
-      <Group gap={6} wrap="nowrap" align="center">
+    <Stack gap="xs" ml="lg">
+      <Group gap="snug" wrap="nowrap" align="center">
         <Caret
           collapsed={collapsed}
           onToggle={() => setCollapsed((c) => !c)}
@@ -96,7 +95,10 @@ export function MilestoneGroup({
         />
       ))}
       {!collapsed && (
-        <div ref={listRef} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div
+          ref={listRef}
+          style={{ display: "flex", flexDirection: "column", gap: "var(--mantine-spacing-xs)" }}
+        >
           {tasks.map((t) => {
             const taskPhases = idx.phasesByTask.get(t.id) ?? [];
             return (

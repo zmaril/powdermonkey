@@ -1,7 +1,7 @@
 import { partition } from "es-toolkit";
 import type { Session, Task } from "../server/schema.ts";
 
-// A session↔task link as the client consumes it (the /session-tasks endpoint
+// A session<->task link as the client consumes it (the /session-tasks endpoint
 // returns just these two fields).
 export type SessionLink = { sessionId: number; taskId: number };
 
