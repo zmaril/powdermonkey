@@ -18,12 +18,10 @@ export type PmIdActivate = (kind: PmKind, id: number) => void;
 /** A buffer cell position (1-based), one per emitted string char. */
 type CellPos = { x: number; y: number };
 
-/** Read a buffer row into its text and a per-char cell position, skipping the empty
- *  right half of a wide (CJK/emoji) cell so the string indices line up with cells. `y`
- *  is the row's 1-based buffer line number. */
-function readRow(line: IBufferLine, y: number): { text: string; pos: CellPos[] } {
-  const chars: string[] = [];
-  const pos: CellPos[] = [];
+/** Append a buffer row's cells to `chars`/`pos`, skipping the empty right half of a wide
+ *  (CJK/emoji) cell so the string indices line up with cells. `y` is the row's 1-based
+ *  buffer line number. */
+function appendRow(line: IBufferLine, y: number, chars: string[], pos: CellPos[]): void {
   for (let i = 0; i < line.length; i++) {
     const cell = line.getCell(i);
     if (!cell || cell.getWidth() === 0) continue;
@@ -35,6 +33,28 @@ function readRow(line: IBufferLine, y: number): { text: string; pos: CellPos[] }
       pos.push({ x: i + 1, y });
     }
   }
+}
+
+/** Read the full *logical* line containing buffer row `y` (1-based) — i.e. the row plus
+ *  every wrapped continuation around it — into its text and per-char cell positions. A
+ *  hard-wrapped line splits one id across two rows ("t1" + "23"); joining the wrapped
+ *  rows lets the matcher see "t123" as one token, and the per-char positions still map
+ *  each char back to its real cell (so the link's range spans the wrap). */
+function readLogicalLine(term: Terminal, y: number): { text: string; pos: CellPos[] } {
+  const buf = term.buffer.active;
+  // Walk up to the first row of the wrapped run (a row is `isWrapped` when it continues
+  // the one above it).
+  let top = y - 1;
+  while (top > 0 && buf.getLine(top)?.isWrapped) top--;
+
+  const chars: string[] = [];
+  const pos: CellPos[] = [];
+  for (let row = top; ; row++) {
+    const line = buf.getLine(row);
+    if (!line) break;
+    if (row !== top && !line.isWrapped) break; // next logical line — stop
+    appendRow(line, row + 1, chars, pos);
+  }
   return { text: chars.join(""), pos };
 }
 
@@ -45,12 +65,11 @@ export class PmIdLinkProvider implements ILinkProvider {
   ) {}
 
   provideLinks(y: number, callback: (links: ILink[] | undefined) => void): void {
-    const line = this.term.buffer.active.getLine(y - 1);
-    if (!line) {
+    if (!this.term.buffer.active.getLine(y - 1)) {
       callback(undefined);
       return;
     }
-    const { text, pos } = readRow(line, y);
+    const { text, pos } = readLogicalLine(this.term, y);
 
     const links: ILink[] = [];
     for (const m of findPmIds(text)) {
