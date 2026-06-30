@@ -4,9 +4,10 @@ import { Decision, PhaseStatus } from "../../../shared/types.ts";
 import type { Ghost } from "../../ghosts.ts";
 import { PhaseList } from "../../plan-ui";
 import { ProposedStrip } from "./ProposedStrip.tsx";
+import { GHOST_BORDER_COLOR } from "./constants.ts";
 import { useDecide } from "./useDecide.ts";
 
-const GHOST_BORDER = "1px dashed var(--mantine-color-teal-5)";
+const GHOST_BORDER = `1px dashed ${GHOST_BORDER_COLOR}`;
 
 /** A proposed new task, rendered like a real card (same title font + phase list) but with
  *  a dashed border and the standard accept/reject strip — so it reads as a peer of the

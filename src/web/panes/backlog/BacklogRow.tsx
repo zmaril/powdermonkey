@@ -6,12 +6,12 @@ import type { Indexes } from "../../plan-data.ts";
 import { IdTag, ProgressPill, StarToggle } from "../../plan-ui";
 import { ProposedStrip } from "./ProposedStrip.tsx";
 import { TaskActions } from "./TaskActions.tsx";
-import { SELECTED_SHADOW } from "./constants.ts";
+import { GHOST_BORDER_COLOR, SELECTED_SHADOW } from "./constants.ts";
 import type { Selection } from "./types.ts";
 import { useDecide } from "./useDecide.ts";
 
 const ROW_BORDER = "1px solid var(--pm-hairline)";
-const GHOST_BORDER = "2px solid var(--mantine-color-teal-7)";
+const GHOST_BORDER = `2px solid ${GHOST_BORDER_COLOR}`;
 
 /** How a proposed edit on one of a task's phases reads — with the phase's own name. */
 function phaseEditLabel(e: EntityEdit, phases: Phase[]): string {

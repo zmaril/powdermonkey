@@ -150,7 +150,16 @@ export function BacklogCard({
         ),
       )}
       {conflict && (
-        <Group mt="snug" gap="tight" wrap="nowrap" c="orange.4">
+        <Group
+          mt="snug"
+          gap="tight"
+          wrap="nowrap"
+          // Scheme-aware so the warning reads on a light card too (orange.4 is a pale
+          // tint that washes out on white); darker orange on light, the tint on dark.
+          style={{
+            color: "light-dark(var(--mantine-color-orange-8), var(--mantine-color-orange-4))",
+          }}
+        >
           <IconAlertTriangle size={14} style={{ flexShrink: 0 }} />
           <Text size="xs">{conflict}</Text>
         </Group>
