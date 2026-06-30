@@ -59,7 +59,7 @@ export function GoalGroup({
 
   return (
     <Stack gap="md">
-      <div>
+      <div data-pm-reveal={`g${goal.id}`}>
         <Group gap="cozy" wrap="nowrap" align="center">
           <Caret
             collapsed={collapsed}

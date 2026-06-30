@@ -6,6 +6,7 @@ import type { Decision } from "../shared/types.ts";
 import { DEFAULT_DENSITY, DEFAULT_FONT_SCALE } from "./appearance.ts";
 import { api } from "./client.ts";
 import { DEFAULT_MOTION } from "./motion.ts";
+import type { PmKind } from "./pm-ids.ts";
 import { DEFAULT_THEME, type EditorTheme, getTheme } from "./themes.ts";
 
 // UI + action store. All *plan/session data* now lives in TanStack DB collections
@@ -68,6 +69,12 @@ type State = {
   // their own request signals.)
   paneReq: { id: string; n: number } | null;
   openPane: (id: string) => void;
+  // Latest request to reveal a plan entity — clicking a t/p/m/g/s id in the terminal
+  // (pm-id-links.ts) sets this; useRevealEntity (App) focuses the entity's pane, scrolls
+  // it into view, and flashes it. `n` makes repeats distinct so the effect re-fires even
+  // when the same id is clicked twice. Transient — never persisted.
+  revealReq: { kind: PmKind; id: number; n: number } | null;
+  revealEntity: (kind: PmKind, id: number) => void;
   // In-app activity indicators, keyed by dockview panel id (e.g. "active"). True
   // means the pane has changes you haven't seen because its tab wasn't on screen;
   // the tab shows an ambient dot until viewed. Transient — never persisted.
@@ -215,6 +222,9 @@ export const useStore = create<State>()(
       rememberBrowserUrl: (url) => set({ lastBrowserUrl: url }),
       paneReq: null,
       openPane: (id) => set((s) => ({ paneReq: { id, n: (s.paneReq?.n ?? 0) + 1 } })),
+      revealReq: null,
+      revealEntity: (kind, id) =>
+        set((s) => ({ revealReq: { kind, id, n: (s.revealReq?.n ?? 0) + 1 } })),
       tabActivity: {},
       flagTab: (paneId) =>
         set((s) =>

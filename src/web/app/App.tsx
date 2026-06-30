@@ -3,6 +3,7 @@ import { type DockviewApi, DockviewReact, type DockviewReadyEvent } from "dockvi
 import { useEffect, useRef } from "react";
 import { ActivityTab, useTabActivity } from "../TabActivity.tsx";
 import { useNeedsInputNotifications } from "../notifications.ts";
+import { useRevealEntity } from "../reveal.ts";
 import { useActiveTheme, useStore } from "../store.ts";
 import { DisconnectBanner } from "./DisconnectBanner.tsx";
 import { ReviewOverlay } from "./ReviewOverlay.tsx";
@@ -45,6 +46,10 @@ export function App() {
   // while its tab is off screen (new session, needs-you, task status change). The
   // tab clears itself when viewed. apiRef is set in onReady below.
   useTabActivity(apiRef);
+
+  // Jump to a plan entity when its id is clicked in the terminal (pm-id links): focus
+  // the pane it lives in, scroll it into view, and flash it.
+  useRevealEntity(apiRef);
 
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;

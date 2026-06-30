@@ -62,6 +62,24 @@
   animation: pm-tab-pulse var(--pm-dur-pulse) ease-in-out infinite;
 }
 
+/* The reveal flash — a brief accent ring + wash when you jump to an entity (from a
+ * terminal PM-id link). An outline-style box-shadow so it doesn't shift layout, fading
+ * out over the pulse duration. At "Off" the duration is 0, so it's a no-op. */
+@keyframes pm-flash {
+  0% {
+    box-shadow: 0 0 0 2px var(--pm-accent);
+    background-color: var(--pm-selection);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+    background-color: transparent;
+  }
+}
+.pm-flash {
+  animation: pm-flash var(--pm-dur-pulse) var(--pm-ease);
+  border-radius: var(--mantine-radius-sm);
+}
+
 /* "Off" also stops animation we don't own (Mantine popovers, dockview, …). */
 [data-pm-motion="off"] *,
 [data-pm-motion="off"] *::before,

@@ -53,6 +53,25 @@ function setScroll(paneId: string, top: number): void {
   if (flushTimer == null) flushTimer = setTimeout(flush, 250);
 }
 
+/** Record a pane's scroll offset from outside the hook (e.g. a reveal that positions the
+ *  pane on a specific entity), so a later tab-away/return restores to it. */
+export function setPaneScroll(paneId: string, top: number): void {
+  setScroll(paneId, top);
+}
+
+// Panes currently being positioned by a reveal (reveal.ts). While a pane is in this set
+// its saved-offset restore yields — otherwise a reveal that focuses a hidden pane would
+// fight the restore, which forces the pane back to its old offset for up to ~1.5s.
+const revealing = new Set<string>();
+
+export function beginReveal(paneId: string): void {
+  revealing.add(paneId);
+}
+
+export function endReveal(paneId: string): void {
+  revealing.delete(paneId);
+}
+
 // A reload kicked off from JS (the disconnect→reload recovery) or a plain refresh
 // can fire before a pending coalesced flush — write through synchronously as the
 // page goes away so the last scroll position is never lost.
@@ -82,6 +101,12 @@ export function usePaneScroll(
     cancelAnimationFrame(rafRef.current);
     const el = ref.current;
     if (!el) return;
+    // A reveal is positioning this pane — don't fight it by re-applying the old offset.
+    // Re-enable persistence so the operator's subsequent scrolling still saves.
+    if (revealing.has(paneId)) {
+      saving.current = true;
+      return;
+    }
     saving.current = false;
     const target = getScroll(paneId);
     if (target <= 0) {

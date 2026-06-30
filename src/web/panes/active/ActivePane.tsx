@@ -126,6 +126,7 @@ export function ActivePane({ api }: { api?: DockviewPanelApi }) {
       <Box
         ref={scroll.ref}
         onScroll={scroll.onScroll}
+        data-pm-scroll="active"
         style={{ flex: 1, overflowY: "auto" }}
         px="md"
         py="xs"

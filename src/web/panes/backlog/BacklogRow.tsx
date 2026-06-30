@@ -82,6 +82,7 @@ export function BacklogRow({
       px="sm"
       py="cozy"
       data-pm-card={task.id}
+      data-pm-reveal={`t${task.id}`}
       style={{
         borderBottom: "1px solid var(--pm-hairline)",
         background: checked ? "var(--pm-surface)" : undefined,
