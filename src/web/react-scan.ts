@@ -6,18 +6,22 @@ import { scan } from "react-scan";
 // or set localStorage["pm:react-scan"] = "1". Importing this module is cheap;
 // nothing instruments React until the opt-in is present.
 //
-// This module MUST be imported before `react-dom` (it's the first import in
-// main.tsx). react-scan instruments React's DevTools hook, and react-dom only
-// registers its renderer with whatever hook exists at import time — install it
-// late and the renderer never reports to us (renderers: 0, no onRender).
+// This module is dev-only: it's imported solely by the main.scan.tsx entry,
+// which `build:web:scan` builds. The production entry (main.tsx) never touches
+// it, so react-scan stays out of the shipped bundle entirely.
+//
+// main.scan.tsx imports this BEFORE react-dom on purpose. react-scan instruments
+// React's DevTools hook, and react-dom only registers its renderer with whatever
+// hook exists at import time — install it late and the renderer never reports to
+// us (renderers: 0, no onRender).
 //
 // When on, renders are outlined, logged to the console, and tallied per
 // component on `window.__reactScan` so a headless run can read the report back
 // out without scraping the overlay (see scripts/react-scan-report.ts).
 //
-// NOTE: react-scan can only instrument a *development* React build — the default
-// `build:web` ships React in production mode, where react-scan silently no-ops.
-// Use `bun run build:web:scan` (NODE_ENV=development) to get a build it can read.
+// NOTE: react-scan can only instrument a *development* React build, which is the
+// other thing build:web:scan does (NODE_ENV=development). Under the production
+// `build:web` it would no-op anyway — but it isn't bundled there at all.
 
 export interface ReactScanTally {
   /** commits React performed for this component */
