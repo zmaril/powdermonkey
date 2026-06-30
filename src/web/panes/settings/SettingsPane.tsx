@@ -4,6 +4,7 @@ import { MOTION } from "../../motion.ts";
 import { useStore } from "../../store.ts";
 import { CommandRow } from "./CommandRow.tsx";
 import { NotifyControl } from "./NotifyControl.tsx";
+import { ServerControl } from "./ServerControl.tsx";
 import { ThemeControl } from "./ThemeControl.tsx";
 
 // The Settings pane: cross-cutting controls that aren't tied to a particular task —
@@ -31,6 +32,8 @@ export function SettingsPane() {
         </Text>
       </Group>
       <Stack gap="lg" px="md" pb="md" style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+        <ServerControl />
+        <Divider />
         <Stack gap="snug">
           <Text size="sm" fw={600}>
             Theme

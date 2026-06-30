@@ -7,6 +7,7 @@ import { P, match } from "ts-pattern";
 import { Decision, OverrideSource, ProposalStatus, SessionState } from "../shared/types.ts";
 import { applyProposal, decideChange } from "./apply.ts";
 import { cancelTask, completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
+import { cors } from "./cors.ts";
 import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
 import { pg } from "./db.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
@@ -339,6 +340,9 @@ const followupsGroup = new Elysia({ prefix: "/followups" }).post(
 );
 
 export const app = new Elysia()
+  // Cross-origin access for desktop/remote clients (Tauri, or a browser over
+  // Tailscale). Inert same-origin. Must be first so it wraps every route.
+  .use(cors)
   .get("/health", () => ({ ok: true }))
   // Nested, id-less plan loader — Elysia validates the body against the TypeBox
   // plan schema before the handler runs.
