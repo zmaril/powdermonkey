@@ -86,11 +86,12 @@ export function ShellTerminal({
       }),
     );
     // The PM-id counterpart to the URL links above: scan the same PTY output for
-    // t/p/m/g/s id tokens and render them hover-underlined. The click handler is wired
-    // to the store's revealEntity below — here it's registered so the links render.
+    // t/p/m/g/s id tokens and render them hover-underlined. Clicking one reveals the
+    // entity in the UI. This is registered on every terminal — the supervisor shell and
+    // each worker's session PTY — so an id jumps to its entity whoever printed it.
     const linkProvider = term.registerLinkProvider(
-      new PmIdLinkProvider(term, () => {
-        // wired to revealEntity in a later phase
+      new PmIdLinkProvider(term, (kind, id) => {
+        useStore.getState().revealEntity(kind, id);
       }),
     );
     term.open(el);

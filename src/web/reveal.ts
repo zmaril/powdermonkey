@@ -22,23 +22,42 @@ function handle(token: string): string {
   return `[data-pm-reveal="${token}"]`;
 }
 
-/** Resolve a clicked id to its pane + element. A task lives in Active when it has a live
- *  session, otherwise the Backlog; goals/milestones are Backlog headers; a session is an
- *  Active worker card. Returns null for a kind we can't place yet. */
+/** The task that owns a phase, or null if the phase id isn't in the plan. */
+function taskOfPhase(phaseId: number, idx: Indexes): number | null {
+  for (const [taskId, phases] of idx.phasesByTask) {
+    if (phases.some((p) => p.id === phaseId)) return taskId;
+  }
+  return null;
+}
+
+/** Resolve a clicked id to its pane + element, disambiguating each kind:
+ *   • t → the task itself           • p → its parent task
+ *   • m → the milestone header      • g → the goal header
+ *   • s → the session's worker card
+ *  A task (whether reached via t or p) lives in Active when it has a live session,
+ *  otherwise the Backlog. Returns null when the id isn't in the current plan. */
 export function resolveReveal(
   kind: PmKind,
   id: number,
   idx: Indexes,
   activeIds: Set<number>,
 ): RevealTarget | null {
+  // A task's home pane: Active if a live session is linked to it, else the Backlog.
+  const taskTarget = (taskId: number): RevealTarget => ({
+    pane: activeIds.has(taskId) ? PANE_ACTIVE : PANE_BACKLOG,
+    selector: handle(`t${taskId}`),
+  });
+
   switch (kind) {
     case "g":
       return idx.goalById.has(id) ? { pane: PANE_BACKLOG, selector: handle(`g${id}`) } : null;
     case "m":
       return idx.milestoneById.has(id) ? { pane: PANE_BACKLOG, selector: handle(`m${id}`) } : null;
-    case "t": {
-      const pane = activeIds.has(id) ? PANE_ACTIVE : PANE_BACKLOG;
-      return { pane, selector: handle(`t${id}`) };
+    case "t":
+      return taskTarget(id);
+    case "p": {
+      const taskId = taskOfPhase(id, idx);
+      return taskId == null ? null : taskTarget(taskId);
     }
     case "s":
       return { pane: PANE_ACTIVE, selector: handle(`s${id}`) };
