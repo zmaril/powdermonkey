@@ -5,6 +5,21 @@ import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef } from "react";
 import { fontScaleOption } from "./appearance.ts";
 import { useActiveTheme, useStore } from "./store.ts";
+import type { EditorTheme } from "./themes.ts";
+
+// The xterm theme for an editor palette. Crucially sets `foreground` (the palette's
+// primary text) — xterm defaults it to white, which renders white-on-white on the light
+// themes whose terminal background is white/cream. Cursor follows the accent, selection
+// the theme's wash.
+function xtermThemeOf(t: EditorTheme) {
+  return {
+    background: t.terminalBg,
+    foreground: t.dark[0],
+    cursor: t.accent[t.primaryShade],
+    cursorAccent: t.terminalBg,
+    selectionBackground: t.selection,
+  };
+}
 
 // xterm.js wired to the /pty WebSocket. Server sends binary PTY output; we send
 // JSON input/resize frames back. Pass `session` to attach to a local session's
@@ -27,12 +42,17 @@ export function ShellTerminal({
   // Keep the latest onEnded without re-running the socket effect on every render.
   const onEndedRef = useRef(onEnded);
   onEndedRef.current = onEnded;
-  // The terminal background follows the active editor theme. Read it through a ref so
-  // changing themes updates the live terminal (separate effect below) without
-  // re-running the socket effect — that owns the PTY WebSocket and must stay stable.
-  const terminalBg = useActiveTheme().terminalBg;
-  const bgRef = useRef(terminalBg);
-  bgRef.current = terminalBg;
+  // The terminal follows the active editor theme. Build a full xterm theme — not just
+  // the background — so the shell stays readable in every theme: without an explicit
+  // `foreground`, xterm falls back to white, which renders white-on-white on the light
+  // themes (GitHub Light / VS Code Light have a white terminal background). Drive it
+  // off the palette's own tokens (primary text for the foreground, the accent for the
+  // cursor, the theme's selection wash) and read it through a ref so a theme change
+  // re-skins the live terminal (effect below) without re-running the socket effect —
+  // that owns the PTY WebSocket and must stay stable.
+  const editor = useActiveTheme();
+  const themeRef = useRef(xtermThemeOf(editor));
+  themeRef.current = xtermThemeOf(editor);
   // The terminal font follows the font-size control (13px base × the scale factor),
   // updated live below without re-running the socket effect.
   const fontPx = Math.round(13 * fontScaleOption(useStore((s) => s.fontScale)).factor);
@@ -48,7 +68,7 @@ export function ShellTerminal({
     const term = new Terminal({
       fontSize: fontRef.current,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", // lint-allow-font: xterm renders to a canvas and needs a literal font stack, not a CSS var
-      theme: { background: bgRef.current },
+      theme: themeRef.current,
       cursorBlink: true,
     });
     termRef.current = term;
@@ -176,8 +196,10 @@ export function ShellTerminal({
   // Re-skin / re-size the live terminal when the theme or font scale changes, without
   // touching the socket. Refit after a font-size change so the grid matches the pane.
   useEffect(() => {
-    if (termRef.current) termRef.current.options.theme = { background: terminalBg };
-  }, [terminalBg]);
+    // `editor` (from getTheme) is a stable reference per theme key, so this re-skins
+    // only when the selected theme actually changes.
+    if (termRef.current) termRef.current.options.theme = xtermThemeOf(editor);
+  }, [editor]);
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;

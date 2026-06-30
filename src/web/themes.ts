@@ -450,10 +450,15 @@ export const THEMES: Record<string, EditorTheme> = {
     label: "Solarized Light",
     scheme: "light",
     dockTheme: themeSolarizedLight,
+    // Solarized's published content tones (base01 #586e75 / base00 #657b83) are famously
+    // low-contrast and only reach ~4:1 on the cream surfaces — text fails AA and dimmed
+    // is well under it. Pull the text roles down to the darker base tones (base02/base01)
+    // so body and dimmed text clear contrast on every Solarized surface; the lighter
+    // surface indices (4–9) keep the canonical cream palette.
     dark: [
+      "#073642",
+      "#2a5560",
       "#586e75",
-      "#657b83",
-      "#839496",
       "#93a1a1",
       "#d6cfb8",
       "#e6dfc8",
