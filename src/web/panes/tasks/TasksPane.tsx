@@ -1,13 +1,36 @@
 import { Box, Group, SegmentedControl, Stack, Text } from "@mantine/core";
+import type { ComboboxData } from "@mantine/core";
 import type { DockviewPanelApi } from "dockview-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { usePaneScroll } from "../../pane-scroll.ts";
 import { useFullData, useProposalEdits, useProposalGhosts } from "../../plan-data.ts";
+import { FilterBar } from "../FilterBar.tsx";
+import {
+  ANY,
+  DEFAULT_TASK_FILTER,
+  TaskBucket,
+  type TaskFilter,
+  matchTask,
+  parseScope,
+  scopeOptions,
+  scopeValue,
+} from "../filters.ts";
 import { FlatView } from "./FlatView.tsx";
 import { GoalGroup } from "./GoalGroup.tsx";
 import { SelectionBar } from "./SelectionBar.tsx";
 import { StartPanel } from "./StartPanel.tsx";
 import type { Selection, View } from "./types.ts";
+
+// The task lifecycle buckets the operator filters on (default Backlog). Done/archived
+// are buckets now, not a separate tab. Values are the TaskBucket consts, not literals.
+const STATUS_DATA: ComboboxData = [
+  { value: ANY, label: "Any status" },
+  { value: TaskBucket.Backlog, label: "Backlog" },
+  { value: TaskBucket.Active, label: "Active" },
+  { value: TaskBucket.Finished, label: "Done" },
+  { value: TaskBucket.WontDo, label: "Won't do" },
+  { value: TaskBucket.Archived, label: "Archived" },
+];
 
 // The Tasks pane is the one filterable list of EVERY task — backlog, active,
 // done/merged, cancelled, archived — not just the to-be-worked set the old Backlog
@@ -16,8 +39,9 @@ import type { Selection, View } from "./types.ts";
 // launch it local/remote or close it (DONE / WONTDO). Shift-click a card to add it to a
 // multi-selection; while a selection is live the per-card actions hide and one batch bar
 // drives the whole set as ONE launch. Goals and milestones have carets to collapse them.
-// (The card components keep their historical Backlog* names.) Search/filter controls and
-// the backlog-by-default land in a later phase; for now every task shows.
+// (The card components keep their historical Backlog* names.) A search + filter strip
+// (FilterBar) slices the list; it opens to backlog (DEFAULT_TASK_FILTER) so the pane comes
+// up like the old Backlog, and widens to active/done/cancelled/archived on demand.
 
 /** A card's top within the scroll content — summed offsets up to the scroller. This is
  *  scroll-invariant AND transform-invariant (offsetTop ignores the transforms
@@ -95,17 +119,22 @@ function usePreserveScrollAcrossResort(scrollRef: React.RefObject<HTMLDivElement
 }
 
 export function TasksPane({ api }: { api?: DockviewPanelApi }) {
-  const { idx, loading } = useFullData();
+  const { idx, activeIds, loading } = useFullData();
   const ghosts = useProposalGhosts();
   const edits = useProposalEdits();
   const [view, setView] = useState<View>("grouped");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const scroll = usePaneScroll("tasks", api); // lint-allow-string: pane scroll key, not an enum value
   usePreserveScrollAcrossResort(scroll.ref);
+  // Opens to backlog (DEFAULT_TASK_FILTER) so the pane comes up showing what the old
+  // Backlog did; widen the status filter to see active / done / cancelled / archived.
+  const [filter, setFilter] = useState<TaskFilter>(DEFAULT_TASK_FILTER);
+  const set = (patch: Partial<TaskFilter>) => setFilter((f) => ({ ...f, ...patch }));
+  const isDefault = JSON.stringify(filter) === JSON.stringify(DEFAULT_TASK_FILTER);
 
-  // Every task — the full set, in plan order. (The status/env/goal/starred filter that
-  // slices this lands in a later phase; for now the list shows everything.)
-  const visibleTasks = [...idx.tasksByMilestone.values()].flat();
+  // Every task, sliced by the filter, in plan order.
+  const allTasks = [...idx.tasksByMilestone.values()].flat();
+  const visibleTasks = allTasks.filter((t) => matchTask(t, idx, activeIds, filter));
   const visible = new Set(visibleTasks.map((t) => t.id));
   const goals = [...idx.goals].sort((a, b) => a.id - b.id);
 
@@ -132,27 +161,44 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
         background: "var(--pm-pane-bg)",
       }}
     >
-      <Group justify="space-between" px="md" py="cozy" style={{ flex: "0 0 auto" }}>
-        <Group gap="cozy">
-          <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
-            TASKS
-          </Text>
-          {loading && (
-            <Text size="xs" c="dimmed">
-              loading…
+      <Stack gap="cozy" px="md" py="cozy" style={{ flex: "0 0 auto" }}>
+        <Group justify="space-between">
+          <Group gap="cozy">
+            <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
+              TASKS
             </Text>
-          )}
+            <Text size="xs" c="dimmed">
+              {loading ? "loading…" : `${visibleTasks.length} shown`}
+            </Text>
+          </Group>
+          <SegmentedControl
+            size="xs"
+            value={view}
+            onChange={(v) => setView(v as View)}
+            data={[
+              { label: "Flat", value: "flat" },
+              { label: "Grouped", value: "grouped" },
+            ]}
+          />
         </Group>
-        <SegmentedControl
-          size="xs"
-          value={view}
-          onChange={(v) => setView(v as View)}
-          data={[
-            { label: "Flat", value: "flat" },
-            { label: "Grouped", value: "grouped" },
-          ]}
+        <FilterBar
+          search={filter.search}
+          onSearch={(v) => set({ search: v })}
+          searchPlaceholder="task id or title"
+          statusData={STATUS_DATA}
+          status={filter.status}
+          onStatus={(v) => set({ status: v as TaskFilter["status"] })}
+          env={filter.env}
+          onEnv={(v) => set({ env: v as TaskFilter["env"] })}
+          scopeData={scopeOptions(idx)}
+          scope={scopeValue(filter)}
+          onScope={(v) => set(parseScope(v))}
+          starred={filter.starred}
+          onStarred={(v) => set({ starred: v })}
+          onReset={() => setFilter(DEFAULT_TASK_FILTER)}
+          isDefault={isDefault}
         />
-      </Group>
+      </Stack>
 
       <Box
         ref={scroll.ref}
