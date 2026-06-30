@@ -1,4 +1,5 @@
 import { Button, Group, Text } from "@mantine/core";
+import { GHOST_BORDER_COLOR, PROPOSED_TEXT_COLOR } from "./constants.ts";
 
 /** The standard proposal-review strip at the bottom of a card: a "Proposed: …" label on
  *  the left, accept (✓) / reject (✗) on the right. Shared by ghost cards (a proposed new
@@ -22,9 +23,14 @@ export function ProposedStrip({
       gap="xs"
       wrap="nowrap"
       mt="cozy"
-      style={{ borderTop: "1px dashed var(--mantine-color-teal-7)", paddingTop: 8 }}
+      style={{ borderTop: `1px dashed ${GHOST_BORDER_COLOR}`, paddingTop: 8 }}
     >
-      <Text size="xs" c="teal.3" truncate style={{ flex: 1, minWidth: 0 }} title={hint}>
+      <Text
+        size="xs"
+        truncate
+        style={{ flex: 1, minWidth: 0, color: PROPOSED_TEXT_COLOR }}
+        title={hint}
+      >
         {label}
       </Text>
       <Button

@@ -2,9 +2,10 @@ import { Card, Text } from "@mantine/core";
 import { Decision } from "../../../shared/types.ts";
 import { type Ghost, ghostLabel } from "../../ghosts.ts";
 import { ProposedStrip } from "./ProposedStrip.tsx";
+import { GHOST_BORDER_COLOR } from "./constants.ts";
 import { useDecide } from "./useDecide.ts";
 
-const GHOST_BORDER = "1px dashed var(--mantine-color-teal-5)";
+const GHOST_BORDER = `1px dashed ${GHOST_BORDER_COLOR}`;
 
 /** A proposed new milestone or goal — a dashed block with its title and the standard
  *  accept/reject strip, matching the ghost task cards. Any child tasks/phases the create
