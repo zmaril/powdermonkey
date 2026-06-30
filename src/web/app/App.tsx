@@ -1,5 +1,10 @@
 import "dockview-core/dist/styles/dockview.css";
-import { type DockviewApi, DockviewReact, type DockviewReadyEvent } from "dockview-react";
+import {
+  type DockviewApi,
+  DockviewReact,
+  type DockviewReadyEvent,
+  type SerializedDockview,
+} from "dockview-react";
 import { useEffect, useRef } from "react";
 import { ActivityTab, useTabActivity } from "../TabActivity.tsx";
 import { useNeedsInputNotifications } from "../notifications.ts";
@@ -21,6 +26,16 @@ import { useConnectionWatch } from "./useConnectionWatch.ts";
 // `persist` middleware so the disconnect→reload recovery (and any plain browser
 // refresh) keeps your panes. App mirrors that state onto the dockview api: onReady
 // restores it, and onDidLayoutChange writes every change back via setLayout.
+
+// True when every panel in a saved layout maps to a component we still register, so
+// dockview's fromJSON won't try to mount a panel whose component was renamed away. A
+// shell/browser panel id is suffixed (shell-0, browser-2); the component name lives in
+// the panel's `contentComponent`, which is what we check.
+function layoutIsCompatible(saved: SerializedDockview): boolean {
+  const panels = saved.panels ?? {};
+  const known = new Set(Object.keys(dockComponents));
+  return Object.values(panels).every((p) => known.has(p.contentComponent ?? ""));
+}
 
 export function App() {
   const apiRef = useRef<DockviewApi | null>(null);
@@ -56,10 +71,13 @@ export function App() {
     // Restore the layout from the store (rehydrated from localStorage by persist);
     // otherwise lay out the default. A corrupt/incompatible saved layout (or one
     // that restores to nothing) falls back to the default so a reload can never
-    // leave you staring at a blank dock.
+    // leave you staring at a blank dock. A layout saved before a pane rename can
+    // still reference a component id we no longer register (e.g. the old
+    // active/backlog panes) — applying that would render a broken panel, so we
+    // discard it up front and rebuild the default.
     const saved = useStore.getState().layout;
     let restored = false;
-    if (saved) {
+    if (saved && layoutIsCompatible(saved)) {
       try {
         event.api.fromJSON(saved);
         restored = event.api.panels.length > 0;
@@ -102,7 +120,7 @@ export function App() {
   // Browser button → add a new browser pane (an iframe on a dev server / preview).
   // Each request opens a distinct panel (keyed by `n`) so you can watch several
   // previews at once; the loaded URL rides in the panel params so it persists with
-  // the layout. Added in the main group, alongside Sessions/Backlog/Archive.
+  // the layout. Added in the main group, alongside Sessions/Tasks/Archive.
   useEffect(() => {
     const api = apiRef.current;
     if (!browserReq) return;
@@ -116,7 +134,7 @@ export function App() {
   }, [browserReq]);
 
   // A pane-launcher button → focus the singleton pane if it's already open, else add
-  // it. New panes land "within" the main group (next to Sessions/Backlog/Archive) when
+  // it. New panes land "within" the main group (next to Sessions/Tasks/Archive) when
   // that anchor exists, otherwise wherever dockview puts a group-less panel — so a
   // launcher always brings the pane up even if the default layout was torn apart.
   useEffect(() => {

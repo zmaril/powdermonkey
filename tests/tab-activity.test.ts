@@ -3,7 +3,7 @@ import type { Session, Task } from "../src/server/schema.ts";
 import {
   PANE_SESSIONS,
   PANE_ARCHIVE,
-  PANE_BACKLOG,
+  PANE_TASKS,
   paneActivity,
   snapshotActivity,
 } from "../src/web/tab-activity.ts";
@@ -43,13 +43,13 @@ test("task status routes to the pane it moved toward", () => {
   const panes = paneActivity(prev, next);
   expect(panes.has(PANE_SESSIONS)).toBe(true); // 1: pending → dispatched (Sessions)
   expect(panes.has(PANE_ARCHIVE)).toBe(true); // 2: dispatched → merged
-  expect(panes.has(PANE_BACKLOG)).toBe(false); // 3: unchanged
+  expect(panes.has(PANE_TASKS)).toBe(false); // 3: unchanged
 });
 
-test("a task rolled back to pending lights up Backlog", () => {
+test("a task rolled back to pending lights up Tasks", () => {
   const prev = snapshotActivity([], [task(1, "dispatched")]);
   const next = snapshotActivity([], [task(1, "pending")]);
-  expect([...paneActivity(prev, next)]).toEqual([PANE_BACKLOG]);
+  expect([...paneActivity(prev, next)]).toEqual([PANE_TASKS]);
 });
 
 test("a brand-new task (absent from prev) is not a status-change edge", () => {

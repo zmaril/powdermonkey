@@ -1,23 +1,23 @@
 import { Box, Group, SegmentedControl, Stack, Text } from "@mantine/core";
 import type { DockviewPanelApi } from "dockview-react";
 import { useLayoutEffect, useRef, useState } from "react";
-import { TaskStatus } from "../../../shared/types.ts";
-import { partitionTasks } from "../../active.ts";
 import { usePaneScroll } from "../../pane-scroll.ts";
-import { usePlanData, useProposalEdits, useProposalGhosts } from "../../plan-data.ts";
+import { useFullData, useProposalEdits, useProposalGhosts } from "../../plan-data.ts";
 import { FlatView } from "./FlatView.tsx";
 import { GoalGroup } from "./GoalGroup.tsx";
 import { SelectionBar } from "./SelectionBar.tsx";
 import { StartPanel } from "./StartPanel.tsx";
 import type { Selection, View } from "./types.ts";
 
-// The Backlog pane is the launchpad — everything to-be-worked (not active),
-// grouped goal → milestone as cards (or one flat star-first list). Every card
-// carries the same action cluster (TaskActions): launch it local/remote or close it
-// (DONE / WONTDO). Shift-click a card to add it to a multi-selection; while a
-// selection is live the per-card actions hide and one batch bar drives the whole
-// set as ONE launch — so it's clear they move together. Goals and milestones have
-// carets to collapse them.
+// The Tasks pane is the one filterable list of EVERY task — backlog, active,
+// done/merged, cancelled, archived — not just the to-be-worked set the old Backlog
+// showed. It keeps the launchpad's machinery: tasks grouped goal → milestone as cards
+// (or one flat star-first list), each carrying the same action cluster (TaskActions):
+// launch it local/remote or close it (DONE / WONTDO). Shift-click a card to add it to a
+// multi-selection; while a selection is live the per-card actions hide and one batch bar
+// drives the whole set as ONE launch. Goals and milestones have carets to collapse them.
+// (The card components keep their historical Backlog* names.) Search/filter controls and
+// the backlog-by-default land in a later phase; for now every task shows.
 
 /** A card's top within the scroll content — summed offsets up to the scroller. This is
  *  scroll-invariant AND transform-invariant (offsetTop ignores the transforms
@@ -94,20 +94,19 @@ function usePreserveScrollAcrossResort(scrollRef: React.RefObject<HTMLDivElement
   });
 }
 
-export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
-  const { idx, activeIds, loading } = usePlanData();
+export function TasksPane({ api }: { api?: DockviewPanelApi }) {
+  const { idx, loading } = useFullData();
   const ghosts = useProposalGhosts();
   const edits = useProposalEdits();
   const [view, setView] = useState<View>("grouped");
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const scroll = usePaneScroll("backlog", api);
+  const scroll = usePaneScroll("tasks", api); // lint-allow-string: pane scroll key, not an enum value
   usePreserveScrollAcrossResort(scroll.ref);
 
-  // Backlog = everything to-be-worked: not active (no live session) and not merged.
-  const allTasks = [...idx.tasksByMilestone.values()].flat();
-  const { backlog: backlogList } = partitionTasks(allTasks, activeIds);
-  const backlogTasks = backlogList.filter((t) => t.status !== TaskStatus.Merged);
-  const backlog = new Set(backlogTasks.map((t) => t.id));
+  // Every task — the full set, in plan order. (The status/env/goal/starred filter that
+  // slices this lands in a later phase; for now the list shows everything.)
+  const visibleTasks = [...idx.tasksByMilestone.values()].flat();
+  const visible = new Set(visibleTasks.map((t) => t.id));
   const goals = [...idx.goals].sort((a, b) => a.id - b.id);
 
   const toggle = (id: number) =>
@@ -119,10 +118,10 @@ export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
     });
   const selection: Selection = { selected, toggle, active: selected.size > 0 };
 
-  // The launch order is the rendered backlog order (goal → milestone → position),
-  // so the first selected card becomes the primary task of the shared session. Drop
-  // any selected ids that are no longer in the backlog (e.g. just launched).
-  const selectedIds = backlogTasks.map((t) => t.id).filter((id) => selected.has(id));
+  // The launch order is the rendered order (goal → milestone → position), so the first
+  // selected card becomes the primary task of the shared session. Drop any selected ids
+  // no longer visible (e.g. filtered out, or just launched).
+  const selectedIds = visibleTasks.map((t) => t.id).filter((id) => selected.has(id));
 
   return (
     <Box
@@ -136,7 +135,7 @@ export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
       <Group justify="space-between" px="md" py="cozy" style={{ flex: "0 0 auto" }}>
         <Group gap="cozy">
           <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
-            BACKLOG
+            TASKS
           </Text>
           {loading && (
             <Text size="xs" c="dimmed">
@@ -176,13 +175,13 @@ export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
             No plan loaded. POST one to /plan.
           </Text>
         ) : view === "flat" ? (
-          backlogTasks.length === 0 ? (
+          visibleTasks.length === 0 ? (
             <Text c="dimmed" size="sm" px="md" py="lg">
-              Backlog is empty — every task is active or done.
+              No tasks match.
             </Text>
           ) : (
             <FlatView
-              tasks={backlogTasks}
+              tasks={visibleTasks}
               idx={idx}
               selection={selection}
               ghosts={ghosts}
@@ -196,7 +195,7 @@ export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
                 key={g.id}
                 goal={g}
                 idx={idx}
-                backlog={backlog}
+                backlog={visible}
                 selection={selection}
                 ghosts={ghosts}
                 edits={edits}

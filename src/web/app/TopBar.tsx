@@ -41,7 +41,7 @@ export function TopBar() {
         </Group>
         <Group gap="hair" wrap="nowrap">
           <PaneButton label="Sessions" onClick={() => openPane("sessions")} />
-          <PaneButton label="Backlog" onClick={() => openPane("backlog")} />
+          <PaneButton label="Tasks" onClick={() => openPane("tasks")} />
           <PaneButton
             label="Archive"
             onClick={

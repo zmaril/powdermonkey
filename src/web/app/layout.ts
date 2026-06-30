@@ -1,21 +1,21 @@
 import type { DockviewApi } from "dockview-react";
 import { AboutPanel } from "./AboutPanel.tsx";
 import { ArchivePanel } from "./ArchivePanel.tsx";
-import { BacklogPanel } from "./BacklogPanel.tsx";
 import { BrowserPanel } from "./BrowserPanel.tsx";
 import { HelpPanel } from "./HelpPanel.tsx";
 import { ScratchPanel } from "./ScratchPanel.tsx";
 import { SessionsPanel } from "./SessionsPanel.tsx";
 import { SettingsPanel } from "./SettingsPanel.tsx";
 import { ShellPanel } from "./ShellPanel.tsx";
+import { TasksPanel } from "./TasksPanel.tsx";
 
 // The dockview component registry: each panel id maps to the component that renders
-// it. The list panes (Sessions/Backlog/Archive) and Browser take their panel api/params
+// it. The list panes (Sessions/Tasks/Archive) and Browser take their panel api/params
 // through a thin wrapper; the prop-less panes render directly.
 export const dockComponents = {
   shell: ShellPanel,
   sessions: SessionsPanel,
-  backlog: BacklogPanel,
+  tasks: TasksPanel,
   archive: ArchivePanel,
   scratch: ScratchPanel,
   browser: BrowserPanel,
@@ -28,7 +28,7 @@ export const dockComponents = {
 // paneReq). Component name and panel id are the same string as the pane id.
 export const PANE_TITLES: Record<string, string> = {
   sessions: "Sessions",
-  backlog: "Backlog",
+  tasks: "Tasks",
   archive: "Archive",
   scratch: "Scratch",
   settings: "Settings",
@@ -37,14 +37,14 @@ export const PANE_TITLES: Record<string, string> = {
 };
 
 // The default arrangement, built from scratch when there's no saved layout (or a
-// saved one we couldn't restore): Sessions/Backlog/Archive tabs in the main group, the
+// saved one we couldn't restore): Sessions/Tasks/Archive tabs in the main group, the
 // scratchpad over the supervisor shell on the left.
 export function buildDefaultLayout(api: DockviewApi) {
   const sessions = api.addPanel({ id: "sessions", component: "sessions", title: "Sessions" });
   api.addPanel({
-    id: "backlog",
-    component: "backlog",
-    title: "Backlog",
+    id: "tasks",
+    component: "tasks",
+    title: "Tasks",
     position: { direction: "within", referencePanel: "sessions" },
   });
   api.addPanel({
