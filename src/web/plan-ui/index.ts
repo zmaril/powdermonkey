@@ -8,6 +8,7 @@ export { SESSION_BADGE, KIND_ICON, STATUS_COLOR } from "./constants.ts";
 export { AgentNarrative } from "./AgentNarrative.tsx";
 export { AgentStateBadge } from "./AgentStateBadge.tsx";
 export { CompleteTaskControl } from "./CompleteTaskControl.tsx";
+export { EditableText } from "./EditableText.tsx";
 export { IdTag } from "./IdTag.tsx";
 export { LaunchActions } from "./LaunchActions.tsx";
 export { PhaseList } from "./PhaseList.tsx";

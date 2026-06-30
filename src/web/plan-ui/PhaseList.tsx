@@ -2,6 +2,7 @@ import { Group, List, Text, ThemeIcon, Tooltip, UnstyledButton } from "@mantine/
 import type { Phase } from "../../server/schema.ts";
 import { DecisionSource, PhaseStatus } from "../../shared/types.ts";
 import { useStore } from "../store.ts";
+import { EditableText } from "./EditableText.tsx";
 
 // A phase's completion, kept visually distinct by who made the call: reconciled is a
 // solid green ✓; an operator-asserted one an orange ✋ ("by hand"); a supervisor one
@@ -26,7 +27,15 @@ function phaseGlyph(p: Phase): { color: string; mark: string; title: string } {
 export function PhaseList({
   phases,
   interactive = false,
-}: { phases: Phase[]; interactive?: boolean }) {
+  struck = false,
+  onRename,
+}: {
+  phases: Phase[];
+  interactive?: boolean;
+  struck?: boolean;
+  /** When set, each phase name becomes click-to-edit (inline plan editing). */
+  onRename?: (phaseId: number, name: string) => void;
+}) {
   const { completePhase, reopenPhase } = useStore();
   return (
     <List spacing={2} size="sm" center>
@@ -47,14 +56,26 @@ export function PhaseList({
               </Tooltip>
             }
           >
-            <Group gap={6} wrap="nowrap" align="baseline">
-              <Text
-                size="sm"
-                c={done ? "dimmed" : undefined}
-                td={done ? "line-through" : undefined}
-              >
-                {p.name}
-              </Text>
+            <Group gap={6} wrap="nowrap" align="baseline" style={{ flex: 1, minWidth: 0 }}>
+              {onRename ? (
+                <EditableText
+                  value={p.name}
+                  size="sm"
+                  wrap
+                  dimmed={done || struck}
+                  strikethrough={done || struck}
+                  onSave={(v) => onRename(p.id, v)}
+                />
+              ) : (
+                <Text
+                  size="sm"
+                  style={{ wordBreak: "break-word" }}
+                  c={done || struck ? "dimmed" : undefined}
+                  td={done || struck ? "line-through" : undefined}
+                >
+                  {p.name}
+                </Text>
+              )}
               {interactive && !done && (
                 <UnstyledButton
                   onClick={() => completePhase(p.id)}

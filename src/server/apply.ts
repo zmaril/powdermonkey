@@ -1,5 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import {
+  type Decision,
+  Decision as DecisionEnum,
   type ProposalChange,
   ProposalOp,
   ProposalStatus,
@@ -169,4 +171,86 @@ export async function applyProposal(id: number): Promise<ApplyResult> {
   }
 
   return { ok: true, applied: true, counts, proposal: applied };
+}
+
+// ── Per-change decisions (inline accept/reject) ────────────────────────────────
+
+export type DecideResult =
+  | { ok: true; applied: boolean; proposal: Proposal }
+  | { ok: false; error: string; conflicts?: Conflict[] };
+
+/** The change indices that form ONE decidable unit with `start`: the change itself plus
+ *  any creates that chain to it through `parentRef` (a created subtree — a new task and
+ *  its new phases — is accepted or rejected as a whole, since the children's parent only
+ *  exists if the root does). A non-create or ref-less change is a singleton unit. */
+function unitIndices(changes: ProposalChange[], start: number): Set<number> {
+  const unit = new Set<number>([start]);
+  const root = changes[start];
+  if (root.op !== ProposalOp.Create || !root.ref) return unit;
+  const refs = new Set<string>([root.ref]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    changes.forEach((c, i) => {
+      if (unit.has(i)) return;
+      if (c.op === ProposalOp.Create && c.parentRef != null && refs.has(c.parentRef)) {
+        unit.add(i);
+        if (c.ref) refs.add(c.ref);
+        grew = true;
+      }
+    });
+  }
+  return unit;
+}
+
+/** Decide ONE change (and its create-subtree unit) inline: accept → apply it now,
+ *  atomically, after a stale-base check on just that unit; reject → drop it. Either way
+ *  the unit's changes leave the proposal; when none remain the proposal is closed
+ *  (Applied). The per-change counterpart to applyProposal's all-or-nothing apply. */
+export async function decideChange(
+  id: number,
+  changeIndex: number,
+  decision: Decision,
+): Promise<DecideResult> {
+  const proposal = await getProposal(id);
+  if (!proposal) return { ok: false, error: "proposal not found" };
+  if (proposal.status !== ProposalStatus.Pending && proposal.status !== ProposalStatus.Approved) {
+    return { ok: false, error: `proposal is ${proposal.status}, not open` };
+  }
+  const changes = proposal.changes;
+  if (changeIndex < 0 || changeIndex >= changes.length) {
+    return { ok: false, error: "change index out of range" };
+  }
+
+  const unit = unitIndices(changes, changeIndex);
+  const unitChanges = [...unit].sort((a, b) => a - b).map((i) => changes[i]);
+  const now = new Date();
+
+  if (decision === DecisionEnum.Accept) {
+    // Inline accept AUTO-REPLANS: it always applies against the CURRENT rows (applyChange
+    // targets the live row by id), so a base that drifted since the proposal was authored
+    // isn't a failure to hand back to the operator — the change just lands on today's plan.
+    // (The whole-proposal applyProposal path still guards a stale base; only this
+    // per-change inline path self-heals, since the operator is acting on what they see.)
+    await db.transaction(async (tx) => {
+      const refs = new Map<string, number>();
+      for (const c of unitChanges) await applyChange(tx, c, refs, now);
+    });
+  }
+
+  // Drop the decided unit (accepted ones are already applied above). When the proposal
+  // has nothing left to decide, it's closed.
+  const remaining = changes.filter((_, i) => !unit.has(i));
+  const done = remaining.length === 0;
+  const [updated] = await db
+    .update(proposals)
+    .set({
+      changes: remaining,
+      status: done ? ProposalStatus.Applied : proposal.status,
+      appliedAt: done ? now : proposal.appliedAt,
+      updatedAt: now,
+    })
+    .where(eq(proposals.id, id))
+    .returning();
+  return { ok: true, applied: decision === DecisionEnum.Accept, proposal: updated as Proposal };
 }

@@ -28,11 +28,6 @@
     "prepublishOnly": "bun run build:web"
   },
   "dependencies": {
-    "@codemirror/lang-markdown": "^6.5.0",
-    "@codemirror/merge": "^6.12.2",
-    "@codemirror/state": "^6.7.0",
-    "@codemirror/theme-one-dark": "^6.1.3",
-    "@codemirror/view": "^6.43.4",
     "@electric-sql/pglite": "^0.2.17",
     "@elysiajs/eden": "^1.4.9",
     "@formkit/auto-animate": "^0.9.0",
@@ -46,7 +41,6 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",
-    "codemirror": "^6.0.2",
     "dockview-react": "^7.0.2",
     "dompurify": "^3.4.11",
     "drizzle-orm": "^0.38.0",

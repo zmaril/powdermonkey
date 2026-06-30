@@ -4,7 +4,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { TaskStatus } from "../../../shared/types.ts";
 import { partitionTasks } from "../../active.ts";
 import { usePaneScroll } from "../../pane-scroll.ts";
-import { usePlanData } from "../../plan-data.ts";
+import { usePlanData, useProposalEdits, useProposalGhosts } from "../../plan-data.ts";
 import { FlatView } from "./FlatView.tsx";
 import { GoalGroup } from "./GoalGroup.tsx";
 import { SelectionBar } from "./SelectionBar.tsx";
@@ -96,6 +96,8 @@ function usePreserveScrollAcrossResort(scrollRef: React.RefObject<HTMLDivElement
 
 export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
   const { idx, activeIds, loading } = usePlanData();
+  const ghosts = useProposalGhosts();
+  const edits = useProposalEdits();
   const [view, setView] = useState<View>("grouped");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const scroll = usePaneScroll("backlog", api);
@@ -173,12 +175,26 @@ export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
               Backlog is empty — every task is active or done.
             </Text>
           ) : (
-            <FlatView tasks={backlogTasks} idx={idx} selection={selection} />
+            <FlatView
+              tasks={backlogTasks}
+              idx={idx}
+              selection={selection}
+              ghosts={ghosts}
+              edits={edits}
+            />
           )
         ) : (
           <Stack gap="xl">
             {goals.map((g) => (
-              <GoalGroup key={g.id} goal={g} idx={idx} backlog={backlog} selection={selection} />
+              <GoalGroup
+                key={g.id}
+                goal={g}
+                idx={idx}
+                backlog={backlog}
+                selection={selection}
+                ghosts={ghosts}
+                edits={edits}
+              />
             ))}
           </Stack>
         )}

@@ -5,7 +5,6 @@ import { ArchivePanel } from "./ArchivePanel.tsx";
 import { BacklogPanel } from "./BacklogPanel.tsx";
 import { BrowserPanel } from "./BrowserPanel.tsx";
 import { HelpPanel } from "./HelpPanel.tsx";
-import { PlanReviewPanel } from "./PlanReviewPanel.tsx";
 import { ScratchPanel } from "./ScratchPanel.tsx";
 import { SettingsPanel } from "./SettingsPanel.tsx";
 import { ShellPanel } from "./ShellPanel.tsx";
@@ -23,7 +22,6 @@ export const dockComponents = {
   settings: SettingsPanel,
   about: AboutPanel,
   help: HelpPanel,
-  planreview: PlanReviewPanel,
 };
 
 // Tab titles for the singleton panes opened by the top-bar launchers (openPane →
@@ -36,7 +34,6 @@ export const PANE_TITLES: Record<string, string> = {
   settings: "Settings",
   about: "About",
   help: "Help",
-  planreview: "Plan",
 };
 
 // The default arrangement, built from scratch when there's no saved layout (or a
@@ -54,12 +51,6 @@ export function buildDefaultLayout(api: DockviewApi) {
     id: "archive", // lint-allow-string: dockview panel id, not an enum value
     component: "archive", // lint-allow-string: dockview component name, not an enum value
     title: "Archive",
-    position: { direction: "within", referencePanel: "active" },
-  });
-  api.addPanel({
-    id: "planreview",
-    component: "planreview",
-    title: "Plan",
     position: { direction: "within", referencePanel: "active" },
   });
   api.addPanel({

@@ -52,6 +52,19 @@ let migrated = false;
 
 /** Apply migrations once at boot. Safe to call repeatedly. */
 export async function ready(): Promise<void> {
+  // Single-process footgun guard. db.ts opens PGlite ONCE at import, on the DATA_DIR it
+  // read then; PGlite is single-writer per process. Each DB-backed test file sets its own
+  // temp PM_DATA_DIR at its top — which only isolates them if files run in SEPARATE
+  // processes. If PM_DATA_DIR has changed since import, multiple such files were loaded
+  // into ONE process (bare `bun test` / `bun test tests/`) and would silently share the
+  // first file's DB and corrupt each other. Fail loudly with the fix instead.
+  if (process.env.PM_DATA_DIR && process.env.PM_DATA_DIR !== DATA_DIR) {
+    throw new Error(
+      "Multiple DB-backed test files were loaded into ONE process (PGlite is single-writer " +
+        "per process, so they'd share one DB). Run `bun run test` — it runs each file in its " +
+        "own process. For a single file: `bun test tests/<name>.test.ts`.",
+    );
+  }
   if (migrated) return;
   // Resolved against the package, not the cwd: a global install supervises a
   // foreign project, where a "drizzle" relative path wouldn't exist.

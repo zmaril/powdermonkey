@@ -4,8 +4,8 @@ import type { TSchema } from "@sinclair/typebox";
 import { getTableColumns, getTableName } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 import { P, match } from "ts-pattern";
-import { OverrideSource, ProposalStatus, SessionState } from "../shared/types.ts";
-import { applyProposal } from "./apply.ts";
+import { Decision, OverrideSource, ProposalStatus, SessionState } from "../shared/types.ts";
+import { applyProposal, decideChange } from "./apply.ts";
 import { cancelTask, completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
 import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
 import { pg } from "./db.ts";
@@ -13,7 +13,6 @@ import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
 import { proposeFollowup } from "./followups.ts";
 import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
-import { applyPlanMarkdown, planMarkdown, proposalMarkdown } from "./markdown.ts";
 import { models } from "./models.ts";
 import { PUBLIC_DIR } from "./paths.ts";
 import { loadPlan, planSchema } from "./plan.ts";
@@ -34,6 +33,7 @@ import {
   milestones as milestonesTable,
   notes as notesTable,
   phases as phasesTable,
+  proposals as proposalsTable,
   pullRequests as pullRequestsTable,
   sessionTasks as sessionTasksTable,
   sessions as sessionsTable,
@@ -89,6 +89,7 @@ const SYNC_TABLES: Record<string, { sql: string; key: string }> = Object.fromEnt
     sessionTasksTable,
     notesTable,
     pullRequestsTable,
+    proposalsTable,
     // biome-ignore lint/suspicious/noExplicitAny: heterogeneous pgTable objects, introspected generically.
   ].map((tbl: any) => {
     const name = getTableName(tbl);
@@ -278,16 +279,6 @@ const proposalsGroup = new Elysia({ prefix: "/proposals" })
     if (!row) set.status = 404;
     return row ?? { error: "not found" };
   })
-  // The proposal rendered as markdown — its change-set projected onto the current
-  // plan — for review/diff against the plan markdown.
-  .get("/:id/markdown", async ({ params, set }) => {
-    const row = await getProposal(Number(params.id));
-    if (!row) {
-      set.status = 404;
-      return "";
-    }
-    return proposalMarkdown(row.changes);
-  })
   .post("/", ({ body }) => createProposal(body as CreateProposalInput), {
     body: proposalCreateBody,
   })
@@ -301,6 +292,23 @@ const proposalsGroup = new Elysia({ prefix: "/proposals" })
     if (!row) set.status = 400;
     return row ?? { error: "proposal not found or not pending" };
   })
+  // Inline per-change decision: accept ONE change (and its create-subtree) — applied
+  // immediately — or reject it. The change leaves the proposal either way; the proposal
+  // closes once empty. Backs the ghost cards' ✓/✗ in the Backlog.
+  .post(
+    "/:id/decide",
+    async ({ params, body, set }) => {
+      const result = await decideChange(Number(params.id), body.changeIndex, body.decision);
+      if (!result.ok) set.status = "conflicts" in result && result.conflicts ? 409 : 400;
+      return result;
+    },
+    {
+      body: t.Object({
+        changeIndex: t.Number(),
+        decision: t.Union([t.Literal(Decision.Accept), t.Literal(Decision.Reject)]),
+      }),
+    },
+  )
   .post("/:id/apply", async ({ params, set }) => {
     const result = await applyProposal(Number(params.id));
     if (!result.ok) set.status = "conflicts" in result && result.conflicts ? 409 : 400;
@@ -332,13 +340,6 @@ const followupsGroup = new Elysia({ prefix: "/followups" }).post(
 
 export const app = new Elysia()
   .get("/health", () => ({ ok: true }))
-  // The plan as markdown — the review-and-edit surface. GET renders the live plan
-  // tree; POST reconciles an edited markdown back into the plan (create untagged
-  // nodes, update tagged ones, archive dropped ones) — "edit the plan" == "edit text".
-  .get("/plan/markdown", () => planMarkdown())
-  .post("/plan/markdown", ({ body }) => applyPlanMarkdown(body.markdown), {
-    body: t.Object({ markdown: t.String() }),
-  })
   // Nested, id-less plan loader — Elysia validates the body against the TypeBox
   // plan schema before the handler runs.
   .post("/plan", ({ body }) => loadPlan(body), { body: planSchema })

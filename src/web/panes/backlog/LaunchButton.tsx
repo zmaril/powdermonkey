@@ -68,7 +68,6 @@ export function LaunchButton({
             minRows={2}
             maxRows={6}
             size="xs"
-            // biome-ignore lint/a11y/noAutofocus: deliberate — popover opens for this input.
             autoFocus
           />
           <Button size="xs" color={color} onClick={run}>

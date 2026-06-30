@@ -40,7 +40,6 @@ export function TopBar() {
               () => openPane("archive") /* lint-allow-string: pane id, not ProposalOp.Archive */
             }
           />
-          <PaneButton label="Plan" onClick={() => openPane("planreview")} />
           <Divider orientation="vertical" />
           <PaneButton label="Shell" onClick={() => openTerminal("")} />
           <PaneButton label="Browser" onClick={() => openBrowser()} />

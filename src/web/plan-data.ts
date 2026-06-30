@@ -8,11 +8,19 @@ import {
   goalsCollection,
   milestonesCollection,
   phasesCollection,
+  proposalsCollection,
   pullRequestsCollection,
   sessionTasksCollection,
   sessionsCollection,
   tasksCollection,
 } from "./collections.ts";
+import {
+  type EntityEdit,
+  type GroupedGhosts,
+  groupGhosts,
+  proposalEditsByEntity,
+  proposalGhosts,
+} from "./ghosts.ts";
 
 // The collections stream every row (live + archived); the live panes want only the
 // non-archived ones. sessionTasks carry no archived_at — their liveness is the
@@ -128,6 +136,22 @@ export function usePlanData(): PlanData {
   // "loading" until the core plan tables have delivered their first snapshot.
   const loading = goals.isLoading || milestones.isLoading || tasks.isLoading || sessions.isLoading;
   return { idx, activeIds, loading, error: null };
+}
+
+/** Pending proposals' create-task changes, projected into ghost cards keyed by the
+ *  milestone they'd land under — live off the synced proposals collection, so a new
+ *  proposal's ghosts appear (and an accepted/rejected one's vanish) without a refresh. */
+export function useProposalGhosts(): GroupedGhosts {
+  const proposals = useLiveQuery(() => proposalsCollection);
+  return useMemo(() => groupGhosts(proposalGhosts(proposals.data ?? [])), [proposals.data]);
+}
+
+/** Pending edits on existing nodes (rename / delete / move, any kind), keyed by
+ *  `${kind}:${id}`, so each node can render the proposed change in place — live off the
+ *  same collection. */
+export function useProposalEdits(): Map<string, EntityEdit[]> {
+  const proposals = useLiveQuery(() => proposalsCollection);
+  return useMemo(() => proposalEditsByEntity(proposals.data ?? []), [proposals.data]);
 }
 
 /** The archive view, off the same collections. `tasks` is the book of work:

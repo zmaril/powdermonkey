@@ -159,6 +159,14 @@ export const ProposalOp = {
 } as const;
 export type ProposalOp = ValueOf<typeof ProposalOp>;
 
+/** An operator's call on a single proposed change (or a create-subtree unit): accept it
+ *  (apply immediately) or reject it (drop it). Per-change granularity for inline review. */
+export const Decision = {
+  Accept: "accept",
+  Reject: "reject",
+} as const;
+export type Decision = ValueOf<typeof Decision>;
+
 /**
  * One typed mutation in a proposal's change-set. Four ops across the four vocab
  * kinds:

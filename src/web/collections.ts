@@ -1,6 +1,6 @@
 import { createCollection } from "@tanstack/db";
 import type { CloudPr } from "../server/events.ts";
-import type { Goal, Milestone, Note, Phase, Session, Task } from "../server/schema.ts";
+import type { Goal, Milestone, Note, Phase, Proposal, Session, Task } from "../server/schema.ts";
 import type { SessionLink } from "./active.ts";
 
 // The browser mirrors each server table as a TanStack DB collection, synced over the
@@ -86,3 +86,4 @@ export const sessionTasksCollection = syncedCollection<SessionLink & { id: numbe
 );
 export const notesCollection = syncedCollection<Note>("notes", "id");
 export const pullRequestsCollection = syncedCollection<CloudPr>("pull_requests", "number");
+export const proposalsCollection = syncedCollection<Proposal>("proposals", "id");

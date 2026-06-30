@@ -2,6 +2,7 @@ import type { SerializedDockview } from "dockview-react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Note } from "../server/schema.ts";
+import type { Decision } from "../shared/types.ts";
 import { api } from "./client.ts";
 
 // UI + action store. All *plan/session data* now lives in TanStack DB collections
@@ -73,6 +74,19 @@ type State = {
   // The scratchpad is a single note. Returns it, creating the row on first use.
   ensureScratch: () => Promise<Note | null>;
   saveNote: (id: number, values: { title?: string; body?: string }) => Promise<void>;
+  // Direct plan editing from the Backlog: add a task to a milestone / a phase to a task,
+  // and rename either in place. The DB write streams back over /sync, so the card updates
+  // without a refetch.
+  createTaskWithPhases: (
+    milestoneId: number,
+    title: string,
+    phaseNames: string[],
+    position?: number,
+  ) => Promise<void>;
+  updateTask: (taskId: number, fields: { title?: string }) => Promise<void>;
+  createPhase: (taskId: number, name: string, position?: number) => Promise<void>;
+  updatePhase: (phaseId: number, fields: { name?: string }) => Promise<void>;
+  deletePhase: (phaseId: number) => Promise<void>;
   toggleStar: (taskId: number, starred: boolean) => Promise<void>;
   setAutoRebase: (on: boolean) => Promise<void>;
   startLocal: (taskId: number) => Promise<void>;
@@ -92,6 +106,15 @@ type State = {
   completeTask: (taskId: number) => Promise<void>;
   cancelTask: (taskId: number) => Promise<void>;
   reopenTask: (taskId: number) => Promise<void>;
+  // Inline proposal review: accept/reject one change (and its create-subtree) in a
+  // pending proposal. Accept applies it immediately; the result streams back over sync.
+  // Returns the outcome so the card can show a stale-base conflict in place (nudging a
+  // re-plan) rather than a global banner.
+  decideChange: (
+    proposalId: number,
+    changeIndex: number,
+    decision: Decision,
+  ) => Promise<{ ok: boolean; error?: string }>;
   land: (sessionId: number) => Promise<void>;
   stop: (sessionId: number) => Promise<void>;
   openEditor: (sessionId: number) => Promise<void>;
@@ -103,7 +126,7 @@ type State = {
 // A failing runtime route (dispatch/start-local/teleport) replies 400 with a JSON
 // body `{ ok: false, error }`, which Eden surfaces as `error.value`. Pull the human
 // message out of that body so the banner shows the reason instead of "[object Object]".
-function errMsg(error: { value?: unknown; status?: number }): string {
+function errMsg(error: { value?: unknown; status?: unknown }): string {
   const v = error.value;
   if (v && typeof v === "object" && "error" in v) return String((v as { error: unknown }).error);
   return String(v ?? error.status);
@@ -224,6 +247,40 @@ export const useStore = create<State>()(
         const { error } = await api.tasks({ id: taskId }).patch({ starred });
         if (error) set({ error: String(error.value ?? error.status) });
       },
+      createTaskWithPhases: async (milestoneId, title, phaseNames, position) => {
+        const { data, error } = await api.tasks.post({
+          milestoneId,
+          title,
+          ...(position != null && { position }),
+        });
+        if (error) return void set({ error: errMsg(error) });
+        const taskId = (data as { id?: number } | null)?.id;
+        if (taskId == null) return;
+        for (let i = 0; i < phaseNames.length; i++) {
+          const r = await api.phases.post({ taskId, name: phaseNames[i], position: i });
+          if (r.error) return void set({ error: errMsg(r.error) });
+        }
+      },
+      updateTask: async (taskId, fields) => {
+        const { error } = await api.tasks({ id: taskId }).patch(fields);
+        if (error) set({ error: errMsg(error) });
+      },
+      createPhase: async (taskId, name, position) => {
+        const { error } = await api.phases.post({
+          taskId,
+          name,
+          ...(position != null && { position }),
+        });
+        if (error) set({ error: errMsg(error) });
+      },
+      updatePhase: async (phaseId, fields) => {
+        const { error } = await api.phases({ id: phaseId }).patch(fields);
+        if (error) set({ error: errMsg(error) });
+      },
+      deletePhase: async (phaseId) => {
+        const { error } = await api.phases({ id: phaseId }).delete();
+        if (error) set({ error: errMsg(error) });
+      },
       setAutoRebase: async (on) => {
         set({ autoRebase: on }); // optimistic — this is store state, not a synced table
         const { error } = await api.settings.post({ autoRebase: on });
@@ -305,6 +362,18 @@ export const useStore = create<State>()(
       reopenTask: async (taskId) => {
         const { error } = await api.tasks({ id: taskId }).reopen.post();
         if (error) set({ error: String(error.value ?? error.status) });
+      },
+      decideChange: async (proposalId, changeIndex, decision) => {
+        const { error } = await api
+          .proposals({ id: proposalId })
+          .decide.post({ changeIndex, decision });
+        if (error) {
+          // A stale-base 409 carries `{ ok:false, error }` in the body — hand it back so
+          // the card can nudge a re-plan in place, rather than firing the global banner.
+          const v = error.value as { error?: string } | undefined;
+          return { ok: false, error: v?.error ?? errMsg(error) };
+        }
+        return { ok: true };
       },
       land: async (sessionId) => {
         const { error } = await api.sessions({ id: sessionId }).land.post();

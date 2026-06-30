@@ -31,6 +31,9 @@ function pr(over: Partial<CloudPr> & { number: number; taskId: number }): CloudP
     updatedAt: "2026-06-27T00:00:00Z",
     agent: null,
     followups: [],
+    lastComment: null,
+    lastCommentAt: null,
+    lastCommentUrl: null,
     ...over,
   };
 }
