@@ -67,7 +67,8 @@ export function ShellTerminal({
 
     const term = new Terminal({
       fontSize: fontRef.current,
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", // lint-allow-font: xterm renders to a canvas and needs a literal font stack, not a CSS var
+      fontFamily: '"Fira Code Variable", ui-monospace, SFMono-Regular, Menlo, monospace', // lint-allow-font: xterm renders to a canvas and needs a literal font stack, not a CSS var
+      lineHeight: 1.15,
       theme: themeRef.current,
       cursorBlink: true,
     });

@@ -9,7 +9,8 @@ import type { EditorTheme } from "./themes.ts";
 
 const SANS =
   'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
-const MONO = 'ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
+const MONO =
+  '"Fira Code Variable", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
 
 export function buildTheme(t: EditorTheme, densityFactor: number): Partial<MantineTheme> {
   return createTheme({

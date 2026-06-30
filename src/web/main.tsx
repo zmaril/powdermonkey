@@ -1,4 +1,7 @@
 import "@mantine/core/styles.css";
+// Fira Code (variable) — the app's monospace face, loaded once so both the Mantine
+// `fontFamilyMonospace` token (theme.ts) and the xterm terminals can use it.
+import "@fontsource-variable/fira-code";
 // Import dockview's stylesheet here, before theme.css, so our abyss-variable
 // overrides in theme.css come last in the bundle and win. (App.tsx also imports
 // it, but the module-graph position is fixed by this first occurrence.)
