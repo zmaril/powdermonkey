@@ -4,6 +4,7 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef } from "react";
 import { fontScaleOption } from "./appearance.ts";
+import { PmIdLinkProvider } from "./pm-id-links.ts";
 import { useActiveTheme, useStore } from "./store.ts";
 import type { EditorTheme } from "./themes.ts";
 
@@ -82,6 +83,14 @@ export function ShellTerminal({
     term.loadAddon(
       new WebLinksAddon((_ev, uri) => {
         window.open(uri, "_blank", "noopener,noreferrer");
+      }),
+    );
+    // The PM-id counterpart to the URL links above: scan the same PTY output for
+    // t/p/m/g/s id tokens and render them hover-underlined. The click handler is wired
+    // to the store's revealEntity below — here it's registered so the links render.
+    const linkProvider = term.registerLinkProvider(
+      new PmIdLinkProvider(term, () => {
+        // wired to revealEntity in a later phase
       }),
     );
     term.open(el);
@@ -184,6 +193,7 @@ export function ShellTerminal({
 
     return () => {
       onData.dispose();
+      linkProvider.dispose();
       ro.disconnect();
       el.removeEventListener("dragover", onDragOver);
       el.removeEventListener("drop", onDrop);
