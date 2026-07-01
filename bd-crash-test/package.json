@@ -1,0 +1,9 @@
+{
+  "name": "bd-crash-test",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "better-drizzle": "^0.1.0"
+  }
+}
