@@ -1,23 +1,48 @@
 import { Box, Group, SegmentedControl, Stack, Text } from "@mantine/core";
+import type { ComboboxData } from "@mantine/core";
 import type { DockviewPanelApi } from "dockview-react";
 import { useLayoutEffect, useRef, useState } from "react";
-import { TaskStatus } from "../../../shared/types.ts";
-import { partitionTasks } from "../../active.ts";
 import { usePaneScroll } from "../../pane-scroll.ts";
-import { usePlanData, useProposalEdits, useProposalGhosts } from "../../plan-data.ts";
+import { useFullData, useProposalEdits, useProposalGhosts } from "../../plan-data.ts";
+import { FilterBar } from "../FilterBar.tsx";
+import {
+  ANY,
+  DEFAULT_TASK_FILTER,
+  TaskBucket,
+  type TaskFilter,
+  matchTask,
+  parseScope,
+  scopeOptions,
+  scopeValue,
+} from "../filters.ts";
+import { useWindow } from "../use-window.ts";
 import { FlatView } from "./FlatView.tsx";
 import { GoalGroup } from "./GoalGroup.tsx";
 import { SelectionBar } from "./SelectionBar.tsx";
 import { StartPanel } from "./StartPanel.tsx";
 import type { Selection, View } from "./types.ts";
 
-// The Backlog pane is the launchpad — everything to-be-worked (not active),
-// grouped goal → milestone as cards (or one flat star-first list). Every card
-// carries the same action cluster (TaskActions): launch it local/remote or close it
-// (DONE / WONTDO). Shift-click a card to add it to a multi-selection; while a
-// selection is live the per-card actions hide and one batch bar drives the whole
-// set as ONE launch — so it's clear they move together. Goals and milestones have
-// carets to collapse them.
+// The task lifecycle buckets the operator filters on (default Backlog). Done/archived
+// are buckets now, not a separate tab. Values are the TaskBucket consts, not literals.
+const STATUS_DATA: ComboboxData = [
+  { value: ANY, label: "Any status" },
+  { value: TaskBucket.Backlog, label: "Backlog" },
+  { value: TaskBucket.Active, label: "Active" },
+  { value: TaskBucket.Finished, label: "Done" },
+  { value: TaskBucket.WontDo, label: "Won't do" },
+  { value: TaskBucket.Archived, label: "Archived" },
+];
+
+// The Tasks pane is the one filterable list of EVERY task — backlog, active,
+// done/merged, cancelled, archived — not just the to-be-worked set the old Backlog
+// showed. It keeps the launchpad's machinery: tasks grouped goal → milestone as cards
+// (or one flat star-first list), each carrying the same action cluster (TaskActions):
+// launch it local/remote or close it (DONE / WONTDO). Shift-click a card to add it to a
+// multi-selection; while a selection is live the per-card actions hide and one batch bar
+// drives the whole set as ONE launch. Goals and milestones have carets to collapse them.
+// (The card components keep their historical Backlog* names.) A search + filter strip
+// (FilterBar) slices the list; it opens to backlog (DEFAULT_TASK_FILTER) so the pane comes
+// up like the old Backlog, and widens to active/done/cancelled/archived on demand.
 
 /** A card's top within the scroll content — summed offsets up to the scroller. This is
  *  scroll-invariant AND transform-invariant (offsetTop ignores the transforms
@@ -94,21 +119,29 @@ function usePreserveScrollAcrossResort(scrollRef: React.RefObject<HTMLDivElement
   });
 }
 
-export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
-  const { idx, activeIds, loading } = usePlanData();
+export function TasksPane({ api }: { api?: DockviewPanelApi }) {
+  const { idx, activeIds, loading } = useFullData();
   const ghosts = useProposalGhosts();
   const edits = useProposalEdits();
   const [view, setView] = useState<View>("grouped");
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const scroll = usePaneScroll("backlog", api);
+  const scroll = usePaneScroll("tasks", api); // lint-allow-string: pane scroll key, not an enum value
   usePreserveScrollAcrossResort(scroll.ref);
+  // Opens to backlog (DEFAULT_TASK_FILTER) so the pane comes up showing what the old
+  // Backlog did; widen the status filter to see active / done / cancelled / archived.
+  const [filter, setFilter] = useState<TaskFilter>(DEFAULT_TASK_FILTER);
+  const set = (patch: Partial<TaskFilter>) => setFilter((f) => ({ ...f, ...patch }));
+  const isDefault = JSON.stringify(filter) === JSON.stringify(DEFAULT_TASK_FILTER);
 
-  // Backlog = everything to-be-worked: not active (no live session) and not merged.
+  // Every task, sliced by the filter, in plan order.
   const allTasks = [...idx.tasksByMilestone.values()].flat();
-  const { backlog: backlogList } = partitionTasks(allTasks, activeIds);
-  const backlogTasks = backlogList.filter((t) => t.status !== TaskStatus.Merged);
-  const backlog = new Set(backlogTasks.map((t) => t.id));
+  const visibleTasks = allTasks.filter((t) => matchTask(t, idx, activeIds, filter));
+  const visible = new Set(visibleTasks.map((t) => t.id));
   const goals = [...idx.goals].sort((a, b) => a.id - b.id);
+  // The flat view can run long (every task, any status), so window it; the grouped view
+  // is already chunked by goal/milestone headers. The full set stays live underneath.
+  const win = useWindow(visibleTasks.length, `${view}:${JSON.stringify(filter)}`, scroll.ref);
+  const shownTasks = visibleTasks.slice(0, win.limit);
 
   const toggle = (id: number) =>
     setSelected((prev) => {
@@ -119,10 +152,10 @@ export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
     });
   const selection: Selection = { selected, toggle, active: selected.size > 0 };
 
-  // The launch order is the rendered backlog order (goal → milestone → position),
-  // so the first selected card becomes the primary task of the shared session. Drop
-  // any selected ids that are no longer in the backlog (e.g. just launched).
-  const selectedIds = backlogTasks.map((t) => t.id).filter((id) => selected.has(id));
+  // The launch order is the rendered order (goal → milestone → position), so the first
+  // selected card becomes the primary task of the shared session. Drop any selected ids
+  // no longer visible (e.g. filtered out, or just launched).
+  const selectedIds = visibleTasks.map((t) => t.id).filter((id) => selected.has(id));
 
   return (
     <Box
@@ -133,32 +166,49 @@ export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
         background: "var(--pm-pane-bg)",
       }}
     >
-      <Group justify="space-between" px="md" py="cozy" style={{ flex: "0 0 auto" }}>
-        <Group gap="cozy">
-          <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
-            BACKLOG
-          </Text>
-          {loading && (
-            <Text size="xs" c="dimmed">
-              loading…
+      <Stack gap="cozy" px="md" py="cozy" style={{ flex: "0 0 auto" }}>
+        <Group justify="space-between">
+          <Group gap="cozy">
+            <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
+              TASKS
             </Text>
-          )}
+            <Text size="xs" c="dimmed">
+              {loading ? "loading…" : `${visibleTasks.length} shown`}
+            </Text>
+          </Group>
+          <SegmentedControl
+            size="xs"
+            value={view}
+            onChange={(v) => setView(v as View)}
+            data={[
+              { label: "Flat", value: "flat" },
+              { label: "Grouped", value: "grouped" },
+            ]}
+          />
         </Group>
-        <SegmentedControl
-          size="xs"
-          value={view}
-          onChange={(v) => setView(v as View)}
-          data={[
-            { label: "Flat", value: "flat" },
-            { label: "Grouped", value: "grouped" },
-          ]}
+        <FilterBar
+          search={filter.search}
+          onSearch={(v) => set({ search: v })}
+          searchPlaceholder="task id or title"
+          statusData={STATUS_DATA}
+          status={filter.status}
+          onStatus={(v) => set({ status: v as TaskFilter["status"] })}
+          env={filter.env}
+          onEnv={(v) => set({ env: v as TaskFilter["env"] })}
+          scopeData={scopeOptions(idx)}
+          scope={scopeValue(filter)}
+          onScope={(v) => set(parseScope(v))}
+          starred={filter.starred}
+          onStarred={(v) => set({ starred: v })}
+          onReset={() => setFilter(DEFAULT_TASK_FILTER)}
+          isDefault={isDefault}
         />
-      </Group>
+      </Stack>
 
       <Box
         ref={scroll.ref}
         onScroll={scroll.onScroll}
-        data-pm-scroll="backlog"
+        data-pm-scroll="tasks" // lint-allow-string: dockview pane id, not an enum value
         // overflowAnchor none: when starring re-sorts the list, the browser's own scroll
         // anchoring chases the card that floated to the top and yanks the whole list up
         // to it (scrollTop → 0), losing your place. Turn it off so a re-sort leaves the
@@ -176,18 +226,27 @@ export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
             No plan loaded. POST one to /plan.
           </Text>
         ) : view === "flat" ? (
-          backlogTasks.length === 0 ? (
+          visibleTasks.length === 0 ? (
             <Text c="dimmed" size="sm" px="md" py="lg">
-              Backlog is empty — every task is active or done.
+              No tasks match.
             </Text>
           ) : (
-            <FlatView
-              tasks={backlogTasks}
-              idx={idx}
-              selection={selection}
-              ghosts={ghosts}
-              edits={edits}
-            />
+            <>
+              <FlatView
+                tasks={shownTasks}
+                idx={idx}
+                selection={selection}
+                ghosts={ghosts}
+                edits={edits}
+              />
+              {win.hasMore && (
+                <div ref={win.sentinelRef}>
+                  <Text c="dimmed" size="xs" ta="center" py="sm">
+                    loading more… ({shownTasks.length} of {visibleTasks.length})
+                  </Text>
+                </div>
+              )}
+            </>
           )
         ) : (
           <Stack gap="xl">
@@ -196,7 +255,7 @@ export function BacklogPane({ api }: { api?: DockviewPanelApi }) {
                 key={g.id}
                 goal={g}
                 idx={idx}
-                backlog={backlog}
+                backlog={visible}
                 selection={selection}
                 ghosts={ghosts}
                 edits={edits}

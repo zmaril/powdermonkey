@@ -40,14 +40,8 @@ export function TopBar() {
           )}
         </Group>
         <Group gap="hair" wrap="nowrap">
-          <PaneButton label="Active" onClick={() => openPane("active")} />
-          <PaneButton label="Backlog" onClick={() => openPane("backlog")} />
-          <PaneButton
-            label="Archive"
-            onClick={
-              () => openPane("archive") /* lint-allow-string: pane id, not ProposalOp.Archive */
-            }
-          />
+          <PaneButton label="Sessions" onClick={() => openPane("sessions")} />
+          <PaneButton label="Tasks" onClick={() => openPane("tasks")} />
           <Divider orientation="vertical" my="tight" />
           <PaneButton label="Shell" onClick={() => openTerminal("")} />
           <PaneButton label="Browser" onClick={() => openBrowser()} />

@@ -46,6 +46,10 @@ export function WorkerCard({
   // The PR carrying the agent's freshest comment (usually the worker has one PR).
   const commentPr = prs.find((p) => p.lastComment);
   const KindIcon = KIND_ICON[session.kind];
+  // A historical session (landed / stopped / teleported) is archived: its state badge
+  // is the outcome, and the live-only controls (Shell/VS Code/Teleport/Stop) no longer
+  // apply, so they drop off. The card still shows its tasks, PRs and final agent status.
+  const live = session.archivedAt == null;
   return (
     <Card withBorder radius="md" padding="sm" bg="dark.5" data-pm-reveal={`s${session.id}`}>
       {/* Top: session status + controls, full width. */}
@@ -59,7 +63,7 @@ export function WorkerCard({
             </Text>
           )}
         </Group>
-        <SessionActions session={session} taskId={tasks[0].id} />
+        {live && tasks.length > 0 && <SessionActions session={session} taskId={tasks[0].id} />}
       </Group>
 
       {/* Bottom: left half = tasks + PRs, right half = the agent's last comment. */}

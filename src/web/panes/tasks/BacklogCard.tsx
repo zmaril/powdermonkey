@@ -2,13 +2,14 @@ import { Button, Card, Group, Text } from "@mantine/core";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { useState } from "react";
 import type { Phase, Task } from "../../../server/schema.ts";
-import { Decision, ProposalOp } from "../../../shared/types.ts";
+import { Decision, ProposalOp, TaskStatus } from "../../../shared/types.ts";
 import { type EntityEdit, type Ghost, editLabel } from "../../ghosts.ts";
 import { IdTag, PhaseList, StarToggle } from "../../plan-ui";
 import { CardEditor } from "./CardEditor.tsx";
 import { GhostCardBody } from "./GhostCardBody.tsx";
 import { ProposedStrip } from "./ProposedStrip.tsx";
 import { TaskActions } from "./TaskActions.tsx";
+import { TaskOutcome } from "./TaskOutcome.tsx";
 import { SELECTED_SHADOW } from "./constants.ts";
 import type { Selection } from "./types.ts";
 import { useDecide } from "./useDecide.ts";
@@ -60,6 +61,12 @@ export function BacklogCard({
   if (editing) return <CardEditor task={task} phases={phases} onDone={() => setEdit(false)} />;
   const checked = selection.selected.has(task.id);
   const archiveProposed = edits.some((e) => e.op === ProposalOp.Archive);
+  // Terminal / archived → show the outcome cluster (badge + reopen + links) instead of
+  // the launch actions; the old Archive pane, folded into the card.
+  const terminal =
+    task.status === TaskStatus.Merged ||
+    task.status === TaskStatus.Cancelled ||
+    task.archivedAt != null;
   const proposed = (key: string, label: string, hint: string, proposalId: number, ix: number) => (
     <ProposedStrip
       key={key}
@@ -120,7 +127,7 @@ export function BacklogCard({
       <PhaseList phases={phases} struck={archiveProposed} />
       {!selection.active && (
         <Group justify="flex-end" mt="cozy">
-          <TaskActions ids={[task.id]} />
+          {terminal ? <TaskOutcome task={task} /> : <TaskActions ids={[task.id]} />}
         </Group>
       )}
       {edits.map((e) =>

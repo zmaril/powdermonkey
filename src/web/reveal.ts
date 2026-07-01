@@ -4,11 +4,11 @@ import { beginReveal, endReveal, setPaneScroll } from "./pane-scroll.ts";
 import { type Indexes, usePlanData } from "./plan-data.ts";
 import type { PmKind } from "./pm-ids.ts";
 import { useStore } from "./store.ts";
-import { PANE_ACTIVE, PANE_BACKLOG } from "./tab-activity.ts";
+import { PANE_SESSIONS, PANE_TASKS } from "./tab-activity.ts";
 
 // Jump-to-entity: the other half of the terminal PM-id links (pm-id-links.ts). A click
 // on a t/p/m/g/s id fires the store's revealEntity, which this hook turns into a real
-// navigation — focus the pane the entity lives in (Backlog or Active), scroll it into
+// navigation — focus the pane the entity lives in (Tasks or Sessions), scroll it into
 // view, and briefly flash it so the eye lands on it. It reuses the pane-scroll infra:
 // the panes mark their scroll container with `data-pm-scroll`, every revealable element
 // carries a `data-pm-reveal` handle, and the scroll position is recorded through the
@@ -34,25 +34,27 @@ function taskOfPhase(phaseId: number, idx: Indexes): number | null {
  *   • t → the task itself           • p → its parent task
  *   • m → the milestone header      • g → the goal header
  *   • s → the session's worker card
- *  A task (whether reached via t or p) lives in Active when it has a live session,
- *  otherwise the Backlog. Returns null when the id isn't in the current plan. */
+ *  A task (whether reached via t or p) reveals in the Sessions pane when it has a live
+ *  session (its worker card carries the task's handle), otherwise in the Tasks pane.
+ *  Returns null when the id isn't in the current plan. */
 export function resolveReveal(
   kind: PmKind,
   id: number,
   idx: Indexes,
   activeIds: Set<number>,
 ): RevealTarget | null {
-  // A task's home pane: Active if a live session is linked to it, else the Backlog.
+  // A task's home pane: Sessions if a live session is linked to it (it's on that
+  // worker card), else the Tasks pane.
   const taskTarget = (taskId: number): RevealTarget => ({
-    pane: activeIds.has(taskId) ? PANE_ACTIVE : PANE_BACKLOG,
+    pane: activeIds.has(taskId) ? PANE_SESSIONS : PANE_TASKS,
     selector: handle(`t${taskId}`),
   });
 
   switch (kind) {
     case "g":
-      return idx.goalById.has(id) ? { pane: PANE_BACKLOG, selector: handle(`g${id}`) } : null;
+      return idx.goalById.has(id) ? { pane: PANE_TASKS, selector: handle(`g${id}`) } : null;
     case "m":
-      return idx.milestoneById.has(id) ? { pane: PANE_BACKLOG, selector: handle(`m${id}`) } : null;
+      return idx.milestoneById.has(id) ? { pane: PANE_TASKS, selector: handle(`m${id}`) } : null;
     case "t":
       return taskTarget(id);
     case "p": {
@@ -60,7 +62,7 @@ export function resolveReveal(
       return taskId == null ? null : taskTarget(taskId);
     }
     case "s":
-      return { pane: PANE_ACTIVE, selector: handle(`s${id}`) };
+      return { pane: PANE_SESSIONS, selector: handle(`s${id}`) };
     default:
       return null;
   }
