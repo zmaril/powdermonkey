@@ -11,6 +11,7 @@ import { ProposedStrip } from "./ProposedStrip.tsx";
 import { TaskActions } from "./TaskActions.tsx";
 import { TaskOutcome } from "./TaskOutcome.tsx";
 import { SELECTED_SHADOW } from "./constants.ts";
+import { useHighlighted } from "./new-task.ts";
 import type { Selection } from "./types.ts";
 import { useDecide } from "./useDecide.ts";
 
@@ -50,6 +51,9 @@ export function BacklogCard({
 }) {
   const { busy, conflict, decide } = useDecide();
   const [editing, setEditing] = useState(false);
+  // Glows while this is a freshly-added task you haven't seen on screen yet (-1 never
+  // matches, for the ghost / no-task render paths below). Hook stays above the early returns.
+  const highlight = useHighlighted(task?.id ?? -1);
   const setEdit = (on: boolean) => {
     onEditingChange?.(on);
     setEditing(on);
@@ -84,6 +88,7 @@ export function BacklogCard({
       padding="sm"
       data-pm-card={task.id}
       data-pm-reveal={`t${task.id}`}
+      className={highlight ? "pm-new-card" : undefined}
       bg={checked ? "dark.5" : undefined}
       style={{ boxShadow: checked ? SELECTED_SHADOW : undefined }}
       onMouseDown={(e) => {

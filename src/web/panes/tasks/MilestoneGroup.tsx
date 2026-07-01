@@ -11,6 +11,7 @@ import { BacklogCard } from "./BacklogCard.tsx";
 import { CardEditor } from "./CardEditor.tsx";
 import { Caret } from "./Caret.tsx";
 import { ProposedStrip } from "./ProposedStrip.tsx";
+import { useReveal } from "./new-task.ts";
 import type { Selection } from "./types.ts";
 import { useDecide } from "./useDecide.ts";
 
@@ -36,6 +37,7 @@ export function MilestoneGroup({
   const [collapsed, setCollapsed] = useState(false);
   const [adding, setAdding] = useState(false);
   const { createTaskWithPhases } = useStore();
+  const requestReveal = useReveal((s) => s.requestReveal);
   const { busy, decide } = useDecide();
   const [listRef, suspendAnim] = useListAnimation();
   // Suspend the list animation while a card is being edited, so the card<->editor swap (and
@@ -121,9 +123,11 @@ export function MilestoneGroup({
           ))}
           {adding ? (
             <CardEditor
-              onCreate={(title, names) =>
-                createTaskWithPhases(milestone.id, title, names, tasks.length)
-              }
+              onCreate={async (title, names) => {
+                const id = await createTaskWithPhases(milestone.id, title, names, tasks.length);
+                // Only a task YOU just added here earns an auto-scroll-into-view.
+                if (id != null) requestReveal(id);
+              }}
               onDone={stopAdding}
             />
           ) : (

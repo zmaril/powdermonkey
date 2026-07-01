@@ -102,12 +102,14 @@ type State = {
   // Direct plan editing from the Backlog: add a task to a milestone / a phase to a task,
   // and rename either in place. The DB write streams back over /sync, so the card updates
   // without a refetch.
+  // Returns the new task's id (or null on failure) so the caller — the Tasks pane's
+  // "+ Add task" editor — can queue it for an auto-scroll-into-view as a local add.
   createTaskWithPhases: (
     milestoneId: number,
     title: string,
     phaseNames: string[],
     position?: number,
-  ) => Promise<void>;
+  ) => Promise<number | null>;
   updateTask: (taskId: number, fields: { title?: string }) => Promise<void>;
   createPhase: (taskId: number, name: string, position?: number) => Promise<void>;
   updatePhase: (phaseId: number, fields: { name?: string }) => Promise<void>;
@@ -289,13 +291,20 @@ export const useStore = create<State>()(
           title,
           ...(position != null && { position }),
         });
-        if (error) return void set({ error: errMsg(error) });
+        if (error) {
+          set({ error: errMsg(error) });
+          return null;
+        }
         const taskId = (data as { id?: number } | null)?.id;
-        if (taskId == null) return;
+        if (taskId == null) return null;
         for (let i = 0; i < phaseNames.length; i++) {
           const r = await api.phases.post({ taskId, name: phaseNames[i], position: i });
-          if (r.error) return void set({ error: errMsg(r.error) });
+          if (r.error) {
+            set({ error: errMsg(r.error) });
+            return taskId;
+          }
         }
+        return taskId;
       },
       updateTask: async (taskId, fields) => {
         const { error } = await api.tasks({ id: taskId }).patch(fields);

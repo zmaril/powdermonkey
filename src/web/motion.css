@@ -80,6 +80,24 @@
   border-radius: var(--mantine-radius-sm);
 }
 
+/* A freshly-added task card glows until you've actually seen it (the Tasks pane clears the
+ * class once the card has been on screen). The static ring is the floor — visible even at
+ * "Off" / reduced-motion, where the pulse is frozen — and the pulse layers a soft breathing
+ * halo on top when motion is on. Accent-tinted so it re-skins with the theme. */
+@keyframes pm-new-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px var(--pm-accent), 0 0 6px 0 var(--pm-accent);
+  }
+  50% {
+    box-shadow: 0 0 0 2px var(--pm-accent), 0 0 16px 2px var(--pm-accent);
+  }
+}
+.pm-new-card {
+  box-shadow: 0 0 0 2px var(--pm-accent);
+  animation: pm-new-glow var(--pm-dur-pulse) ease-in-out infinite;
+}
+
 /* "Off" also stops animation we don't own (Mantine popovers, dockview, …). */
 [data-pm-motion="off"] *,
 [data-pm-motion="off"] *::before,

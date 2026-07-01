@@ -8,6 +8,7 @@ import { ProposedStrip } from "./ProposedStrip.tsx";
 import { TaskActions } from "./TaskActions.tsx";
 import { TaskOutcome } from "./TaskOutcome.tsx";
 import { GHOST_BORDER_COLOR, SELECTED_SHADOW } from "./constants.ts";
+import { useHighlighted } from "./new-task.ts";
 import type { Selection } from "./types.ts";
 import { useDecide } from "./useDecide.ts";
 
@@ -46,6 +47,9 @@ export function BacklogRow({
   phaseEdits?: EntityEdit[];
 }) {
   const { busy, decide } = useDecide();
+  // Glows while this is a freshly-added task you haven't seen yet (-1 never matches, for the
+  // ghost render path below). Hook stays above the early returns.
+  const highlight = useHighlighted(task?.id ?? -1);
   const strip = (key: string, label: string, hint: string, proposalId: number, ix: number) => (
     <ProposedStrip
       key={key}
@@ -90,6 +94,7 @@ export function BacklogRow({
       py="cozy"
       data-pm-card={task.id}
       data-pm-reveal={`t${task.id}`}
+      className={highlight ? "pm-new-card" : undefined}
       style={{
         borderBottom: "1px solid var(--pm-hairline)",
         background: checked ? "var(--pm-surface)" : undefined,
