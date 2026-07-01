@@ -155,6 +155,7 @@ export function SessionsPane({ api }: { api?: DockviewPanelApi }) {
       <Box
         ref={scroll.ref}
         onScroll={scroll.onScroll}
+        data-pm-scroll="sessions" // lint-allow-string: dockview pane id, not an enum value
         style={{ flex: 1, overflowY: "auto" }}
         px="md"
         py="xs"

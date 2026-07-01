@@ -208,7 +208,7 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
       <Box
         ref={scroll.ref}
         onScroll={scroll.onScroll}
-        data-pm-scroll="backlog"
+        data-pm-scroll="tasks" // lint-allow-string: dockview pane id, not an enum value
         // overflowAnchor none: when starring re-sorts the list, the browser's own scroll
         // anchoring chases the card that floated to the top and yanks the whole list up
         // to it (scrollTop → 0), losing your place. Turn it off so a re-sort leaves the
