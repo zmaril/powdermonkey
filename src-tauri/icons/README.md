@@ -1,15 +1,23 @@
 # App icons
 
-Tauri's bundler needs platform icons (the set referenced in
-`../tauri.conf.json` → `bundle.icon`). They're binary and not checked in; generate
-them once from a single square source image:
+Tauri needs platform icons (the set referenced in `../tauri.conf.json` →
+`bundle.icon`), and it reads them even in **dev** — `generate_context!` panics with
+a missing-icon error, so *both* `desktop:dev` and `desktop:build` fail without them.
+
+So the generated set is **checked in** here (`32x32.png`, `128x128.png`,
+`128x128@2x.png`, `icon.icns`, `icon.ico`, `icon.png`) — a clean checkout builds
+out of the box.
+
+Regenerate only when the source art changes. `tauri icon` needs a **square**
+source, and `docs/powder-monkey.jpg` isn't square, so crop it first (macOS `sips`;
+any image tool works):
 
 ```sh
 # from the repo root, after `bun install` (adds the Tauri CLI)
-bun run tauri icon docs/powder-monkey.jpg
+sips -s format png -c 906 906 docs/powder-monkey.jpg --out /tmp/pm-square.png
+bun run tauri icon /tmp/pm-square.png
 ```
 
-That writes `32x32.png`, `128x128.png`, `128x128@2x.png`, `icon.icns`, and
-`icon.ico` into this directory. Re-run it whenever the source art changes. Until
-you do, `bun run desktop:build` will fail at the bundling step with a missing-icon
-error — `desktop:dev` runs fine without icons.
+`tauri icon` also emits mobile / Windows-Store variants (`android/`, `ios/`,
+`Square*Logo.png`, …) that this desktop app doesn't use — delete those and keep
+only the files listed above.
