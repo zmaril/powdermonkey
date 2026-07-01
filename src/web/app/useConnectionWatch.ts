@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { apiUrl } from "../server.ts";
 
 // Heartbeat the server's /health. When it drops (typically a `bun --watch`
 // restart) and then comes back, reload the page once to reconnect cleanly —
@@ -12,7 +13,7 @@ export function useConnectionWatch(): boolean {
     let cancelled = false;
     const check = async () => {
       try {
-        const res = await fetch("/health", { cache: "no-store" });
+        const res = await fetch(apiUrl("/health"), { cache: "no-store" });
         if (!res.ok) throw new Error(`health ${res.status}`);
         if (cancelled) return;
         if (wasDown.current) {

@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import { fontScaleOption } from "./appearance.ts";
 import { PmIdDecorator } from "./pm-id-decorate.ts";
 import { PmIdLinkProvider } from "./pm-id-links.ts";
+import { apiUrl, wsUrl } from "./server.ts";
 import { useActiveTheme, useStore } from "./store.ts";
 
 // The accent colour (a #RRGGBB hex) the PM-id links are tinted with — the same accent the
@@ -113,10 +114,9 @@ export function ShellTerminal({
     const decorator = new PmIdDecorator(term, themeRef.current.cursor);
     decoRef.current = decorator;
 
-    const proto = location.protocol === "https:" ? "wss" : "ws";
     const qs =
       session != null ? `?session=${session}` : cwd ? `?cwd=${encodeURIComponent(cwd)}` : "";
-    const ws = new WebSocket(`${proto}://${location.host}/pty${qs}`);
+    const ws = new WebSocket(wsUrl(`/pty${qs}`));
     ws.binaryType = "arraybuffer";
 
     const sendResize = () => {
@@ -189,7 +189,7 @@ export function ShellTerminal({
         try {
           const body = new FormData();
           body.append("file", file);
-          const res = await fetch("/upload", { method: "POST", body });
+          const res = await fetch(apiUrl("/upload"), { method: "POST", body });
           const { path } = (await res.json()) as { path?: string };
           if (path && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "input", data: `${path} ` }));

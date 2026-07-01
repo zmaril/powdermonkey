@@ -59,6 +59,17 @@ planned distribution.
 
 To hack on PowderMonkey itself, run from a checkout instead (below).
 
+## Desktop client / remote servers
+
+The browser UI is a thin client over the supervisor, and the two don't have to be
+on the same machine. You can run the supervisor on a host somewhere and point a
+**desktop app** (Tauri) or another browser at it — pick the server in **Settings →
+Server**. Because there's no auth (by design), keep the supervisor on a private
+network (Tailscale / SSH tunnel / VPN), not a public address. Run it locally and
+it's the same single-machine setup as before. See **[docs/desktop.md](docs/desktop.md)**
+for the model, the build steps (`bun run desktop:dev` / `desktop:build`), and the
+network/auth notes.
+
 ## Run (dev)
 
 ```bash
