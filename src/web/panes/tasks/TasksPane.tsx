@@ -1,7 +1,7 @@
 import { Box, Group, SegmentedControl, Stack, Text } from "@mantine/core";
 import type { ComboboxData } from "@mantine/core";
 import type { DockviewPanelApi } from "dockview-react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePaneScroll } from "../../pane-scroll.ts";
 import { useFullData, useProposalEdits, useProposalGhosts } from "../../plan-data.ts";
 import { FilterBar } from "../FilterBar.tsx";
@@ -18,8 +18,10 @@ import {
 import { useWindow } from "../use-window.ts";
 import { FlatView } from "./FlatView.tsx";
 import { GoalGroup } from "./GoalGroup.tsx";
+import { ScrollIndicator } from "./ScrollIndicator.tsx";
 import { SelectionBar } from "./SelectionBar.tsx";
 import { StartPanel } from "./StartPanel.tsx";
+import { HighlightProvider, useNewTaskReveal } from "./new-task.ts";
 import type { Selection, View } from "./types.ts";
 
 // The task lifecycle buckets the operator filters on (default Backlog). Done/archived
@@ -83,7 +85,12 @@ function topAnchor(scroller: HTMLElement): { key: string; offset: number } | nul
  *  same offset by nudging scrollTop. The re-sort then slides the other cards around your
  *  anchor instead of moving you. It's scroll math, not animation, so it holds with motion
  *  off too. We track on `scroll` (not just on render) because scrolling fires no React
- *  render — the anchor must be current at the instant a star lands. */
+ *  render — the anchor must be current at the instant a star lands.
+ *
+ *  Also the single owner of *deliberate* scrolls (revealing a new card, jumping to one
+ *  off-screen): those go through `revealCard`, which scrolls the card in and then re-reads
+ *  the anchor synchronously, so the very next restore is a no-op instead of yanking you
+ *  back to where you were before the reveal. */
 function usePreserveScrollAcrossResort(scrollRef: React.RefObject<HTMLDivElement | null>) {
   const anchor = useRef<{ key: string; offset: number } | null>(null);
 
@@ -117,6 +124,27 @@ function usePreserveScrollAcrossResort(scrollRef: React.RefObject<HTMLDivElement
     }
     anchor.current = topAnchor(scroller);
   });
+
+  // Scroll a card into view by its task id, then re-anchor on it so the resort preserver
+  // (above) treats the new position as the place to hold — otherwise its next restore would
+  // immediately undo the reveal. Instant, not smooth: a deliberate jump shouldn't fight the
+  // anchor math mid-animation, and the glow is what draws the eye. Returns false if the card
+  // isn't in the DOM yet (its row hasn't streamed in / isn't within the window), so the
+  // caller can retry on the next render.
+  const revealCard = useCallback(
+    (taskId: number): boolean => {
+      const scroller = scrollRef.current;
+      if (!scroller) return false;
+      const node = scroller.querySelector<HTMLElement>(`[data-pm-card="${taskId}"]`);
+      if (!node) return false;
+      node.scrollIntoView({ block: "nearest" });
+      anchor.current = topAnchor(scroller);
+      return true;
+    },
+    [scrollRef],
+  );
+
+  return { revealCard };
 }
 
 export function TasksPane({ api }: { api?: DockviewPanelApi }) {
@@ -126,7 +154,7 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
   const [view, setView] = useState<View>("grouped");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const scroll = usePaneScroll("tasks", api); // lint-allow-string: pane scroll key, not an enum value
-  usePreserveScrollAcrossResort(scroll.ref);
+  const { revealCard } = usePreserveScrollAcrossResort(scroll.ref);
   // Opens to backlog (DEFAULT_TASK_FILTER) so the pane comes up showing what the old
   // Backlog did; widen the status filter to see active / done / cancelled / archived.
   const [filter, setFilter] = useState<TaskFilter>(DEFAULT_TASK_FILTER);
@@ -135,6 +163,10 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
 
   // Every task, sliced by the filter, in plan order.
   const allTasks = [...idx.tasksByMilestone.values()].flat();
+  // Every live task id — the surface new-task detection diffs against, so a task created by
+  // a worker or an accepted proposal counts as new just like one you added, whatever filter
+  // is active.
+  const allIds = new Set(allTasks.map((t) => t.id));
   const visibleTasks = allTasks.filter((t) => matchTask(t, idx, activeIds, filter));
   const visible = new Set(visibleTasks.map((t) => t.id));
   const goals = [...idx.goals].sort((a, b) => a.id - b.id);
@@ -142,6 +174,26 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
   // is already chunked by goal/milestone headers. The full set stays live underneath.
   const win = useWindow(visibleTasks.length, `${view}:${JSON.stringify(filter)}`, scroll.ref);
   const shownTasks = visibleTasks.slice(0, win.limit);
+
+  // The task ids whose cards actually render right now — grouped shows every visible task,
+  // flat shows only the windowed slice. This gates the new-task glow/scroll to cards that
+  // exist in the DOM and prunes a highlight whose card scrolled out of the window or was
+  // filtered away before it was seen.
+  const present = useMemo(
+    () => (view === "flat" ? new Set(shownTasks.map((t) => t.id)) : visible),
+    [view, shownTasks, visible],
+  );
+  // A stable digest of the rendered ids — changes when a card mounts/unmounts (a new row
+  // streams in, the window grows, the filter shifts), so a queued auto-scroll retries and
+  // the IntersectionObserver re-attaches at the right moment.
+  const idsKey = useMemo(() => [...present].sort((a, b) => a - b).join(","), [present]);
+  const { highlighted, hasAbove, hasBelow, jumpAbove, jumpBelow } = useNewTaskReveal(
+    scroll.ref,
+    idsKey,
+    allIds,
+    present,
+    revealCard,
+  );
 
   const toggle = (id: number) =>
     setSelected((prev) => {
@@ -158,116 +210,124 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
   const selectedIds = visibleTasks.map((t) => t.id).filter((id) => selected.has(id));
 
   return (
-    <Box
-      style={{
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        background: "var(--pm-pane-bg)",
-      }}
-    >
-      <Stack gap="cozy" px="md" py="cozy" style={{ flex: "0 0 auto" }}>
-        <Group justify="space-between">
-          <Group gap="cozy">
-            <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
-              TASKS
-            </Text>
-            <Text size="xs" c="dimmed">
-              {loading ? "loading…" : `${visibleTasks.length} shown`}
-            </Text>
-          </Group>
-          <SegmentedControl
-            size="xs"
-            value={view}
-            onChange={(v) => setView(v as View)}
-            data={[
-              { label: "Flat", value: "flat" },
-              { label: "Grouped", value: "grouped" },
-            ]}
-          />
-        </Group>
-        <FilterBar
-          search={filter.search}
-          onSearch={(v) => set({ search: v })}
-          searchPlaceholder="task id or title"
-          statusData={STATUS_DATA}
-          status={filter.status}
-          onStatus={(v) => set({ status: v as TaskFilter["status"] })}
-          env={filter.env}
-          onEnv={(v) => set({ env: v as TaskFilter["env"] })}
-          scopeData={scopeOptions(idx)}
-          scope={scopeValue(filter)}
-          onScope={(v) => set(parseScope(v))}
-          starred={filter.starred}
-          onStarred={(v) => set({ starred: v })}
-          onReset={() => setFilter(DEFAULT_TASK_FILTER)}
-          isDefault={isDefault}
-        />
-      </Stack>
-
+    <HighlightProvider value={highlighted}>
       <Box
-        ref={scroll.ref}
-        onScroll={scroll.onScroll}
-        data-pm-scroll="tasks" // lint-allow-string: dockview pane id, not an enum value
-        // overflowAnchor none: when starring re-sorts the list, the browser's own scroll
-        // anchoring chases the card that floated to the top and yanks the whole list up
-        // to it (scrollTop → 0), losing your place. Turn it off so a re-sort leaves the
-        // scroll where it is; usePreserveScrollAcrossResort then holds your exact spot.
-        // position relative anchors contentTop's offset walk (see the helper).
-        style={{ flex: 1, overflowY: "auto", overflowAnchor: "none", position: "relative" }}
-        px={view === "grouped" ? "md" : 0}
-        py="tight"
+        style={{
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
+          background: "var(--pm-pane-bg)",
+        }}
       >
-        <Box px={view === "grouped" ? 0 : "md"}>
-          <StartPanel />
+        <Stack gap="cozy" px="md" py="cozy" style={{ flex: "0 0 auto" }}>
+          <Group justify="space-between">
+            <Group gap="cozy">
+              <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
+                TASKS
+              </Text>
+              <Text size="xs" c="dimmed">
+                {loading ? "loading…" : `${visibleTasks.length} shown`}
+              </Text>
+            </Group>
+            <SegmentedControl
+              size="xs"
+              value={view}
+              onChange={(v) => setView(v as View)}
+              data={[
+                { label: "Flat", value: "flat" },
+                { label: "Grouped", value: "grouped" },
+              ]}
+            />
+          </Group>
+          <FilterBar
+            search={filter.search}
+            onSearch={(v) => set({ search: v })}
+            searchPlaceholder="task id or title"
+            statusData={STATUS_DATA}
+            status={filter.status}
+            onStatus={(v) => set({ status: v as TaskFilter["status"] })}
+            env={filter.env}
+            onEnv={(v) => set({ env: v as TaskFilter["env"] })}
+            scopeData={scopeOptions(idx)}
+            scope={scopeValue(filter)}
+            onScope={(v) => set(parseScope(v))}
+            starred={filter.starred}
+            onStarred={(v) => set({ starred: v })}
+            onReset={() => setFilter(DEFAULT_TASK_FILTER)}
+            isDefault={isDefault}
+          />
+        </Stack>
+
+        {/* Relative wrapper so the off-screen new-task indicators can pin to the viewport
+          edges without scrolling away with the list. */}
+        <Box style={{ flex: 1, position: "relative", minHeight: 0, display: "flex" }}>
+          <Box
+            ref={scroll.ref}
+            onScroll={scroll.onScroll}
+            data-pm-scroll="tasks" // lint-allow-string: dockview pane id, not an enum value
+            // overflowAnchor none: when starring re-sorts the list, the browser's own scroll
+            // anchoring chases the card that floated to the top and yanks the whole list up
+            // to it (scrollTop → 0), losing your place. Turn it off so a re-sort leaves the
+            // scroll where it is; usePreserveScrollAcrossResort then holds your exact spot.
+            // position relative anchors contentTop's offset walk (see the helper).
+            style={{ flex: 1, overflowY: "auto", overflowAnchor: "none", position: "relative" }}
+            px={view === "grouped" ? "md" : 0}
+            py="tight"
+          >
+            <Box px={view === "grouped" ? 0 : "md"}>
+              <StartPanel />
+            </Box>
+            {goals.length === 0 ? (
+              <Text c="dimmed" size="sm" px="md" py="lg">
+                No plan loaded. POST one to /plan.
+              </Text>
+            ) : view === "flat" ? (
+              visibleTasks.length === 0 ? (
+                <Text c="dimmed" size="sm" px="md" py="lg">
+                  No tasks match.
+                </Text>
+              ) : (
+                <>
+                  <FlatView
+                    tasks={shownTasks}
+                    idx={idx}
+                    selection={selection}
+                    ghosts={ghosts}
+                    edits={edits}
+                  />
+                  {win.hasMore && (
+                    <div ref={win.sentinelRef}>
+                      <Text c="dimmed" size="xs" ta="center" py="sm">
+                        loading more… ({shownTasks.length} of {visibleTasks.length})
+                      </Text>
+                    </div>
+                  )}
+                </>
+              )
+            ) : (
+              <Stack gap="xl">
+                {goals.map((g) => (
+                  <GoalGroup
+                    key={g.id}
+                    goal={g}
+                    idx={idx}
+                    backlog={visible}
+                    selection={selection}
+                    ghosts={ghosts}
+                    edits={edits}
+                  />
+                ))}
+              </Stack>
+            )}
+          </Box>
+          {hasAbove && <ScrollIndicator dir="up" onClick={jumpAbove} />}
+          {hasBelow && <ScrollIndicator dir="down" onClick={jumpBelow} />}
         </Box>
-        {goals.length === 0 ? (
-          <Text c="dimmed" size="sm" px="md" py="lg">
-            No plan loaded. POST one to /plan.
-          </Text>
-        ) : view === "flat" ? (
-          visibleTasks.length === 0 ? (
-            <Text c="dimmed" size="sm" px="md" py="lg">
-              No tasks match.
-            </Text>
-          ) : (
-            <>
-              <FlatView
-                tasks={shownTasks}
-                idx={idx}
-                selection={selection}
-                ghosts={ghosts}
-                edits={edits}
-              />
-              {win.hasMore && (
-                <div ref={win.sentinelRef}>
-                  <Text c="dimmed" size="xs" ta="center" py="sm">
-                    loading more… ({shownTasks.length} of {visibleTasks.length})
-                  </Text>
-                </div>
-              )}
-            </>
-          )
-        ) : (
-          <Stack gap="xl">
-            {goals.map((g) => (
-              <GoalGroup
-                key={g.id}
-                goal={g}
-                idx={idx}
-                backlog={visible}
-                selection={selection}
-                ghosts={ghosts}
-                edits={edits}
-              />
-            ))}
-          </Stack>
+
+        {selectedIds.length > 0 && (
+          <SelectionBar ids={selectedIds} clear={() => setSelected(new Set())} />
         )}
       </Box>
-
-      {selectedIds.length > 0 && (
-        <SelectionBar ids={selectedIds} clear={() => setSelected(new Set())} />
-      )}
-    </Box>
+    </HighlightProvider>
   );
 }
