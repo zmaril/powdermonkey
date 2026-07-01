@@ -1,5 +1,9 @@
 # PowderMonkey
 
+> [!WARNING]
+> **Work in progress.** PowderMonkey has mostly been tested on itself, and is very
+> new — it breaks in fun and exciting ways. Expect rough edges.
+
 PowderMonkey helps you plan and execute long term projects via coding agents in the cloud through Github and Claude Code.
 
 ![A powder monkey serving the guns](docs/powder-monkey.jpg)
