@@ -69,7 +69,7 @@ export function MilestoneGroup({
 
   return (
     <Stack gap="xs" ml="lg">
-      <Group gap="snug" wrap="nowrap" align="center">
+      <Group gap="snug" wrap="nowrap" align="center" data-pm-reveal={`m${milestone.id}`}>
         <Caret
           collapsed={collapsed}
           onToggle={() => setCollapsed((c) => !c)}

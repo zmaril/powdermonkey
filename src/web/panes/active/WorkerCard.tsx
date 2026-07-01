@@ -47,7 +47,7 @@ export function WorkerCard({
   const commentPr = prs.find((p) => p.lastComment);
   const KindIcon = KIND_ICON[session.kind];
   return (
-    <Card withBorder radius="md" padding="sm" bg="dark.5">
+    <Card withBorder radius="md" padding="sm" bg="dark.5" data-pm-reveal={`s${session.id}`}>
       {/* Top: session status + controls, full width. */}
       <Group justify="space-between" wrap="nowrap" align="flex-start" mb="xs">
         <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>

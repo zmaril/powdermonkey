@@ -7,7 +7,7 @@ import { IdTag, StarToggle } from "../../plan-ui";
  *  get their own column on the right. */
 export function TaskLine({ task, context }: { task: Task; context?: string }) {
   return (
-    <Group gap="sm" wrap="nowrap" align="flex-start">
+    <Group gap="sm" wrap="nowrap" align="flex-start" data-pm-reveal={`t${task.id}`}>
       <StarToggle task={task} />
       <Box style={{ flex: 1, minWidth: 0 }}>
         <Group gap="snug" wrap="nowrap">

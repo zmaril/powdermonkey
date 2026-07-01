@@ -4,7 +4,15 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef } from "react";
 import { fontScaleOption } from "./appearance.ts";
+import { PmIdDecorator } from "./pm-id-decorate.ts";
+import { PmIdLinkProvider } from "./pm-id-links.ts";
 import { useActiveTheme, useStore } from "./store.ts";
+
+// The accent colour (a #RRGGBB hex) the PM-id links are tinted with — the same accent the
+// cursor uses. xterm decorations only accept #RRGGBB, which the palette tuples already are.
+function accentHex(t: EditorTheme): string {
+  return t.accent[t.primaryShade];
+}
 import type { EditorTheme } from "./themes.ts";
 
 // The xterm theme for an editor palette. Crucially sets `foreground` (the palette's
@@ -60,6 +68,7 @@ export function ShellTerminal({
   fontRef.current = fontPx;
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const decoRef = useRef<PmIdDecorator | null>(null);
 
   useEffect(() => {
     const el = ref.current;
@@ -71,6 +80,9 @@ export function ShellTerminal({
       lineHeight: 1.15,
       theme: themeRef.current,
       cursorBlink: true,
+      // Marker + decoration APIs (used by PmIdDecorator to persistently style PM ids) are
+      // still "proposed" in xterm and throw unless this is opted into.
+      allowProposedApi: true,
     });
     termRef.current = term;
     const fit = new FitAddon();
@@ -84,8 +96,22 @@ export function ShellTerminal({
         window.open(uri, "_blank", "noopener,noreferrer");
       }),
     );
+    // The PM-id counterpart to the URL links above: scan the same PTY output for
+    // t/p/m/g/s id tokens and render them hover-underlined. Clicking one reveals the
+    // entity in the UI. This is registered on every terminal — the supervisor shell and
+    // each worker's session PTY — so an id jumps to its entity whoever printed it.
+    const linkProvider = term.registerLinkProvider(
+      new PmIdLinkProvider(term, (kind, id) => {
+        useStore.getState().revealEntity(kind, id);
+      }),
+    );
     term.open(el);
     fit.fit();
+    // Persistent styling for the PM-id links: blue + underlined at all times (the link
+    // provider above only underlines on hover). Tinted with the theme accent (the xterm
+    // theme's `cursor` is that same accent hex), re-skinned by the theme effect below.
+    const decorator = new PmIdDecorator(term, themeRef.current.cursor);
+    decoRef.current = decorator;
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const qs =
@@ -184,6 +210,9 @@ export function ShellTerminal({
 
     return () => {
       onData.dispose();
+      decorator.dispose();
+      decoRef.current = null;
+      linkProvider.dispose();
       ro.disconnect();
       el.removeEventListener("dragover", onDragOver);
       el.removeEventListener("drop", onDrop);
@@ -200,6 +229,7 @@ export function ShellTerminal({
     // `editor` (from getTheme) is a stable reference per theme key, so this re-skins
     // only when the selected theme actually changes.
     if (termRef.current) termRef.current.options.theme = xtermThemeOf(editor);
+    decoRef.current?.setColor(accentHex(editor));
   }, [editor]);
   useEffect(() => {
     const term = termRef.current;

@@ -76,6 +76,7 @@ export function BacklogCard({
       radius="md"
       padding="sm"
       data-pm-card={task.id}
+      data-pm-reveal={`t${task.id}`}
       bg={checked ? "dark.5" : undefined}
       style={{ boxShadow: checked ? SELECTED_SHADOW : undefined }}
       onMouseDown={(e) => {
