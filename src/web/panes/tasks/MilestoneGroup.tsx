@@ -1,24 +1,32 @@
+import { useDroppable } from "@dnd-kit/core";
+import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Button, Group, Stack, Title } from "@mantine/core";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import type { Milestone, Task } from "../../../server/schema.ts";
 import { Decision, ProposalOp, VocabKind } from "../../../shared/types.ts";
 import { type EntityEdit, type GroupedGhosts, editLabel, entityKey } from "../../ghosts.ts";
 import type { Indexes } from "../../plan-data.ts";
 import { IdTag } from "../../plan-ui";
 import { useStore } from "../../store.ts";
-import { useListAnimation } from "../../use-list-animation.ts";
 import { BacklogCard } from "./BacklogCard.tsx";
 import { CardEditor } from "./CardEditor.tsx";
 import { Caret } from "./Caret.tsx";
+import { DragHandle } from "./DragHandle.tsx";
 import { ProposedStrip } from "./ProposedStrip.tsx";
+import { SortableCard } from "./SortableCard.tsx";
 import { useReveal } from "./new-task.ts";
+import { type Reorder, cId, mId, tId } from "./reorder.ts";
 import type { Selection } from "./types.ts";
 import { useDecide } from "./useDecide.ts";
 
-/** A milestone and its backlog cards, with a caret to collapse the lot. Pending proposal
- *  changes show in place: edits on the milestone itself (rename / delete) as strips on the
- *  header, new-task ghosts after the real cards, and per-task / per-phase changes on each
- *  card. */
+/** A milestone and its backlog cards. The header drag-handle reorders the milestone within
+ *  its goal; each card drags to reorder within the milestone or move to another. Pending
+ *  proposal changes show in place: edits on the milestone itself (rename / delete) as
+ *  strips on the header, new-task ghosts after the real cards, and per-task / per-phase
+ *  changes on each card. Cards render in `position` order (the drag order) — see GoalGroup.
+ *  The sortable card list drives its own motion through dnd-kit, so it doesn't use the
+ *  shared list animation (the two would fight over the same DOM during a drag). */
 export function MilestoneGroup({
   milestone,
   tasks,
@@ -26,6 +34,7 @@ export function MilestoneGroup({
   selection,
   ghosts,
   edits,
+  reorder,
 }: {
   milestone: Milestone;
   tasks: Task[];
@@ -33,45 +42,38 @@ export function MilestoneGroup({
   selection: Selection;
   ghosts: GroupedGhosts;
   edits: Map<string, EntityEdit[]>;
+  reorder: Reorder;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [adding, setAdding] = useState(false);
   const { createTaskWithPhases } = useStore();
   const requestReveal = useReveal((s) => s.requestReveal);
   const { busy, decide } = useDecide();
-  const [listRef, suspendAnim] = useListAnimation();
-  // Suspend the list animation while a card is being edited, so the card<->editor swap (and
-  // the save back) is instant instead of morphing. Re-enable a frame later so the closing
-  // swap isn't animated either. (suspendAnim composes with the motion setting.)
-  const editingIds = useRef(new Set<number>());
-  const setCardEditing = (id: number, on: boolean) => {
-    if (on) {
-      editingIds.current.add(id);
-      suspendAnim(true);
-    } else {
-      editingIds.current.delete(id);
-      if (editingIds.current.size === 0) requestAnimationFrame(() => suspendAnim(false));
-    }
-  };
-  // Adding a task opens the same editor in the list — suspend the animation for it too,
-  // via a sentinel id (real task ids are positive), so "+ Add task" → editor → save is
-  // instant, not a morph.
-  const ADDING = -1;
-  const startAdding = () => {
-    setCardEditing(ADDING, true);
-    setAdding(true);
-  };
-  const stopAdding = () => {
-    setCardEditing(ADDING, false);
-    setAdding(false);
-  };
+  // The milestone is itself sortable within its goal's SortableContext (see GoalGroup).
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: mId(milestone.id),
+    data: { type: VocabKind.Milestone },
+  });
+  // A droppable task area so a task can be dropped into this milestone even when it shows
+  // no backlog cards.
+  const { setNodeRef: dropRef, isOver } = useDroppable({ id: cId(milestone.id) });
   const milestoneEdits = edits.get(entityKey(VocabKind.Milestone, milestone.id)) ?? [];
   const archiveProposed = milestoneEdits.some((e) => e.op === ProposalOp.Archive);
   const taskGhosts = ghosts.tasksByMilestone.get(milestone.id) ?? [];
 
   return (
-    <Stack gap="xs" ml="lg">
+    <Stack
+      ref={setNodeRef}
+      gap="xs"
+      ml="lg"
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+      }}
+    >
       <Group gap="snug" wrap="nowrap" align="center" data-pm-reveal={`m${milestone.id}`}>
+        <DragHandle {...attributes} {...listeners} />
         <Caret
           collapsed={collapsed}
           onToggle={() => setCollapsed((c) => !c)}
@@ -97,27 +99,38 @@ export function MilestoneGroup({
         />
       ))}
       {!collapsed && (
-        <div
-          ref={listRef}
-          style={{ display: "flex", flexDirection: "column", gap: "var(--mantine-spacing-xs)" }}
-        >
-          {tasks.map((t) => {
-            const taskPhases = idx.phasesByTask.get(t.id) ?? [];
-            return (
-              <BacklogCard
-                key={t.id}
-                task={t}
-                phases={taskPhases}
-                selection={selection}
-                edits={edits.get(entityKey(VocabKind.Task, t.id))}
-                phaseGhosts={ghosts.phasesByTask.get(t.id)}
-                phaseEdits={taskPhases.flatMap(
-                  (p) => edits.get(entityKey(VocabKind.Phase, p.id)) ?? [],
-                )}
-                onEditingChange={(on) => setCardEditing(t.id, on)}
-              />
-            );
-          })}
+        <Stack gap="xs">
+          <SortableContext
+            items={tasks.map((t) => tId(t.id))}
+            strategy={verticalListSortingStrategy}
+          >
+            <Stack
+              ref={dropRef}
+              gap="xs"
+              style={{
+                minHeight: "var(--mantine-spacing-xs)",
+                borderRadius: "var(--mantine-radius-sm)",
+                outline: isOver ? "1px dashed var(--pm-accent)" : undefined,
+              }}
+            >
+              {tasks.map((t) => {
+                const taskPhases = idx.phasesByTask.get(t.id) ?? [];
+                return (
+                  <SortableCard
+                    key={t.id}
+                    task={t}
+                    phases={taskPhases}
+                    selection={selection}
+                    edits={edits.get(entityKey(VocabKind.Task, t.id))}
+                    phaseGhosts={ghosts.phasesByTask.get(t.id)}
+                    phaseEdits={taskPhases.flatMap(
+                      (p) => edits.get(entityKey(VocabKind.Phase, p.id)) ?? [],
+                    )}
+                  />
+                );
+              })}
+            </Stack>
+          </SortableContext>
           {taskGhosts.map((g) => (
             <BacklogCard key={`p${g.proposalId}-${g.changeIndex}`} ghost={g} />
           ))}
@@ -128,7 +141,7 @@ export function MilestoneGroup({
                 // Only a task YOU just added here earns an auto-scroll-into-view.
                 if (id != null) requestReveal(id);
               }}
-              onDone={stopAdding}
+              onDone={() => setAdding(false)}
             />
           ) : (
             <Button
@@ -136,12 +149,12 @@ export function MilestoneGroup({
               variant="subtle"
               color="gray"
               style={{ alignSelf: "flex-start" }}
-              onClick={startAdding}
+              onClick={() => setAdding(true)}
             >
               + Add task
             </Button>
           )}
-        </div>
+        </Stack>
       )}
     </Stack>
   );
