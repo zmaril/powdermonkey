@@ -116,6 +116,37 @@ export const sessionTasks = pgTable("session_tasks", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// The repo registry: a flat, global list of the GitHub repos the operator drives.
+// A Repo is *where* work runs, kept apart from the *what* (the goal→…→task spine) —
+// only a Task pins one (its dispatch environment). Cloud-first: the repo of record
+// is on GitHub (`owner/name`); PowderMonkey clones a transient cache on demand and
+// never treats it as a checkout you browse. See docs/vocabulary.md.
+export const repos = pgTable("repos", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  // The GitHub identity of record, "owner/name". The natural key of a repo; the
+  // boot seed and the picker find-or-create by it (no DB unique constraint, so an
+  // archived row can be re-added — callers dedupe on the live set).
+  slug: text("slug").notNull(),
+  owner: text("owner").notNull(),
+  name: text("name").notNull(),
+  // The branch reconciliation scans and sessions cut from. Defaults to main.
+  defaultBranch: text("default_branch").notNull().default("main"),
+  // The repo's homepage (`gh repo view --json homepageUrl`), used to resolve a
+  // favicon; null when it has none.
+  homepageUrl: text("homepage_url"),
+  // Fork-first provenance: the upstream slug this was forked from, so cloud dispatch
+  // can push to the operator's fork while tracking the source. Null for an owned repo.
+  upstream: text("upstream"),
+  // A stable seed for the repo's swatch, resolved to a hue in the *active* theme's
+  // palette (re-skins on theme change). Null means "derive from the slug"; an operator
+  // override stores an explicit seed here.
+  colorSeed: text("color_seed"),
+  // Cached icon under ~/.powdermonkey/repos/<slug>/icon.png (favicon, else owner
+  // avatar), served at /repos/:id/icon. Null until resolved.
+  iconPath: text("icon_path"),
+  ...timestamps,
+});
+
 // Operator notepad. Free-form notes the operator keeps alongside the plan —
 // scratch thoughts, reminders, context for the supervisor. Not part of the
 // goal hierarchy; the supervisor reads them on request (e.g. "check @notes").
@@ -235,6 +266,7 @@ export type Task = typeof tasks.$inferSelect;
 export type Phase = typeof phases.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type SessionTask = typeof sessionTasks.$inferSelect;
+export type Repo = typeof repos.$inferSelect;
 export type Note = typeof notes.$inferSelect;
 export type PullRequestRow = typeof pullRequests.$inferSelect;
 export type Settings = typeof settings.$inferSelect;
