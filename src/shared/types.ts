@@ -192,3 +192,40 @@ export type ProposalChange =
   | { op: "update"; kind: VocabKind; id: number; fields: Record<string, unknown> }
   | { op: "archive"; kind: VocabKind; id: number }
   | { op: "reorder"; kind: VocabKind; id: number; position?: number; parentId?: number };
+
+/**
+ * One rate-limit window as Claude reports it — a slice of the shared cap the global
+ * status bar surfaces. `utilization` is the fraction of the window consumed (0..1, so
+ * the bar can render "83%" or a meter without extra math); `resetsAt` is when the
+ * window rolls over (epoch ms), or null when the source doesn't give one. `label` is
+ * the short window name for the UI ("5h", "7d", or a model's display name).
+ */
+export type UsageWindow = {
+  label: string;
+  utilization: number;
+  resetsAt: number | null;
+};
+
+/**
+ * A Claude usage/limits snapshot for the global status bar. Sourced from the
+ * operator's local Claude Code OAuth session (see src/server/claude-usage.ts and
+ * docs/claude-usage-spike.md): the tier metadata (`subscriptionType`,
+ * `rateLimitTier`) is read straight from `~/.claude/.credentials.json` and is almost
+ * always present, while the live `windows` come from the `/api/oauth/usage` endpoint
+ * and are only populated when the stored access token is still valid.
+ *
+ * `available` is the honest split the bar renders on: `true` means the live endpoint
+ * answered and `windows` is real; `false` means we're degraded (token expired, no
+ * credentials, or the endpoint was unreachable) and only the static tier is known —
+ * the vocabulary's "as the data is available" made explicit. `reason` explains the
+ * degradation for a tooltip; `fetchedAt` (epoch ms) stamps the snapshot so the client
+ * can show its age.
+ */
+export type ClaudeUsage = {
+  available: boolean;
+  subscriptionType: string | null;
+  rateLimitTier: string | null;
+  windows: UsageWindow[];
+  reason: string | null;
+  fetchedAt: number;
+};
