@@ -19,7 +19,34 @@
 
 const KEY = "pm-server-base";
 
+// The conventional local supervisor address (README default, matches PM_URL). Used as
+// the desktop shell's default, since it has no same-origin server of its own.
+const DESKTOP_DEFAULT = "http://localhost:4500";
+
 let cached: string | null = null;
+
+/** True when this bundle is running inside the Tauri desktop shell rather than a
+ *  browser. The webview loads from Tauri's own asset origin — `tauri://localhost` on
+ *  macOS/iOS, `http://tauri.localhost` on Windows/Linux — none of which serves a
+ *  supervisor, and Tauri always injects `__TAURI_INTERNALS__`. */
+export function isDesktop(): boolean {
+  try {
+    return (
+      window.location.protocol === "tauri:" ||
+      window.location.hostname === "tauri.localhost" ||
+      "__TAURI_INTERNALS__" in window
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** The origin used when no explicit server is configured. In a browser that's the
+ *  supervisor that served the bundle (same origin); in the desktop shell there is no
+ *  such server (the origin is `tauri://…`), so fall back to the local supervisor. */
+export function defaultOrigin(): string {
+  return isDesktop() ? DESKTOP_DEFAULT : window.location.origin;
+}
 
 /** The configured base origin, or "" for same-origin (the supervisor serving us). */
 export function getServerBase(): string {
@@ -58,9 +85,10 @@ export function setServerBase(base: string): void {
 }
 
 /** The HTTP origin for REST calls — full scheme-qualified URL, fed to Eden's
- *  treaty and to bare fetch()es. Same-origin (window.location.origin) when unset. */
+ *  treaty and to bare fetch()es. Falls back to defaultOrigin() (same origin in a
+ *  browser, the local supervisor in the desktop shell) when unset. */
 export function httpOrigin(): string {
-  return getServerBase() || window.location.origin;
+  return getServerBase() || defaultOrigin();
 }
 
 /** Absolute URL for a server path (e.g. "/upload", "/health") for fetch(). */

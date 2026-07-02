@@ -2,8 +2,10 @@ import { Badge, Button, Group, Stack, Text, TextInput } from "@mantine/core";
 import { useState } from "react";
 import {
   type SavedServer,
+  defaultOrigin,
   getSavedServers,
   getServerBase,
+  isDesktop,
   normalizeServerBase,
   probeServer,
   setSavedServers,
@@ -13,6 +15,8 @@ import {
 // Pick which supervisor this client talks to. Only meaningful for a desktop /
 // remote client (the bundle the supervisor serves to itself is always same-origin);
 // for that web case "This device" is the active server and there's nothing to add.
+// In the desktop shell "This device" resolves to the local supervisor (localhost:4500)
+// rather than the tauri:// asset origin, so it connects out of the box (server.ts).
 //
 // Switching writes the new base (server.ts) and reloads: the Eden treaty and the
 // sync sockets are module-level singletons built once at import against the base,
@@ -32,6 +36,10 @@ export function ServerControl() {
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
+  // In a browser "This device" is literally the same origin; in the desktop shell
+  // there is no same-origin server, so it resolves to the local supervisor — show
+  // that address so the row is honest about where "Connect" points.
+  const localLabel = isDesktop() ? `This device (${defaultOrigin()})` : "This device (same origin)";
 
   const persist = (list: SavedServer[]) => {
     setSavedServers(list);
@@ -76,14 +84,15 @@ export function ServerControl() {
           Connected to:
         </Text>
         <Badge size="sm" variant="light">
-          {active || "This device (same origin)"}
+          {active || localLabel}
         </Badge>
       </Group>
 
-      {/* "This device" — the supervisor serving this bundle. The default web path;
-          a packaged desktop client has none, so this just won't be reachable there. */}
+      {/* "This device" — the supervisor serving this bundle in a browser (same origin),
+          or the local supervisor (localhost:4500) in the desktop shell, which has no
+          same-origin server of its own. */}
       <Group justify="space-between" wrap="nowrap">
-        <Text size="sm">This device (same origin)</Text>
+        <Text size="sm">{localLabel}</Text>
         {active === "" ? (
           <Badge size="sm" color="green" variant="light">
             active
