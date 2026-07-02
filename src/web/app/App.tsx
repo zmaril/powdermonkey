@@ -12,6 +12,7 @@ import { useRevealEntity } from "../reveal.ts";
 import { useActiveTheme, useStore } from "../store.ts";
 import { DisconnectBanner } from "./DisconnectBanner.tsx";
 import { ReviewOverlay } from "./ReviewOverlay.tsx";
+import { StatusBar } from "./StatusBar.tsx";
 import { TopBar } from "./TopBar.tsx";
 import { PANE_TITLES, buildDefaultLayout, dockComponents } from "./layout.ts";
 import { useConnectionWatch } from "./useConnectionWatch.ts";
@@ -165,6 +166,7 @@ export function App() {
 
   return (
     <div style={{ height: "100vh", width: "100vw", display: "flex", flexDirection: "column" }}>
+      <StatusBar />
       {disconnected && <DisconnectBanner />}
       <TopBar />
       <div className={skinClass} style={{ flex: 1, minHeight: 0 }}>
