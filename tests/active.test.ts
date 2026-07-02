@@ -1,6 +1,12 @@
 import { expect, test } from "bun:test";
 import type { Session, Task } from "../src/server/schema.ts";
-import { type SessionLink, activeTaskIds, isActive, partitionTasks } from "../src/web/active.ts";
+import {
+  type SessionLink,
+  activeTaskIds,
+  isActive,
+  partitionTasks,
+  runningAgentCount,
+} from "../src/web/active.ts";
 
 // Active-ness is derived from sessions + their task links, not stored. These check
 // the shared selector both panes read from: a task is ACTIVE iff a LIVE session is
@@ -41,4 +47,23 @@ test("no sessions → everything is backlog", () => {
   const { active, backlog } = partitionTasks(tasks, activeTaskIds([], []));
   expect(active).toHaveLength(0);
   expect(backlog).toHaveLength(2);
+});
+
+// The global status bar's live count: running agents = live (non-archived) sessions,
+// local + remote alike, ignoring archived rows even when the full collection is passed.
+const archived = (id: number) =>
+  ({ id, kind: "local", state: "idle", archivedAt: new Date() }) as Session;
+
+test("runningAgentCount counts live sessions of any kind", () => {
+  expect(runningAgentCount([session(1, "local"), session(2, "remote")])).toBe(2);
+});
+
+test("runningAgentCount ignores archived (landed/stopped) sessions", () => {
+  // The sessions collection streams live + history; only the live ones are running.
+  expect(runningAgentCount([session(1), archived(2), session(3, "remote"), archived(4)])).toBe(2);
+});
+
+test("runningAgentCount is zero with no live sessions", () => {
+  expect(runningAgentCount([])).toBe(0);
+  expect(runningAgentCount([archived(1), archived(2)])).toBe(0);
 });

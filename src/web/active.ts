@@ -29,6 +29,18 @@ export function isActive(taskId: number, active: Set<number>): boolean {
   return active.has(taskId);
 }
 
+/** How many agents are running right now — the live-session count the global status
+ *  bar shows. "Running" is exactly the Sessions pane's Live bucket (sessionBucket):
+ *  a session with no `archived_at`, i.e. one that hasn't landed or been torn down.
+ *  Kind-agnostic on purpose — local worktrees and remote cloud runs both count, since
+ *  they draw on the same shared cap (five agents on one repo plus five on another is
+ *  ten against your limit; see docs/vocabulary.md → Global status bar). The caller
+ *  hands in whichever sessions it holds; archived rows are ignored here rather than
+ *  assumed pre-filtered, so it's correct on the full (live + history) collection. */
+export function runningAgentCount(sessions: Session[]): number {
+  return sessions.reduce((n, s) => (s.archivedAt == null ? n + 1 : n), 0);
+}
+
 /** Split a list of tasks into the Active set (has a live session) and the Backlog
  *  (everything else — the to-be-worked launchpad). Order within each list is
  *  preserved, so callers can sort first and keep that order. */
