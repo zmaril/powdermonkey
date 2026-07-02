@@ -3,11 +3,18 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { tasksCollection } from "../collections.ts";
 import { useStore } from "../store.ts";
 import { PaneButton } from "./PaneButton.tsx";
+import { AgentsCluster } from "./status/AgentsCluster.tsx";
+import { ClaudeUsageCluster } from "./status/ClaudeUsageCluster.tsx";
+import { useAgentsRunning } from "./useAgentsRunning.ts";
+import { useClaudeUsage } from "./useClaudeUsage.ts";
 
-// Slim global toolbar: the wordmark, the error banner, and a launcher for every
-// pane type. Click one and the pane appears (or comes forward) below — singletons
-// focus their one instance, Shell/Browser open a fresh one each time. Lives above
-// the dockview so it's always reachable regardless of which panel is focused.
+// Slim global toolbar: the wordmark, the two always-on-glance status readouts (agents
+// running by the wordmark, Claude usage by the launchers), the error banner, and a
+// launcher for every pane type. Click one and the pane appears (or comes forward)
+// below — singletons focus their one instance, Shell/Browser open a fresh one each
+// time. Lives above the dockview so it's always reachable regardless of which panel is
+// focused. The agents count is reactive off the sessions collection; the usage reading
+// is polled (see useClaudeUsage) and degrades to a dim note when there's no login.
 export function TopBar() {
   const openPane = useStore((s) => s.openPane);
   const openTerminal = useStore((s) => s.openTerminal);
@@ -15,6 +22,8 @@ export function TopBar() {
   const error = useStore((s) => s.error);
   // "loading" until the first collection snapshot lands.
   const loading = useLiveQuery(() => tasksCollection).isLoading;
+  const running = useAgentsRunning();
+  const usage = useClaudeUsage();
   return (
     <div
       style={{
@@ -38,8 +47,11 @@ export function TopBar() {
               {error}
             </Text>
           )}
+          <AgentsCluster running={running} />
         </Group>
-        <Group gap="hair" wrap="nowrap">
+        <Group gap="hair" wrap="nowrap" align="center">
+          <ClaudeUsageCluster usage={usage} />
+          <Divider orientation="vertical" my="tight" />
           <PaneButton label="Sessions" onClick={() => openPane("sessions")} />
           <PaneButton label="Tasks" onClick={() => openPane("tasks")} />
           <Divider orientation="vertical" my="tight" />
