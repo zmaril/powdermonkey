@@ -134,6 +134,13 @@
       "when": 1783034377004,
       "tag": "0018_windy_squirrel_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1783035538667,
+      "tag": "0019_breezy_mimic",
+      "breakpoints": true
     }
   ]
 }

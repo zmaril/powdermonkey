@@ -1,4 +1,4 @@
-import { boolean, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, boolean, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import {
   type AgentState,
   type CheckRollupState,
@@ -260,7 +260,10 @@ export const proposals = pgTable("proposals", {
   // live row); `sourcePr` ties it back to the PR it was slurped from.
   sourceTaskId: integer("source_task_id"),
   sourcePr: integer("source_pr"),
-  sourceCommentId: integer("source_comment_id"),
+  // GitHub comment databaseIds are ~10 digits (billions) — bigint, not int4, or the
+  // followup-ingest write overflows ("value … is out of range for type integer").
+  // `mode: "number"` keeps the TS type a plain number (ids stay well under 2^53).
+  sourceCommentId: bigint("source_comment_id", { mode: "number" }),
   ...timestamps,
 });
 
