@@ -29,6 +29,12 @@ export const goals = pgTable("goals", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   title: text("title").notNull(),
   objective: text("objective").notNull().default(""),
+  // A default repo the goal's tasks inherit unless overridden lower down. The planning
+  // spine stays repo-agnostic (a goal can span repos), but a goal scoped to one repo
+  // pre-fills every task under it — the plan loader cascades this to a repo-less task,
+  // and the fan-out picker seeds from it. Nullable: most goals declare none. See
+  // docs/vocabulary.md § Goal.
+  repoId: integer("repo_id").references(() => repos.id),
   ...timestamps,
 });
 
@@ -39,6 +45,10 @@ export const milestones = pgTable("milestones", {
     .references(() => goals.id),
   title: text("title").notNull(),
   position: integer("position").notNull().default(0),
+  // A default repo for tasks under this milestone, overriding the goal's. Same
+  // inheritance story as goals.repoId, one level down (milestone wins over goal); the
+  // task can still override it. Nullable. See docs/vocabulary.md § Milestone.
+  repoId: integer("repo_id").references(() => repos.id),
   ...timestamps,
 });
 

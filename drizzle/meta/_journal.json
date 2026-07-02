@@ -141,6 +141,13 @@
       "when": 1783035538667,
       "tag": "0019_breezy_mimic",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1783035955480,
+      "tag": "0020_acoustic_pride",
+      "breakpoints": true
     }
   ]
 }
