@@ -29,12 +29,17 @@ const taskInput = Type.Object({
 
 const milestoneInput = Type.Object({
   title: Type.String({ minLength: 1 }),
+  // Default repo for tasks under this milestone (overrides the goal's). Cascades to a
+  // repo-less task at load time; the task can still pin its own.
+  repoId: Type.Optional(Type.Number()),
   tasks: Type.Optional(Type.Array(taskInput)),
 });
 
 const goalInput = Type.Object({
   title: Type.String({ minLength: 1 }),
   objective: Type.Optional(Type.String()),
+  // Default repo the goal's tasks inherit unless a milestone/task overrides it.
+  repoId: Type.Optional(Type.Number()),
   milestones: Type.Optional(Type.Array(milestoneInput)),
 });
 
@@ -56,21 +61,31 @@ export async function loadPlan(plan: Plan): Promise<LoadResult> {
     for (const goal of plan.goals) {
       const [g] = await tx
         .insert(goals)
-        .values({ title: goal.title, objective: goal.objective ?? "" })
+        .values({ title: goal.title, objective: goal.objective ?? "", repoId: goal.repoId })
         .returning();
       counts.goals++;
       const goalMilestones = goal.milestones ?? [];
       for (const [mi, ms] of goalMilestones.entries()) {
         const [m] = await tx
           .insert(milestones)
-          .values({ goalId: g.id, title: ms.title, position: mi })
+          .values({ goalId: g.id, title: ms.title, position: mi, repoId: ms.repoId })
           .returning();
         counts.milestones++;
+        // A task inherits its default repo from the nearest scope that declares one —
+        // itself, else its milestone, else its goal — so a goal/milestone pinned to a
+        // repo pre-fills every task under it without repeating the id per task. An
+        // explicit task.repoId always wins.
+        const inheritedRepoId = ms.repoId ?? goal.repoId;
         const milestoneTasks = ms.tasks ?? [];
         for (const [ti, task] of milestoneTasks.entries()) {
           const [t] = await tx
             .insert(tasks)
-            .values({ milestoneId: m.id, title: task.title, position: ti, repoId: task.repoId })
+            .values({
+              milestoneId: m.id,
+              title: task.title,
+              position: ti,
+              repoId: task.repoId ?? inheritedRepoId,
+            })
             .returning();
           counts.tasks++;
           const taskPhases = task.phases ?? [];
