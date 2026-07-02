@@ -219,7 +219,13 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
   // The launch order is the rendered order (goal → milestone → position), so the first
   // selected card becomes the primary task of the shared session. Drop any selected ids
   // no longer visible (e.g. filtered out, or just launched).
-  const selectedIds = visibleTasks.map((t) => t.id).filter((id) => selected.has(id));
+  const selectedTasks = visibleTasks.filter((t) => selected.has(t.id));
+  const selectedIds = selectedTasks.map((t) => t.id);
+  // Cross-repo guard (client twin of the server's): one session runs one repo, so a
+  // selection that spans repos can't launch together. A null repo is its own bucket, so
+  // mixing a repo-less task with a repo-pinned one counts as cross-repo — same rule as
+  // dispatch.spansRepos on the server.
+  const crossRepo = new Set(selectedTasks.map((t) => t.repoId ?? null)).size > 1;
 
   return (
     <HighlightProvider value={highlighted}>
@@ -355,7 +361,11 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
         </Box>
 
         {selectedIds.length > 0 && (
-          <SelectionBar ids={selectedIds} clear={() => setSelected(new Set())} />
+          <SelectionBar
+            ids={selectedIds}
+            clear={() => setSelected(new Set())}
+            crossRepo={crossRepo}
+          />
         )}
       </Box>
     </HighlightProvider>

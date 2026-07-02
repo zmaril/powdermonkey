@@ -104,6 +104,20 @@ export function buildTaskPrompt(
   return { prompt, trailers };
 }
 
+/** The message both launch paths return when a multi-select spans repos. */
+export const CROSS_REPO_ERROR =
+  "cross-repo launch: the selected tasks target different repos — a session runs one repo, so launch each repo's tasks separately (or author cross-repo work via the task fan-out)";
+
+/** True when these tasks don't all target the same repo. One launch is ONE session,
+ *  and a session is ONE environment — it clones a single repo — so a multi-select that
+ *  spans repos can't be dispatched together. Tasks that agree on a repo (including a set
+ *  that's uniformly repo-less) pass; a null repo is its own bucket, so mixing a repo-less
+ *  task with a repo-pinned one is treated as cross-repo. The API rejects this and the UI
+ *  blocks the selection — cross-repo work is authored via the task fan-out instead. */
+export function spansRepos(tasks: Task[]): boolean {
+  return new Set(tasks.map((t) => t.repoId ?? null)).size > 1;
+}
+
 /** Fetch one or more tasks + their live (non-archived, ordered) phases and build
  *  the combined prompt and trailers. Accepts a single task id or a list, and
  *  returns the resolved tasks (in the given order) alongside the brief. Returns
@@ -189,6 +203,9 @@ export async function dispatchTask(
 ): Promise<DispatchResult> {
   const built = await loadTaskPrompt(taskIds, comment);
   if (!built) return { ok: false, error: `unknown task "${[taskIds].flat().join(", ")}"` };
+  if (spansRepos(built.tasks)) {
+    return { ok: false, error: CROSS_REPO_ERROR };
+  }
   const ids = built.tasks.map((t) => t.id);
   const primary = ids[0];
 
