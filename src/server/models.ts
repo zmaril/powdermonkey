@@ -1,6 +1,6 @@
 import { type TObject, Type } from "@sinclair/typebox";
 import { createInsertSchema } from "drizzle-typebox";
-import { goals, milestones, notes, phases, sessions, tasks } from "./schema.ts";
+import { goals, milestones, notes, phases, repos, sessions, tasks } from "./schema.ts";
 
 // drizzle-typebox's insert schema carries a very deep generic type. Pinning it to a
 // plain TObject stops TS from unrolling it (TS2589) — the runtime schema object,
@@ -23,6 +23,7 @@ const taskCreate = Type.Omit(insert(tasks), SERVER_MANAGED);
 const phaseCreate = Type.Omit(insert(phases), SERVER_MANAGED);
 const sessionCreate = Type.Omit(insert(sessions), SERVER_MANAGED);
 const noteCreate = Type.Omit(insert(notes), SERVER_MANAGED);
+const repoCreate = Type.Omit(insert(repos), SERVER_MANAGED);
 
 // Updates: same fields, all optional (PATCH semantics).
 export const models = {
@@ -32,4 +33,5 @@ export const models = {
   phases: { create: phaseCreate, update: Type.Partial(phaseCreate) },
   sessions: { create: sessionCreate, update: Type.Partial(sessionCreate) },
   notes: { create: noteCreate, update: Type.Partial(noteCreate) },
+  repos: { create: repoCreate, update: Type.Partial(repoCreate) },
 };
