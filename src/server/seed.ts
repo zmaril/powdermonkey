@@ -1,6 +1,8 @@
+import { isNull } from "drizzle-orm";
 import { repoRepo } from "./crud.ts";
+import { db } from "./db.ts";
 import { gh, resolveRepo } from "./gh.ts";
-import type { Repo } from "./schema.ts";
+import { type Repo, tasks } from "./schema.ts";
 
 // Upgrade path from a single-repo install to the flat repo registry: on boot, make
 // sure the supervisor's own repo (the one it was pointed at before repos existed) is
@@ -33,6 +35,13 @@ async function repoMeta(slug: string): Promise<{ defaultBranch?: string; homepag
  *  slug over the whole registry (archived rows included, so a repo the operator
  *  archived by hand is never resurrected), a no-op once the row exists. No-ops too
  *  when there's no GitHub repo to resolve (no `gh` auth / no `$PM_GITHUB_REPO`).
+ *
+ *  On first registration — the one-time upgrade moment — it also **backfills**: every
+ *  existing repo-less task is attached to the new repo, so a pre-registry plan becomes
+ *  "one repo's worth of work" with no data loss. Only runs on create (not on the
+ *  idempotent no-op), so once multiple repos exist a task authored without a repo isn't
+ *  silently swept onto the supervisor's own.
+ *
  *  `resolve` is injectable for tests. Returns the existing/created row, or null when
  *  skipped. */
 export async function seedSupervisorRepo(
@@ -44,11 +53,18 @@ export async function seedSupervisorRepo(
   const existing = (await repoRepo.list({ includeArchived: true })).find((r) => r.slug === slug);
   if (existing) return existing;
   const meta = await repoMeta(slug);
-  return repoRepo.create({
+  const created = await repoRepo.create({
     slug,
     owner: slugParts.owner,
     name: slugParts.name,
     defaultBranch: meta.defaultBranch ?? "main",
     homepageUrl: meta.homepageUrl ?? null,
   });
+  // Backfill: attach every existing repo-less task (live or archived) to the repo we
+  // just registered — the flat registry's upgrade migration for the plan spine.
+  await db
+    .update(tasks)
+    .set({ repoId: created.id, updatedAt: new Date() })
+    .where(isNull(tasks.repoId));
+  return created;
 }

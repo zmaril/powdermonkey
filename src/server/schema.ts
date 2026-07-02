@@ -47,6 +47,11 @@ export const tasks = pgTable("tasks", {
   milestoneId: integer("milestone_id")
     .notNull()
     .references(() => milestones.id),
+  // The repo this task runs against — its dispatch environment. A task targets
+  // exactly one repo (a session clones one repo); the planning spine above it stays
+  // repo-agnostic. Nullable: pre-registry tasks carry none until the boot seed
+  // backfills them to the supervisor's own repo. See docs/vocabulary.md.
+  repoId: integer("repo_id").references(() => repos.id),
   title: text("title").notNull(),
   position: integer("position").notNull().default(0),
   // Operator priority: a starred task sorts to the top of its group (active/backlog).
