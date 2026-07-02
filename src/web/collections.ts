@@ -1,6 +1,15 @@
 import { createCollection } from "@tanstack/db";
 import type { CloudPr } from "../server/events.ts";
-import type { Goal, Milestone, Note, Phase, Proposal, Session, Task } from "../server/schema.ts";
+import type {
+  Goal,
+  Milestone,
+  Note,
+  Phase,
+  Proposal,
+  Repo,
+  Session,
+  Task,
+} from "../server/schema.ts";
 import type { SessionLink } from "./active.ts";
 import { wsUrl } from "./server.ts";
 
@@ -85,5 +94,6 @@ export const sessionTasksCollection = syncedCollection<SessionLink & { id: numbe
   "id",
 );
 export const notesCollection = syncedCollection<Note>("notes", "id");
+export const reposCollection = syncedCollection<Repo>("repos", "id");
 export const pullRequestsCollection = syncedCollection<CloudPr>("pull_requests", "number");
 export const proposalsCollection = syncedCollection<Proposal>("proposals", "id");

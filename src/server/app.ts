@@ -44,6 +44,7 @@ import {
   phases as phasesTable,
   proposals as proposalsTable,
   pullRequests as pullRequestsTable,
+  repos as reposTable,
   sessionTasks as sessionTasksTable,
   sessions as sessionsTable,
   tasks as tasksTable,
@@ -97,6 +98,7 @@ const SYNC_TABLES: Record<string, { sql: string; key: string }> = Object.fromEnt
     sessionsTable,
     sessionTasksTable,
     notesTable,
+    reposTable,
     pullRequestsTable,
     proposalsTable,
     // biome-ignore lint/suspicious/noExplicitAny: heterogeneous pgTable objects, introspected generically.
