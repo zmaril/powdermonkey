@@ -96,18 +96,29 @@ async function ensureRepoInner(slug: string): Promise<EnsureRepoResult> {
  *  (teardown, where the clone already exists and we only need to know which repo owns
  *  the worktree). A task with no repo pinned falls back to the supervisor's own
  *  checkout — that's the pre-registry / repo-less path, which keeps working unchanged. */
+export type RepoDir = {
+  dir: string;
+  // The branch a session's worktree is cut off (the repo's default branch), so
+  // start-local branches `pm/task-<id>` from the right base in a non-`main` repo.
+  // Undefined for the supervisor-repo fallback — the caller uses PM_MAIN_BRANCH.
+  baseBranch?: string;
+  error?: string;
+  output?: string;
+};
+
 export async function repoDirForTask(
   taskId: number,
   opts: { ensure?: boolean } = {},
-): Promise<{ dir: string; error?: string; output?: string }> {
+): Promise<RepoDir> {
   const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId));
   if (!task?.repoId) return { dir: supervisorRepoDir() };
   const repo = await repoRepo.get(task.repoId);
   if (!repo) return { dir: supervisorRepoDir() };
 
-  if (!opts.ensure) return { dir: repoCachePath(repo.slug) };
+  const baseBranch = repo.defaultBranch;
+  if (!opts.ensure) return { dir: repoCachePath(repo.slug), baseBranch };
 
   const res = await ensureRepo(repo.slug);
-  if (!res.ok) return { dir: res.dir, error: res.error, output: res.output };
-  return { dir: res.dir };
+  if (!res.ok) return { dir: res.dir, baseBranch, error: res.error, output: res.output };
+  return { dir: res.dir, baseBranch };
 }

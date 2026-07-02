@@ -5,6 +5,7 @@ import { SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { loadTaskPrompt } from "./dispatch.ts";
 import { worktreeAdd, worktreeAddRemote, worktreeRemove } from "./git.ts";
+import { repoDirForTask, supervisorRepoDir } from "./repo-cache.ts";
 import { type Session, sessions, tasks } from "./schema.ts";
 import { killSessionPty, startSessionPty } from "./session-pty.ts";
 import { linkSessionTasks, taskIdsForSession } from "./session-tasks.ts";
@@ -24,6 +25,16 @@ function worktreeBase(): string {
 /** The on-disk worktree path a task's local session lives in. */
 function worktreePathFor(taskId: number): string {
   return join(worktreeBase(), `task-${taskId}`);
+}
+
+/** The repo dir that owns a session's worktree — the cache clone of its (first) task's
+ *  repo, or the supervisor's own checkout when the task is repo-less. Teardown runs
+ *  `git worktree remove` from here: a worktree cut from a cache clone can't be removed
+ *  from the supervisor's repo. Path-only (no clone/fetch) — the clone already exists. */
+async function repoDirForSession(sessionId: number): Promise<string> {
+  const ids = await taskIdsForSession(sessionId);
+  if (ids.length === 0) return supervisorRepoDir();
+  return (await repoDirForTask(ids[0])).dir;
 }
 
 // Where per-session prompt files live (outside any worktree so the agent never
@@ -81,14 +92,24 @@ export async function startLocalSession(
   const ids = built.tasks.map((t) => t.id);
   const primary = ids[0];
 
+  // Resolve the repo this task's worktree is cut from: the task's cache clone (ensured
+  // current), or the supervisor's own checkout for a repo-less task. The worktree is a
+  // worktree OF that clone, branched off the repo's default branch — so start-local
+  // works on any registered repo, not just the supervisor's own.
+  const repo = await repoDirForTask(primary, { ensure: true });
+  if (repo.error)
+    return { ok: false, error: `repo cache unavailable: ${repo.error}`, output: repo.output };
+  const repoCwd = repo.dir;
+  const baseRef = repo.baseBranch ?? MAIN_BRANCH;
+
   // One worktree + branch for all selected tasks, named after the primary task.
   const branch = opts.branch ?? `pm/task-${primary}`;
   const worktreePath = worktreePathFor(primary);
   mkdirSync(worktreeBase(), { recursive: true });
 
   const add = opts.fetchRemote
-    ? await worktreeAddRemote(worktreePath, branch, MAIN_BRANCH)
-    : await worktreeAdd(worktreePath, branch, MAIN_BRANCH);
+    ? await worktreeAddRemote(worktreePath, branch, baseRef, repoCwd)
+    : await worktreeAdd(worktreePath, branch, baseRef, repoCwd);
   if (!add.ok) return { ok: false, error: "git worktree add failed", output: add.output };
 
   // One session row for all the tasks, linked through the session_tasks join; each
@@ -129,7 +150,9 @@ export async function landSession(sessionId: number): Promise<LandResult> {
   killSessionPty(sessionId);
 
   if (session.worktreePath) {
-    const rm = await worktreeRemove(session.worktreePath);
+    const rm = await worktreeRemove(session.worktreePath, {
+      cwd: await repoDirForSession(sessionId),
+    });
     if (!rm.ok) {
       return {
         ok: false,
@@ -175,7 +198,10 @@ export async function stopSession(sessionId: number): Promise<StopResult> {
     // collect perfectly.
     killSessionPty(sessionId);
     if (session.worktreePath) {
-      const rm = await worktreeRemove(session.worktreePath, { force: true });
+      const rm = await worktreeRemove(session.worktreePath, {
+        force: true,
+        cwd: await repoDirForSession(sessionId),
+      });
       if (!rm.ok) console.warn(`stop: worktree remove (non-fatal): ${rm.output}`);
     }
   }
