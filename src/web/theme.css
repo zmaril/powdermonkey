@@ -86,6 +86,19 @@ body {
   box-shadow: inset 0 2px 0 0 var(--pm-accent);
 }
 
+/* ── Terminal (xterm) ───────────────────────────────────────────────────────
+ * The terminal renders in Fira Code (a variable, ligature-heavy font). Ligatures
+ * fuse pairs like -> => == != into single wide glyphs, which breaks xterm's
+ * fixed-width cell grid — you get overlapping/repeated characters and mangled
+ * wrapping, and it's markedly worse in the desktop app's WebKit webview than in
+ * Chrome. Force plain, one-glyph-per-cell rendering. Scoped to .xterm so the rest
+ * of the UI keeps Fira Code's ligatures. */
+.xterm,
+.xterm .xterm-rows {
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+}
+
 /* Cards feel alive: a faint border brighten on hover. Subtle on purpose — the
  * task/backlog lists are dense, so anything stronger would be noise. (The transition
  * itself lives in motion.css.) */
