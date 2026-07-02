@@ -118,6 +118,25 @@ test("ingestFollowups creates one proposal per marked comment, carrying provenan
   expect(p?.title).toBe("Follow-up: Cloud follow-up one");
 });
 
+test("ingestFollowups handles a real (billions-range) GitHub comment id without overflowing", async () => {
+  // GitHub comment databaseIds are ~10 digits, past int4's 2.1B ceiling; sourceCommentId
+  // must be bigint or the ingest write throws "out of range for type integer". 4827711718
+  // is the id that surfaced the bug in the running supervisor.
+  const bigId = 4827711718;
+  const created = await ingestFollowups(
+    cloudPr({
+      number: 9,
+      taskId: taskInB,
+      followups: [{ commentId: bigId, title: "Big-id follow-up", body: "ctx", updatedAt: "t3" }],
+    }),
+  );
+  expect(created).toBe(1);
+  const p = (await listProposals()).find((x) => x.sourceCommentId === bigId);
+  expect(p).toMatchObject({ sourcePr: 9, sourceTaskId: taskInB, status: "pending" });
+  // And still idempotent at that magnitude (the dedup WHERE also compares the big id).
+  expect(await ingestFollowups(cloudPr({ number: 9, taskId: taskInB, followups: [{ commentId: bigId, title: "Big-id follow-up", body: "ctx", updatedAt: "t3" }] }))).toBe(0);
+});
+
 test("ingestFollowups is idempotent — re-reading the same comments creates nothing new", async () => {
   const pr = cloudPr({
     number: 7,
