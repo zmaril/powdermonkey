@@ -6,6 +6,7 @@ import { Elysia, t } from "elysia";
 import { P, match } from "ts-pattern";
 import { Decision, OverrideSource, ProposalStatus, SessionState } from "../shared/types.ts";
 import { applyProposal, decideChange } from "./apply.ts";
+import { getClaudeUsage } from "./claude-usage.ts";
 import { cancelTask, completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
 import { cors } from "./cors.ts";
 import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
@@ -356,6 +357,11 @@ export const app = new Elysia()
   // Persisted in the pull_requests table, so it's served from last-known state on
   // boot — the Active panel reads it for status badges.
   .get("/cloud-prs", () => currentCloudPrs())
+  // The operator's Claude usage/limits (rolling 5-hour + weekly windows), read from
+  // the same OAuth usage endpoint Claude Code's `/usage` uses. Best-effort: returns
+  // `available: false` with a reason when there's no login / the API is down, never
+  // an error. The global status bar polls this. See docs/claude-usage-spike.md.
+  .get("/claude/usage", () => getClaudeUsage())
   // Runtime operator settings (in-memory, reset on restart). `autoRebase` gates the
   // watcher's auto @claude-rebase ask, so the Active pane can pause/resume it.
   .get("/settings", () => ({ autoRebase: getAutoRebase() }))
