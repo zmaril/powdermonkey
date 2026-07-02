@@ -5,6 +5,7 @@ import { app } from "./app.ts";
 import { ready } from "./db.ts";
 import { startGithubWatch } from "./github-watch.ts";
 import { reconcile } from "./reconcile.ts";
+import { seedSupervisorRepo } from "./seed.ts";
 import { startSupervisorPty } from "./session-pty.ts";
 import { loadSettings } from "./settings.ts";
 
@@ -14,6 +15,15 @@ await ready();
 // Load persisted operator settings (e.g. autoRebase) into the in-memory cache the
 // watcher reads, so a toggle made before a restart is honored on boot.
 await loadSettings();
+
+// Upgrade path: make sure the supervisor's own repo is in the flat repo registry.
+// Idempotent (find-or-create by slug), and non-fatal — a `gh` hiccup must never
+// keep the supervisor from coming up.
+try {
+  await seedSupervisorRepo();
+} catch (e) {
+  console.warn("repo seed skipped:", e instanceof Error ? e.message : e);
+}
 
 // Bind the preferred port, but never crash if it's already taken — another
 // instance (a teleported worker, or just a second copy) may already hold it.
