@@ -5,12 +5,14 @@ import {
   type Milestone,
   type Note,
   type Phase,
+  type Repo,
   type Session,
   type Task,
   goals,
   milestones,
   notes,
   phases,
+  repos,
   sessions,
   tasks,
 } from "./schema.ts";
@@ -70,3 +72,4 @@ export const taskRepo = crud<Task, typeof tasks.$inferInsert>(tasks);
 export const phaseRepo = crud<Phase, typeof phases.$inferInsert>(phases);
 export const sessionRepo = crud<Session, typeof sessions.$inferInsert>(sessions);
 export const noteRepo = crud<Note, typeof notes.$inferInsert>(notes);
+export const repoRepo = crud<Repo, typeof repos.$inferInsert>(repos);

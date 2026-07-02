@@ -1,0 +1,2 @@
+ALTER TABLE "tasks" ADD COLUMN "repo_id" integer;--> statement-breakpoint
+ALTER TABLE "tasks" ADD CONSTRAINT "tasks_repo_id_repos_id_fk" FOREIGN KEY ("repo_id") REFERENCES "public"."repos"("id") ON DELETE no action ON UPDATE no action;

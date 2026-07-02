@@ -21,6 +21,9 @@ const phaseInput = Type.Object({
 
 const taskInput = Type.Object({
   title: Type.String({ minLength: 1 }),
+  // The repo this task targets (its dispatch environment). Optional at authoring —
+  // a repo-less task is backfilled to the supervisor's own repo on boot.
+  repoId: Type.Optional(Type.Number()),
   phases: Type.Optional(Type.Array(phaseInput)),
 });
 
@@ -67,7 +70,7 @@ export async function loadPlan(plan: Plan): Promise<LoadResult> {
         for (const [ti, task] of milestoneTasks.entries()) {
           const [t] = await tx
             .insert(tasks)
-            .values({ milestoneId: m.id, title: task.title, position: ti })
+            .values({ milestoneId: m.id, title: task.title, position: ti, repoId: task.repoId })
             .returning();
           counts.tasks++;
           const taskPhases = task.phases ?? [];

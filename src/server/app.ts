@@ -8,7 +8,15 @@ import { Decision, OverrideSource, ProposalStatus, SessionState } from "../share
 import { applyProposal, decideChange } from "./apply.ts";
 import { cancelTask, completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
 import { cors } from "./cors.ts";
-import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
+import {
+  goalRepo,
+  milestoneRepo,
+  noteRepo,
+  phaseRepo,
+  repoRepo,
+  sessionRepo,
+  taskRepo,
+} from "./crud.ts";
 import { pg } from "./db.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
@@ -36,6 +44,7 @@ import {
   phases as phasesTable,
   proposals as proposalsTable,
   pullRequests as pullRequestsTable,
+  repos as reposTable,
   sessionTasks as sessionTasksTable,
   sessions as sessionsTable,
   tasks as tasksTable,
@@ -89,6 +98,7 @@ const SYNC_TABLES: Record<string, { sql: string; key: string }> = Object.fromEnt
     sessionsTable,
     sessionTasksTable,
     notesTable,
+    reposTable,
     pullRequestsTable,
     proposalsTable,
     // biome-ignore lint/suspicious/noExplicitAny: heterogeneous pgTable objects, introspected generically.
@@ -669,6 +679,7 @@ export const app = new Elysia()
   .use(phasesGroup)
   .use(sessionsGroup)
   .use(resource("notes", noteRepo, models.notes))
+  .use(resource("repos", repoRepo, models.repos))
   .use(proposalsGroup)
   .use(followupsGroup)
   // Static: bundled web app, SPA fallback to index.html. Served from the package's
