@@ -11,6 +11,7 @@ import { useNeedsInputNotifications } from "../notifications.ts";
 import { useRevealEntity } from "../reveal.ts";
 import { useActiveTheme, useStore } from "../store.ts";
 import { DisconnectBanner } from "./DisconnectBanner.tsx";
+import { GlobalBar } from "./GlobalBar.tsx";
 import { ReviewOverlay } from "./ReviewOverlay.tsx";
 import { TopBar } from "./TopBar.tsx";
 import { PANE_TITLES, buildDefaultLayout, dockComponents } from "./layout.ts";
@@ -165,6 +166,9 @@ export function App() {
 
   return (
     <div style={{ height: "100vh", width: "100vw", display: "flex", flexDirection: "column" }}>
+      {/* Global status bar: always-on supervisor-wide chrome, topmost above every
+          window (agents running + Claude usage/limits). */}
+      <GlobalBar />
       {disconnected && <DisconnectBanner />}
       <TopBar />
       <div className={skinClass} style={{ flex: 1, minHeight: 0 }}>
