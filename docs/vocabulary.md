@@ -126,6 +126,27 @@ supervisor sees everything at once. Surfaces the **shared constraints**:
 The point is that five agents on one repo plus five on another is ten against your cap; the
 global bar is where that stays visible regardless of which window you're in.
 
+### Scratchpad
+Free-form operator notes, at two scopes with different lifetimes:
+
+- **Per-window (local)** — each window has its own scratchpad for the throwaway thinking of
+  *that* working context. Lives in the window's session-restore state (device-local),
+  disposable with the window.
+- **Global** — one durable, server-side scratchpad (today's single note), the standing
+  brain-dump that's always present regardless of window and syncs across devices.
+
+Local is "this context, right now"; global is the notebook you never lose.
+
+### Supervisor
+There is exactly one supervisor **process** — global awareness is the point (Decision 6): it
+must see every repo and session to reason about the shared concurrency/budget cap. What can
+vary is the supervisor **pane** you drive it through:
+
+- **Global pane (default)** — one conversation that drives any repo and sees everything.
+- **Per-window pane (opt-in, deferred)** — a supervisor conversation scoped to that window's
+  repos. Not free: a scoped supervisor is another running agent against the same cap the
+  global bar tracks. Value unproven, so it's not in v1.
+
 ## Id chips
 
 `g` goal · `m` milestone · `t` task · `#` phase · `r` repo. So `g3` is a goal, `m7` a
@@ -209,3 +230,5 @@ showing one repo."
   spike** before the global status bar's usage readout can be specified.
 - Icon resolution edge cases — private repos with no homepage (owner avatar covers it), and
   refresh cadence for a repo whose avatar/favicon later changes.
+- **Per-window supervisor pane** — worth the extra running agent (against the cap) for
+  repo-scoped focus, or is the global pane always enough? Deferred until the value is clear.
