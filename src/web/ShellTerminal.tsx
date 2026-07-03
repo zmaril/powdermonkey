@@ -8,6 +8,7 @@ import { PmIdDecorator } from "./pm-id-decorate.ts";
 import { PmIdLinkProvider } from "./pm-id-links.ts";
 import { apiUrl, wsUrl } from "./server.ts";
 import { useActiveTheme, useStore } from "./store.ts";
+import { MONO } from "./theme.ts";
 
 // The accent colour (a #RRGGBB hex) the PM-id links are tinted with — the same accent the
 // cursor uses. xterm decorations only accept #RRGGBB, which the palette tuples already are.
@@ -77,7 +78,7 @@ export function ShellTerminal({
 
     const term = new Terminal({
       fontSize: fontRef.current,
-      fontFamily: '"Fira Code Variable", ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontFamily: MONO,
       lineHeight: 1.15,
       theme: themeRef.current,
       cursorBlink: true,
