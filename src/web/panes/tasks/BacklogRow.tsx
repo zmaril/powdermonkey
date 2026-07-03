@@ -3,7 +3,7 @@ import type { Phase, Task } from "../../../server/schema.ts";
 import { Decision, ProposalOp, TaskStatus } from "../../../shared/types.ts";
 import { type EntityEdit, type Ghost, editLabel } from "../../ghosts.ts";
 import type { Indexes } from "../../plan-data.ts";
-import { IdTag, KindBadge, ProgressPill, StarToggle } from "../../plan-ui";
+import { IdTag, KindBadge, ProgressPill, RepoBadge, StarToggle, useRepo } from "../../plan-ui";
 import { ProposedStrip } from "./ProposedStrip.tsx";
 import { TaskActions } from "./TaskActions.tsx";
 import { TaskOutcome } from "./TaskOutcome.tsx";
@@ -50,6 +50,8 @@ export function BacklogRow({
   // Glows while this is a freshly-added task you haven't seen yet (-1 never matches, for the
   // ghost render path below). Hook stays above the early returns.
   const highlight = useHighlighted(task?.id ?? -1);
+  // The task's repo identity (color + icon); undefined for repo-less tasks.
+  const repo = useRepo(task?.repoId);
   const strip = (key: string, label: string, hint: string, proposalId: number, ix: number) => (
     <ProposedStrip
       key={key}
@@ -132,6 +134,7 @@ export function BacklogRow({
             </Text>
           )}
         </Box>
+        {repo && <RepoBadge repo={repo} />}
         {phases.length > 0 && <ProgressPill phases={phases} />}
         {!selection.active &&
           (terminal ? <TaskOutcome task={task} /> : <TaskActions ids={[task.id]} />)}

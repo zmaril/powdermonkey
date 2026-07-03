@@ -17,6 +17,7 @@ export { PrRow } from "./PrRow.tsx";
 export { ProgressBar } from "./ProgressBar.tsx";
 export { ReviewLink, prNumberFromUrl } from "./ReviewLink.tsx";
 export { ProgressPill } from "./ProgressPill.tsx";
+export { RepoBadge, useRepo, useSessionRepo } from "./RepoBadge.tsx";
 export { SessionActions } from "./SessionActions.tsx";
 export { SessionStateBadge } from "./SessionStateBadge.tsx";
 export { StarToggle } from "./StarToggle.tsx";

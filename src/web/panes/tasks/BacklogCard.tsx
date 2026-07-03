@@ -5,7 +5,7 @@ import { useState } from "react";
 import type { Phase, Task } from "../../../server/schema.ts";
 import { Decision, ProposalOp, TaskStatus } from "../../../shared/types.ts";
 import { type EntityEdit, type Ghost, editLabel } from "../../ghosts.ts";
-import { IdTag, KindBadge, PhaseList, StarToggle } from "../../plan-ui";
+import { IdTag, KindBadge, PhaseList, RepoBadge, StarToggle, useRepo } from "../../plan-ui";
 import { CardEditor } from "./CardEditor.tsx";
 import { GhostCardBody } from "./GhostCardBody.tsx";
 import { ProposedStrip } from "./ProposedStrip.tsx";
@@ -58,6 +58,8 @@ export function BacklogCard({
   // Glows while this is a freshly-added task you haven't seen on screen yet (-1 never
   // matches, for the ghost / no-task render paths below). Hook stays above the early returns.
   const highlight = useHighlighted(task?.id ?? -1);
+  // The task's repo identity (color + icon); undefined for repo-less tasks.
+  const repo = useRepo(task?.repoId);
   const setEdit = (on: boolean) => {
     onEditingChange?.(on);
     setEditing(on);
@@ -121,18 +123,21 @@ export function BacklogCard({
             {task.title}
           </Text>
         </Group>
-        <Button
-          size="compact-xs"
-          variant="default"
-          title="Edit title + phases together"
-          style={{ flexShrink: 0 }}
-          onClick={(e) => {
-            e.stopPropagation();
-            setEdit(true);
-          }}
-        >
-          ✎ Edit
-        </Button>
+        <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+          {repo && <RepoBadge repo={repo} />}
+          <Button
+            size="compact-xs"
+            variant="default"
+            title="Edit title + phases together"
+            style={{ flexShrink: 0 }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setEdit(true);
+            }}
+          >
+            ✎ Edit
+          </Button>
+        </Group>
       </Group>
       {/* Free-form context, kept visually apart from the phases below — the
           description is the narrative, the phases are the pure work steps. */}

@@ -105,10 +105,12 @@ scannable at a glance:
 - **Color** — a stable hue hashed from the slug, resolved to a swatch in the *active*
   theme's palette (re-skins on theme change, never clashes). Stored as a seed on the repo
   row; operator-overridable.
-- **Icon** — resolved once on registration: try the repo's homepage favicon
-  (`gh repo view --json homepageUrl` → `/favicon.ico`), else the owner avatar
-  (`https://github.com/<owner>.png`, always available). Cached under
-  `~/.powdermonkey/repos/<slug>/icon.png`, served at `/repos/:id/icon`.
+- **Icon** — resolved once per repo, lazily on the first icon request: try the repo's
+  homepage favicon (`gh repo view --json homepageUrl` → `/favicon.ico`), else the owner
+  avatar (`https://github.com/<owner>.png`, always available). Cached under
+  `~/.powdermonkey/repos/.icons/<owner>/<name>.png` — next to the cache clones, not
+  inside them, so a pre-clone icon never makes `git clone` fail on a non-empty dir —
+  and served at `/repos/:id/icon`.
 
 Task cards, session panes, and the Windows rail all render a repo's color + icon.
 
