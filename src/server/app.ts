@@ -49,6 +49,7 @@ import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { reconcile } from "./reconcile.ts";
 import { repoIconResponse } from "./repo-icon.ts";
 import { listMyRepos, searchRepos } from "./repo-picker.ts";
+import { registerRepo } from "./repo-register.ts";
 import {
   goals as goalsTable,
   milestones as milestonesTable,
@@ -377,6 +378,20 @@ const proposalsGroup = new Elysia({ prefix: "/proposals" })
 // leaves a `<!-- pm:followup -->` PR comment that github-watch slurps into the same
 // path. Just the title is required; body (context) and sourceTaskId (the task the
 // worker was on, which picks the milestone) sharpen the proposal.
+// Repos carry `register` on top of CRUD — the picker's confirm path. Fork-first:
+// a slug the operator can't push to is forked (`gh repo fork --clone=false`) and
+// the fork is registered with `upstream` recording the source (repo-register.ts).
+// Idempotent on the live set, so re-picking an added repo just returns its row.
+const reposGroup = resource("repos", repoRepo, models.repos).post(
+  "/register",
+  async ({ body, set }) => {
+    const result = await registerRepo(body.slug);
+    if (!result.ok) set.status = 502;
+    return result;
+  },
+  { body: t.Object({ slug: t.String({ pattern: "^[^/\\s]+/[^/\\s]+$" }) }) },
+);
+
 // The picker's read sources (docs/vocabulary.md § Repo): the operator's own repos
 // and a public GitHub search, both through the operator's authed `gh`. 502 when gh
 // is missing/unauthed/unreachable — the picker surfaces the message in place.
