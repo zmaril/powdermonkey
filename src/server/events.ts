@@ -52,6 +52,9 @@ export type FollowupComment = {
 /** A pull request a cloud worker opened for a task (branch `pm/task-<id>-<slug>`),
  *  reduced to the fields the supervisor reacts to. */
 export type CloudPr = {
+  /** The registered repo the PR lives in, as its "owner/name" slug. `number` is
+   *  only unique within it — (repo, number) is the PR's identity everywhere. */
+  repo: string;
   taskId: number;
   number: number;
   title: string;

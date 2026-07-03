@@ -124,6 +124,11 @@ const SYNC_TABLES: Record<string, { sql: string; key: string }> = Object.fromEnt
     return [name, { sql: `SELECT * FROM "${name}"`, key: pk }];
   }),
 );
+// pull_requests' primary key is the composite (repo, number) — no column carries the
+// `primary` flag, and PGlite's live.changes tracks rows by ONE column. Its `url` is
+// just as unique (a GitHub PR URL embeds owner/name/number) and stable, so the feed
+// keys by that; the browser collection (collections.ts) uses the same key.
+SYNC_TABLES.pull_requests.key = "url";
 
 // The two response-shaping idioms every route below repeats: 404 when a lookup
 // misses, 400 when an action reports `{ ok: false }`. Factored out so each handler

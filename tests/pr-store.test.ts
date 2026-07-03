@@ -13,6 +13,7 @@ type CloudPr = import("../src/server/events.ts").CloudPr;
 
 function pr(over: Partial<CloudPr> & { number: number }): CloudPr {
   return {
+    repo: "o/r",
     taskId: 10,
     title: "",
     url: `https://github.com/o/r/pull/${over.number}`,
@@ -44,25 +45,25 @@ test("upsert round-trips through listPrs as a CloudPr", async () => {
 
 test("mark then clear toggles the ask ledger", async () => {
   await upsertPrState(pr({ number: 2 }));
-  expect(await isRebaseAsked(2)).toBe(false);
-  await markRebaseAsked(2);
-  expect(await isRebaseAsked(2)).toBe(true);
-  await clearRebaseAsked(2);
-  expect(await isRebaseAsked(2)).toBe(false);
+  expect(await isRebaseAsked("o/r", 2)).toBe(false);
+  await markRebaseAsked("o/r", 2);
+  expect(await isRebaseAsked("o/r", 2)).toBe(true);
+  await clearRebaseAsked("o/r", 2);
+  expect(await isRebaseAsked("o/r", 2)).toBe(false);
 });
 
 test("a later upsert (poll churn) never clobbers the rebase-ask ledger", async () => {
   await upsertPrState(pr({ number: 3, checks: "PENDING" }));
-  await markRebaseAsked(3);
+  await markRebaseAsked("o/r", 3);
   // Simulate a poll tick rewriting observed state while the conflict persists.
   await upsertPrState(pr({ number: 3, checks: "FAILURE" }));
-  expect(await isRebaseAsked(3)).toBe(true); // ledger survived the upsert
+  expect(await isRebaseAsked("o/r", 3)).toBe(true); // ledger survived the upsert
   const got = (await listPrs()).find((p) => p.number === 3);
   expect(got?.checks).toBe("FAILURE"); // …but the cache column did update
 });
 
 test("isRebaseAsked is false for an unknown PR", async () => {
-  expect(await isRebaseAsked(99999)).toBe(false);
+  expect(await isRebaseAsked("o/r", 99999)).toBe(false);
 });
 
 test("agent status round-trips through the agent_* columns", async () => {

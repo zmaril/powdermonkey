@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "./db.ts";
 import type { CloudPr } from "./events.ts";
 import { type PullRequestRow, pullRequests } from "./schema.ts";
@@ -14,6 +14,7 @@ import { type PullRequestRow, pullRequests } from "./schema.ts";
  *  `ghUpdatedAt` maps back to CloudPr's `updatedAt` (GitHub's PR timestamp). */
 function rowToCloudPr(r: PullRequestRow): CloudPr {
   return {
+    repo: r.repo,
     taskId: r.taskId ?? 0,
     number: r.number,
     title: r.title,
@@ -61,6 +62,7 @@ export async function listPrs(): Promise<CloudPr[]> {
 export async function upsertPrState(pr: CloudPr): Promise<void> {
   const state = {
     taskId: pr.taskId,
+    repo: pr.repo,
     title: pr.title,
     url: pr.url,
     state: pr.state,
@@ -86,32 +88,38 @@ export async function upsertPrState(pr: CloudPr): Promise<void> {
   await db
     .insert(pullRequests)
     .values({ number: pr.number, ...state })
-    .onConflictDoUpdate({ target: pullRequests.number, set: state });
+    .onConflictDoUpdate({ target: [pullRequests.repo, pullRequests.number], set: state });
 }
+
+// The ledger helpers key by (repo, number) — a PR's full identity now that the
+// watcher polls several repos and their numbers collide freely.
+
+const prKeyWhere = (repo: string, number: number) =>
+  and(eq(pullRequests.repo, repo), eq(pullRequests.number, number));
 
 /** Has this PR already been asked to rebase its current conflict episode? Reads the
  *  ledger column — true only while `rebaseAskedAt` is set. */
-export async function isRebaseAsked(number: number): Promise<boolean> {
+export async function isRebaseAsked(repo: string, number: number): Promise<boolean> {
   const rows = await db
     .select({ rebaseAskedAt: pullRequests.rebaseAskedAt })
     .from(pullRequests)
-    .where(eq(pullRequests.number, number));
+    .where(prKeyWhere(repo, number));
   return rows[0]?.rebaseAskedAt != null;
 }
 
 /** Record that we've asked @claude to rebase this PR (stamps the ledger). */
-export async function markRebaseAsked(number: number): Promise<void> {
+export async function markRebaseAsked(repo: string, number: number): Promise<void> {
   await db
     .update(pullRequests)
     .set({ rebaseAskedAt: new Date(), updatedAt: new Date() })
-    .where(eq(pullRequests.number, number));
+    .where(prKeyWhere(repo, number));
 }
 
 /** Forget the ask, ending the conflict episode so a later, distinct conflict on the
  *  same PR re-asks. Called when the PR goes MERGEABLE or leaves the board. */
-export async function clearRebaseAsked(number: number): Promise<void> {
+export async function clearRebaseAsked(repo: string, number: number): Promise<void> {
   await db
     .update(pullRequests)
     .set({ rebaseAskedAt: null, updatedAt: new Date() })
-    .where(eq(pullRequests.number, number));
+    .where(prKeyWhere(repo, number));
 }

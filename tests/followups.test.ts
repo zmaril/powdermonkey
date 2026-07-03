@@ -17,6 +17,7 @@ type CloudPr = import("../src/server/events.ts").CloudPr;
 
 function cloudPr(over: Partial<CloudPr> & { number: number; taskId: number }): CloudPr {
   return {
+    repo: "o/r",
     title: `PR ${over.number}`,
     url: `https://github.com/o/r/pull/${over.number}`,
     state: "OPEN",

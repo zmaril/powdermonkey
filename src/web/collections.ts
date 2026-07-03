@@ -34,13 +34,15 @@ function toRow(delta: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-/** Register one server table as a live-synced collection. `key` is the primary-key
- *  property (camelCase). Everything else — the socket, snapshot, and delta mapping —
- *  is generic. */
+/** Register one server table as a live-synced collection. `key` is the property
+ *  (camelCase) the server's /sync feed keys the table's deltas by — the primary key
+ *  for the id-keyed tables; pull_requests (whose PK is the composite repo+number)
+ *  is keyed by its unique `url` instead, since the feed tracks rows by one column.
+ *  Everything else — the socket, snapshot, and delta mapping — is generic. */
 function syncedCollection<T extends object>(table: string, key: keyof T & string) {
-  return createCollection<T, number>({
+  return createCollection<T, string | number>({
     id: table,
-    getKey: (row) => row[key] as number,
+    getKey: (row) => row[key] as string | number,
     sync: {
       // UPDATE deltas are partial (only changed columns); TanStack merges them onto
       // the existing row instead of overwriting with the nulls PGlite sends for the
@@ -62,7 +64,7 @@ function syncedCollection<T extends object>(table: string, key: keyof T & string
             if (c.__op__ === "RESET") {
               truncate();
             } else if (c.__op__ === "DELETE") {
-              write({ type: "delete", key: row[key] as number });
+              write({ type: "delete", key: row[key] as string | number });
             } else if (c.__op__ === "INSERT") {
               write({ type: "insert", value: row as T });
             } else {
@@ -97,5 +99,5 @@ export const sessionTasksCollection = syncedCollection<SessionLink & { id: numbe
 export const taskCommentsCollection = syncedCollection<TaskComment>("task_comments", "id");
 export const notesCollection = syncedCollection<Note>("notes", "id");
 export const reposCollection = syncedCollection<Repo>("repos", "id");
-export const pullRequestsCollection = syncedCollection<CloudPr>("pull_requests", "number");
+export const pullRequestsCollection = syncedCollection<CloudPr>("pull_requests", "url");
 export const proposalsCollection = syncedCollection<Proposal>("proposals", "id");

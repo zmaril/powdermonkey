@@ -1,6 +1,6 @@
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { AgentState, MergeableState, PrState } from "../shared/types.ts";
-import { taskRepo } from "./crud.ts";
+import { repoRepo, taskRepo } from "./crud.ts";
 import { db } from "./db.ts";
 import {
   type AgentStatus,
@@ -10,7 +10,7 @@ import {
   type FollowupComment,
 } from "./events.ts";
 import { ingestFollowups } from "./followups.ts";
-import { askClaude, gh, resolveRepo } from "./gh.ts";
+import { askClaude, gh } from "./gh.ts";
 import { pullMain } from "./git.ts";
 import {
   clearRebaseAsked,
@@ -20,13 +20,14 @@ import {
   upsertPrState,
 } from "./pr-store.ts";
 import { reconcile } from "./reconcile.ts";
-import { phases } from "./schema.ts";
+import { phases, type Repo, tasks } from "./schema.ts";
 import { getAutoRebase } from "./settings.ts";
 
 // The one loop. It polls GitHub for the PRs our cloud workers open — branches
-// named `pm/task-<id>-<slug>` — diffs each tick against the last-seen state, and
-// emits typed events on the bus. Independent subscribers (below) react; the
-// watcher itself owns no task/session logic.
+// named `pm/task-<id>-<slug>` — across EVERY registered repo, diffs each tick
+// against the last-seen state, and emits typed events on the bus. Independent
+// subscribers (below) react; the watcher itself owns no task/session logic.
+// A PR's identity is (repo, number): numbers collide freely across repos.
 //
 // Division of truth:
 //   • GitHub PR state is the lifecycle *clock* (dispatched → PR open → merged)
@@ -37,9 +38,9 @@ import { getAutoRebase } from "./settings.ts";
 //
 // "Realtime" is efficient polling: GitHub offers no client push for repo events
 // short of webhooks (which need a public endpoint — PowderMonkey is localhost).
-// A 10s GraphQL poll over `gh` auth costs ~1 point of a 5000/hr budget and feels
-// live enough. Live agent micro-state (needs-you / retry) is deliberately NOT
-// tracked here — that's the Claude web/mobile app's job.
+// A 10s GraphQL poll over `gh` auth costs ~1 point per registered repo of a
+// 5000/hr budget and feels live enough. Live agent micro-state (needs-you /
+// retry) is deliberately NOT tracked here — that's the Claude web/mobile app's job.
 
 const INTERVAL_MS = Number(process.env.PM_GITHUB_WATCH_INTERVAL_MS ?? 10_000);
 // Branch → task id: `pm/task-166-archive-merged-sessions` → 166. Tolerates the
@@ -59,14 +60,15 @@ const GQL = `query($owner:String!,$name:String!){
   }
 }`;
 
-/** Fetch the current state of every PR we can tie to a task — by branch name
- *  (`pm/task-<id>-…`) or, failing that, its commit trailers (see resolveTaskId).
- *  Returns `null` on a fetch failure (no gh, no auth, network blip, bad JSON) so
- *  the caller can leave the last-known state untouched; an empty array means the
- *  fetch succeeded and there genuinely are no matching PRs. */
-export async function fetchCloudPrs(): Promise<CloudPr[] | null> {
-  const repo = await resolveRepo();
-  if (!repo) return null;
+/** Fetch the current state of every PR we can tie to a task in ONE registered
+ *  repo — by branch name (`pm/task-<id>-…`) or, failing that, its commit trailers
+ *  (see resolveTaskId). Returns `null` on a fetch failure (no gh, no auth, network
+ *  blip, bad JSON) so the caller can leave that repo's last-known state untouched;
+ *  an empty array means the fetch succeeded and there genuinely are no matching
+ *  PRs. Exported for the odd manual probe; the loop drives it per registered repo. */
+export async function fetchRepoPrs(
+  repo: Pick<Repo, "id" | "slug" | "owner" | "name">,
+): Promise<CloudPr[] | null> {
   const r = await gh([
     "api",
     "graphql",
@@ -78,7 +80,10 @@ export async function fetchCloudPrs(): Promise<CloudPr[] | null> {
     `query=${GQL}`,
   ]);
   if (!r.ok) {
-    console.warn("github-watch: gh graphql failed:", r.stderr.trim().slice(0, 200));
+    console.warn(
+      `github-watch: gh graphql failed for ${repo.slug}:`,
+      r.stderr.trim().slice(0, 200),
+    );
     return null;
   }
   // biome-ignore lint/suspicious/noExplicitAny: untyped GraphQL JSON, narrowed below.
@@ -94,10 +99,11 @@ export async function fetchCloudPrs(): Promise<CloudPr[] | null> {
     const commitText = (n.history?.nodes ?? [])
       .map((c: { commit?: { messageBody?: string } }) => c.commit?.messageBody ?? "")
       .join("\n");
-    const taskId = await resolveTaskId(n.headRefName ?? "", commitText);
+    const taskId = await resolveTaskId(n.headRefName ?? "", commitText, repo.id);
     if (taskId == null) continue; // can't tie this PR to a task — skip it
     const lastAgent = lastAgentComment(n.comments?.nodes ?? []);
     prs.push({
+      repo: repo.slug,
       taskId,
       number: n.number,
       title: n.title ?? "",
@@ -299,16 +305,35 @@ async function taskIdForPhaseIds(ids: number[]): Promise<number | null> {
   return rows[0]?.taskId ?? null;
 }
 
+/** May task `taskId` own a PR observed in repo `repoId`? True when the task is
+ *  unknown locally (tolerated — persistence must not depend on the row existing),
+ *  repo-less (the pre-registry path), or pinned to that very repo. False only for
+ *  a task pinned elsewhere: with several repos watched, branch names and trailer
+ *  ids can collide across repos, and a PR must never claim another repo's task. */
+async function taskInRepo(taskId: number, repoId: number): Promise<boolean> {
+  const [t] = await db.select({ repoId: tasks.repoId }).from(tasks).where(eq(tasks.id, taskId));
+  return !t || t.repoId == null || t.repoId === repoId;
+}
+
 /** Map a PR to its task. The branch name (`pm/task-<id>-…`) is the happy path, but
  *  cloud workers don't always follow it (e.g. a default `claude/…` branch). When
  *  the branch carries no id, fall back to the commit trailers, which always do:
- *  a `PM-Task:` names the task directly; a `PM-Phase:` resolves through the DB. */
-async function resolveTaskId(headRefName: string, commitText: string): Promise<number | null> {
+ *  a `PM-Task:` names the task directly; a `PM-Phase:` resolves through the DB.
+ *  Every candidate passes the taskInRepo guard — a resolution that points at a
+ *  task pinned to a different repo is rejected (falling through to the next
+ *  candidate) rather than mis-tying the PR. Exported for tests. */
+export async function resolveTaskId(
+  headRefName: string,
+  commitText: string,
+  repoId: number,
+): Promise<number | null> {
   const m = BRANCH_RE.exec(headRefName);
-  if (m) return Number(m[1]);
+  if (m && (await taskInRepo(Number(m[1]), repoId))) return Number(m[1]);
   const { taskIds, phaseIds } = parseTrailerIds(commitText);
-  if (taskIds.length > 0) return taskIds[0];
-  return taskIdForPhaseIds(phaseIds);
+  for (const id of taskIds) if (await taskInRepo(id, repoId)) return id;
+  const viaPhase = await taskIdForPhaseIds(phaseIds);
+  if (viaPhase != null && (await taskInRepo(viaPhase, repoId))) return viaPhase;
+  return null;
 }
 
 /** Signature of the fields whose change we care about — drives "did this PR
@@ -327,14 +352,20 @@ function sig(pr: CloudPr): string {
 export type CloudEventType = "pr.opened" | "pr.updated" | "pr.merged" | "pr.closed";
 export type CloudEvent = { type: CloudEventType; pr: CloudPr };
 
-/** Pure diff: given the previously-seen PRs (keyed by number) and the freshly
+/** A PR's identity across the watched repos — `number` alone collides once more
+ *  than one repo is polled. Keys the last-seen map and the diff. Exported for tests. */
+export function prKey(pr: Pick<CloudPr, "repo" | "number">): string {
+  return `${pr.repo}#${pr.number}`;
+}
+
+/** Pure diff: given the previously-seen PRs (keyed by prKey) and the freshly
  *  fetched set, return the events to emit. Exported for tests; mutates nothing.
  *  A PR seen for the first time is classified by its current state — which is how
  *  the startup catch-up (empty `prev`) replays existing PRs as their real state. */
-export function diffCloudPrs(prev: Map<number, CloudPr>, next: CloudPr[]): CloudEvent[] {
+export function diffCloudPrs(prev: Map<string, CloudPr>, next: CloudPr[]): CloudEvent[] {
   const events: CloudEvent[] = [];
   for (const pr of next) {
-    const before = prev.get(pr.number);
+    const before = prev.get(prKey(pr));
     if (!before) {
       if (pr.merged) events.push({ type: "pr.merged", pr });
       else if (pr.state === PrState.Closed) events.push({ type: "pr.closed", pr });
@@ -398,30 +429,28 @@ const REBASE_MESSAGE =
 // scoped to the *ask* alone (in rebaseAction); a MERGEABLE seen during catch-up
 // still clears, so a conflict resolved during downtime can't leave a stale flag.
 async function maybeAskRebase(pr: CloudPr, meta: CloudEventMeta): Promise<void> {
-  const action = rebaseAction(pr.mergeable, await isRebaseAsked(pr.number), meta.initial);
+  const action = rebaseAction(pr.mergeable, await isRebaseAsked(pr.repo, pr.number), meta.initial);
   if (action === "clear") {
-    await clearRebaseAsked(pr.number);
+    await clearRebaseAsked(pr.repo, pr.number);
     return;
   }
   if (action !== "ask") return;
   if (!getAutoRebase()) return; // operator paused auto-rebase — drive it by hand
-  await markRebaseAsked(pr.number); // mark first, so a failed post doesn't loop-retry
-  const repo = await resolveRepo();
-  const slug = repo ? `${repo.owner}/${repo.name}` : undefined;
-  const r = await askClaude(pr.number, REBASE_MESSAGE, slug);
+  await markRebaseAsked(pr.repo, pr.number); // mark first, so a failed post doesn't loop-retry
+  const r = await askClaude(pr.number, REBASE_MESSAGE, pr.repo);
   if (r.ok) {
-    console.log(`github-watch: PR #${pr.number} conflicting → asked @claude to rebase`);
+    console.log(`github-watch: ${pr.repo}#${pr.number} conflicting → asked @claude to rebase`);
   } else {
-    await clearRebaseAsked(pr.number); // post failed — let a later tick retry
+    await clearRebaseAsked(pr.repo, pr.number); // post failed — let a later tick retry
     console.warn(
-      `github-watch: rebase ask for PR #${pr.number} failed:`,
+      `github-watch: rebase ask for ${pr.repo}#${pr.number} failed:`,
       r.stderr.trim().slice(0, 200),
     );
   }
 }
 
 // ---- the loop --------------------------------------------------------------
-let lastByNumber = new Map<number, CloudPr>();
+let lastByKey = new Map<string, CloudPr>();
 
 /** The watcher's latest known PR state, one per task-linked PR. Served to the UI
  *  (GET /cloud-prs) for the Active panel's CI / merge-conflict badges. Read from
@@ -432,16 +461,27 @@ export function currentCloudPrs(): Promise<CloudPr[]> {
 }
 
 async function tick(initial: boolean): Promise<number> {
-  const prs = await fetchCloudPrs();
-  if (prs === null) return 0; // fetch failed — keep last-known state untouched
-  const events = diffCloudPrs(lastByNumber, prs);
+  // One GraphQL fetch per live registered repo. A repo whose fetch fails carries
+  // its last-known PRs forward untouched — identical entries diff to nothing, so
+  // a blip never re-classifies (or silently drops) that repo's PRs, while the
+  // repos that did fetch still emit their changes.
+  const next = new Map<string, CloudPr>();
+  for (const repo of await repoRepo.list()) {
+    const prs = await fetchRepoPrs(repo);
+    if (prs === null) {
+      for (const [k, p] of lastByKey) if (p.repo === repo.slug) next.set(k, p);
+      continue;
+    }
+    for (const p of prs) next.set(prKey(p), p);
+  }
+  const events = diffCloudPrs(lastByKey, [...next.values()]);
   // Persist the changed PRs *before* emitting, so their rows exist when the rebase
   // subscriber reads/writes the ask ledger. upsertPrState only writes cache
   // columns — it never disturbs rebaseAskedAt. Unchanged PRs already have a row
   // from a prior tick, so we skip the write churn for them.
   for (const ev of events) await upsertPrState(ev.pr);
   for (const ev of events) await bus.emit(ev.type, ev.pr, { initial });
-  lastByNumber = new Map(prs.map((p) => [p.number, p]));
+  lastByKey = next;
   return events.length;
 }
 
@@ -449,14 +489,14 @@ async function tick(initial: boolean): Promise<number> {
  *  so it only acts on real changes since the last tick. */
 export async function syncCloudPrs(): Promise<{ tracked: number; emitted: number }> {
   const emitted = await tick(false);
-  return { tracked: lastByNumber.size, emitted };
+  return { tracked: lastByKey.size, emitted };
 }
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let running = false;
 
 /** Start the poll loop (no-op if disabled via PM_GITHUB_WATCH_INTERVAL_MS=0 or
- *  already started). The first tick is the startup catch-up: `lastByNumber` is
+ *  already started). The first tick is the startup catch-up: `lastByKey` is
  *  empty, so every existing PR is seen as new and its current state applied —
  *  this is how PRs opened/merged before boot get picked up. It's tagged
  *  initial:true so notify-style subscribers can stay quiet about old PRs. */
@@ -515,7 +555,7 @@ function registerSubscribers(): void {
   bus.on("pr.updated", maybeAskRebase);
   // A PR leaving the board ends its conflict episode — clear the ledger so a reopen
   // starts clean.
-  const forget = (pr: CloudPr) => clearRebaseAsked(pr.number);
+  const forget = (pr: CloudPr) => clearRebaseAsked(pr.repo, pr.number);
   bus.on("pr.merged", forget);
   bus.on("pr.closed", forget);
 

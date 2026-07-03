@@ -8,6 +8,8 @@ import { setupTestDb } from "./db-harness.ts";
 await setupTestDb();
 const {
   diffCloudPrs,
+  prKey,
+  resolveTaskId,
   parseTrailerIds,
   parseStatusComment,
   statusFromComments,
@@ -18,6 +20,7 @@ type CloudPr = import("../src/server/events.ts").CloudPr;
 
 function pr(over: Partial<CloudPr> & { number: number; taskId: number }): CloudPr {
   return {
+    repo: "o/r",
     title: `PR ${over.number}`,
     url: `https://github.com/o/r/pull/${over.number}`,
     state: "OPEN",
@@ -36,7 +39,7 @@ function pr(over: Partial<CloudPr> & { number: number; taskId: number }): CloudP
   };
 }
 
-const index = (prs: CloudPr[]) => new Map(prs.map((p) => [p.number, p]));
+const index = (prs: CloudPr[]) => new Map(prs.map((p) => [prKey(p), p]));
 
 test("first sight of an open PR → pr.opened", () => {
   const evs = diffCloudPrs(new Map(), [pr({ number: 1, taskId: 10 })]);
@@ -297,4 +300,51 @@ test("only the changed PR among many emits", () => {
   ];
   const evs = diffCloudPrs(prev, next);
   expect(evs).toEqual([{ type: "pr.merged", pr: next[1] }]);
+});
+
+// ---- multi-repo -------------------------------------------------------------
+// The watcher polls every registered repo, so a PR's identity is (repo, number):
+// the same number in two repos must be two distinct PRs to the diff.
+
+test("prKey tells same-numbered PRs in different repos apart", () => {
+  expect(prKey(pr({ number: 1, taskId: 10 }))).not.toBe(
+    prKey(pr({ number: 1, taskId: 20, repo: "o/other" })),
+  );
+});
+
+test("same-numbered PRs across repos diff independently", () => {
+  const inR = pr({ number: 1, taskId: 10 });
+  const inOther = pr({ number: 1, taskId: 20, repo: "o/other" });
+  const prev = index([inR, inOther]);
+  const next = [inR, { ...inOther, merged: true, state: "MERGED" as const }];
+  const evs = diffCloudPrs(prev, next);
+  expect(evs).toEqual([{ type: "pr.merged", pr: next[1] }]);
+});
+
+// The task↔PR tie is guarded per repo: a branch/trailer id that resolves to a task
+// pinned to a DIFFERENT repo must not claim it — with several repos watched, ids
+// collide freely across them. (Unknown and repo-less tasks stay tolerated.)
+test("resolveTaskId rejects a task pinned to another repo and falls through to trailers", async () => {
+  const { ready } = await import("../src/server/db.ts");
+  await ready();
+  const { goalRepo, milestoneRepo, taskRepo, repoRepo } = await import("../src/server/crud.ts");
+  const repoA = await repoRepo.create({ slug: "o/a", owner: "o", name: "a" });
+  const repoB = await repoRepo.create({ slug: "o/b", owner: "o", name: "b" });
+  const goal = await goalRepo.create({ title: "g" });
+  const ms = await milestoneRepo.create({ goalId: goal.id, title: "m" });
+  const inA = await taskRepo.create({ milestoneId: ms.id, title: "in a", repoId: repoA.id });
+  const inB = await taskRepo.create({ milestoneId: ms.id, title: "in b", repoId: repoB.id });
+  const repoless = await taskRepo.create({ milestoneId: ms.id, title: "loose" });
+
+  // Happy path: the branch id resolves when the task is pinned to the polled repo…
+  expect(await resolveTaskId(`pm/task-${inA.id}-x`, "", repoA.id)).toBe(inA.id);
+  // …a repo-less task and an id with no local row stay tolerated…
+  expect(await resolveTaskId(`pm/task-${repoless.id}-x`, "", repoA.id)).toBe(repoless.id);
+  expect(await resolveTaskId("pm/task-999999-x", "", repoA.id)).toBe(999999);
+  // …but a task pinned to the OTHER repo is rejected outright…
+  expect(await resolveTaskId(`pm/task-${inB.id}-x`, "", repoA.id)).toBeNull();
+  // …and a rejected branch id falls through to a trailer that does belong here.
+  expect(
+    await resolveTaskId(`pm/task-${inB.id}-x`, `PM-Task: ${inA.id}`, repoA.id),
+  ).toBe(inA.id);
 });

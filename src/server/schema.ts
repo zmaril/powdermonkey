@@ -1,4 +1,13 @@
-import { bigint, boolean, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  bigint,
+  boolean,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core";
 import {
   type AgentState,
   type CheckRollupState,
@@ -210,52 +219,61 @@ export const notes = pgTable("notes", {
 //     conflict. The poll upsert rewrites the cache columns and never touches this
 //     one; only the ask logic (github-watch) writes it. That split is the whole
 //     reason the two can share a row safely.
-// Keyed by the GitHub PR `number` (unique per repo) — supplied by us, not generated.
-export const pullRequests = pgTable("pull_requests", {
-  number: integer("number").primaryKey(),
-  // The task this PR is tied to, resolved by the watcher from the branch name or
-  // commit trailers. Plain integer, *not* a FK: a branch like `pm/task-166` yields
-  // 166 whether or not that task row exists locally, and persistence must not throw
-  // on the mismatch.
-  taskId: integer("task_id").notNull(),
-  title: text("title").notNull().default(""),
-  url: text("url").notNull(),
-  state: text("state").$type<PrState>().notNull(),
-  isDraft: boolean("is_draft").notNull().default(false),
-  merged: boolean("merged").notNull().default(false), // lint-allow-string: DB column name
-  // statusCheckRollup state (SUCCESS / FAILURE / PENDING / …), null when none.
-  checks: text("checks").$type<CheckRollupState>(),
-  // MERGEABLE / CONFLICTING / UNKNOWN, or null — GitHub computes it lazily.
-  mergeable: text("mergeable").$type<MergeableState>(),
-  headRefName: text("head_ref_name").notNull(),
-  // GitHub's own PR updatedAt (ISO string). Named apart from the row's `updatedAt`
-  // below, which tracks when *we* last wrote the row.
-  ghUpdatedAt: text("gh_updated_at").notNull(),
-  // The worker's self-reported status, parsed from its newest `<!-- pm:status -->`-marked
-  // PR comment (see github-watch.parseStatusComment + the powdermonkey skill). Cache
-  // columns like the GitHub state above — overwritten every tick, null when the PR
-  // has no status comment. `agentState` is the typed lifecycle (AgentState) or null
-  // for an unrecognised word; `agentBody` is the raw comment kept for the UI's
-  // human-readable glance; `agentUpdatedAt` is the comment's GitHub edit time.
-  agentState: text("agent_state").$type<AgentState>(),
-  agentSummary: text("agent_summary"),
-  agentNext: text("agent_next"),
-  // The cloud session that authored the status comment (the worker-stamped
-  // `claude.ai/code/…` link) — a direct PR→session map, see events.ts AgentStatus.
-  agentSessionUrl: text("agent_session_url"),
-  agentBody: text("agent_body"),
-  agentUpdatedAt: text("agent_updated_at"),
-  // The agent's newest PR comment (footer/marker stripped) — shown live on the worker
-  // card. Cache column like the rest; overwritten each poll, null until it speaks.
-  lastComment: text("last_comment"),
-  lastCommentAt: text("last_comment_at"),
-  lastCommentUrl: text("last_comment_url"),
-  // The ledger: when set, we've already asked @claude to rebase this conflict
-  // episode; cleared when the PR goes MERGEABLE (or leaves the board) so a later,
-  // distinct conflict re-asks. Survives restarts — that's the point of this table.
-  rebaseAskedAt: timestamp("rebase_asked_at"),
-  ...timestamps,
-});
+// Keyed by (repo, number) — both supplied by us, not generated. A GitHub PR number
+// is only unique within its repo, and the watcher polls every registered repo.
+export const pullRequests = pgTable(
+  "pull_requests",
+  {
+    // The GitHub repo the PR lives in, as its "owner/name" slug. A plain string,
+    // *not* an FK into `repos`: rows must survive a repo being archived or re-added
+    // (they're a cache + a ledger, not part of the registry).
+    repo: text("repo").notNull(),
+    number: integer("number").notNull(),
+    // The task this PR is tied to, resolved by the watcher from the branch name or
+    // commit trailers. Plain integer, *not* a FK: a branch like `pm/task-166` yields
+    // 166 whether or not that task row exists locally, and persistence must not throw
+    // on the mismatch.
+    taskId: integer("task_id").notNull(),
+    title: text("title").notNull().default(""),
+    url: text("url").notNull(),
+    state: text("state").$type<PrState>().notNull(),
+    isDraft: boolean("is_draft").notNull().default(false),
+    merged: boolean("merged").notNull().default(false), // lint-allow-string: DB column name
+    // statusCheckRollup state (SUCCESS / FAILURE / PENDING / …), null when none.
+    checks: text("checks").$type<CheckRollupState>(),
+    // MERGEABLE / CONFLICTING / UNKNOWN, or null — GitHub computes it lazily.
+    mergeable: text("mergeable").$type<MergeableState>(),
+    headRefName: text("head_ref_name").notNull(),
+    // GitHub's own PR updatedAt (ISO string). Named apart from the row's `updatedAt`
+    // below, which tracks when *we* last wrote the row.
+    ghUpdatedAt: text("gh_updated_at").notNull(),
+    // The worker's self-reported status, parsed from its newest `<!-- pm:status -->`-marked
+    // PR comment (see github-watch.parseStatusComment + the powdermonkey skill). Cache
+    // columns like the GitHub state above — overwritten every tick, null when the PR
+    // has no status comment. `agentState` is the typed lifecycle (AgentState) or null
+    // for an unrecognised word; `agentBody` is the raw comment kept for the UI's
+    // human-readable glance; `agentUpdatedAt` is the comment's GitHub edit time.
+    agentState: text("agent_state").$type<AgentState>(),
+    agentSummary: text("agent_summary"),
+    agentNext: text("agent_next"),
+    // The cloud session that authored the status comment (the worker-stamped
+    // `claude.ai/code/…` link) — a direct PR→session map, see events.ts AgentStatus.
+    agentSessionUrl: text("agent_session_url"),
+    agentBody: text("agent_body"),
+    agentUpdatedAt: text("agent_updated_at"),
+    // The agent's newest PR comment (footer/marker stripped) — shown live on the worker
+    // card. Cache column like the rest; overwritten each poll, null until it speaks.
+    lastComment: text("last_comment"),
+    lastCommentAt: text("last_comment_at"),
+    lastCommentUrl: text("last_comment_url"),
+    // The ledger: when set, we've already asked @claude to rebase this conflict
+    // episode; cleared when the PR goes MERGEABLE (or leaves the board) so a later,
+    // distinct conflict re-asks. Survives restarts — that's the point of this table.
+    rebaseAskedAt: timestamp("rebase_asked_at"),
+    ...timestamps,
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.repo, t.number] }) }),
+);
 
 // Operator runtime settings — a single-row table (id always 1) of toggles that
 // should survive a restart. Starts with just `autoRebase` (whether the watcher
