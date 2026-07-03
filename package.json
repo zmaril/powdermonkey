@@ -42,7 +42,7 @@
     "@pierre/trees": "^1.0.0-beta.4",
     "@sinclair/typebox": "0.34.49",
     "@tabler/icons-react": "^3.44.0",
-    "@tanstack/db": "^0.6.12",
+    "@tanstack/db": "^0.6.14",
     "@tanstack/react-db": "^0.1.90",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
