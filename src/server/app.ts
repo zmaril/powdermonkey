@@ -25,7 +25,7 @@ import { openSessionEditor } from "./editor.ts";
 import { fanOutTasks } from "./fanout.ts";
 import { proposeFollowup } from "./followups.ts";
 import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
-import { models } from "./models.ts";
+import { models, taskKindSchema } from "./models.ts";
 import { PUBLIC_DIR } from "./paths.ts";
 import { loadPlan, planSchema } from "./plan.ts";
 import { getFileContents, getPrReview, postPrComment, submitReview } from "./pr-review.ts";
@@ -190,6 +190,8 @@ const tasksGroup = resource("tasks", taskRepo, models.tasks)
     body: t.Object({
       milestoneId: t.Number(),
       title: t.String({ minLength: 1 }),
+      kind: t.Optional(taskKindSchema),
+      description: t.Optional(t.String()),
       repoIds: t.Array(t.Number(), { minItems: 1 }),
       phases: t.Optional(t.Array(t.Object({ name: t.String({ minLength: 1 }) }))),
       position: t.Optional(t.Number()),

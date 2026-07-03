@@ -2,6 +2,7 @@ import { type Static, Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { PhaseStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
+import { taskKindSchema } from "./models.ts";
 import { goals, milestones, phases, tasks } from "./schema.ts";
 
 // A plan is authored as a nested, id-less tree: goal → milestones → tasks → phases.
@@ -21,6 +22,11 @@ const phaseInput = Type.Object({
 
 const taskInput = Type.Object({
   title: Type.String({ minLength: 1 }),
+  // What flavour of work (task | bug | spike); defaults to `task`. Descriptive only —
+  // it never templates phases (discovery-first work can't be pre-canned).
+  kind: Type.Optional(taskKindSchema),
+  // Free-form context (why / what's known), kept apart from phases (pure work).
+  description: Type.Optional(Type.String()),
   // The repo this task targets (its dispatch environment). Optional at authoring —
   // a repo-less task is backfilled to the supervisor's own repo on boot.
   repoId: Type.Optional(Type.Number()),
@@ -83,6 +89,8 @@ export async function loadPlan(plan: Plan): Promise<LoadResult> {
             .values({
               milestoneId: m.id,
               title: task.title,
+              kind: task.kind,
+              description: task.description,
               position: ti,
               repoId: task.repoId ?? inheritedRepoId,
             })
