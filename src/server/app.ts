@@ -4,10 +4,17 @@ import type { TSchema } from "@sinclair/typebox";
 import { getTableColumns, getTableName } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 import { match, P } from "ts-pattern";
-import { Decision, OverrideSource, ProposalStatus, SessionState } from "../shared/types.ts";
+import {
+  CommentAuthor,
+  Decision,
+  OverrideSource,
+  ProposalStatus,
+  SessionState,
+} from "../shared/types.ts";
 import { applyProposal, decideChange } from "./apply.ts";
 import { dumpSnapshot, type SqlClient } from "./backup.ts";
 import { getClaudeUsage } from "./claude-usage.ts";
+import { appendComment, deleteComment, listComments } from "./comments.ts";
 import { cancelTask, completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
 import { cors } from "./cors.ts";
 import {
@@ -51,6 +58,7 @@ import {
   repos as reposTable,
   sessions as sessionsTable,
   sessionTasks as sessionTasksTable,
+  taskComments as taskCommentsTable,
   tasks as tasksTable,
 } from "./schema.ts";
 import {
@@ -101,6 +109,7 @@ const SYNC_TABLES: Record<string, { sql: string; key: string }> = Object.fromEnt
     phasesTable,
     sessionsTable,
     sessionTasksTable,
+    taskCommentsTable,
     notesTable,
     reposTable,
     pullRequestsTable,
@@ -243,6 +252,28 @@ const tasksGroup = resource("tasks", taskRepo, models.tasks)
   )
   .post("/:id/reopen", async ({ params, set }) =>
     orNotFound(set, await reopenTask(Number(params.id))),
+  )
+  // The task's diary — append-only comments (see comments.ts). List reads oldest
+  // first; append is the ONLY write shape (no PATCH exists — a line is never
+  // edited); delete takes one line back outright. Changes stream to the browser
+  // through the task_comments synced collection like every other table.
+  .get("/:id/comments", ({ params }) => listComments(Number(params.id)))
+  .post(
+    "/:id/comments",
+    async ({ params, body, set }) =>
+      orNotFound(set, await appendComment(Number(params.id), body.body, body.author)),
+    {
+      body: t.Object({
+        body: t.String({ minLength: 1 }),
+        // Who's speaking — operator (default) or supervisor, same split as sourceBody.
+        author: t.Optional(
+          t.Union([t.Literal(CommentAuthor.Operator), t.Literal(CommentAuthor.Supervisor)]),
+        ),
+      }),
+    },
+  )
+  .delete("/:id/comments/:commentId", async ({ params, set }) =>
+    orNotFound(set, await deleteComment(Number(params.id), Number(params.commentId))),
   );
 
 // Phases carry the same complete/reopen on top of CRUD — the grain at which a
