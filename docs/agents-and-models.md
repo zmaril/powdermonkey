@@ -14,20 +14,42 @@ runs it):
 Task ─ targets ─→ Repo                       (where — existing)
      └ runs on  ─→ Runtime                    (who — new)
 
-Runtime = Agent  ×  Location  ×  Model
-          claude    local        (backend-specific model id)
-          codex     cloud
-          pi
+Runtime = Agent  ×  Location  ×  ModelChoice
+          claude    local        └ Model  ×  Version  ×  Effort
+          codex     cloud          opus       4.8         high
+          pi                       sonnet     5           medium
 ```
 
 - **Agent** — the coding tool: `claude`, `codex` (OpenAI Codex CLI), `pi` (Pi.dev). Extensible.
 - **Location** — `local` (a worktree/checkout on this machine, using your installed tool + git
   auth) or `cloud` (an isolated sandbox the provider runs, opening a PR via its GitHub App).
-- **Model** — the specific model the agent runs, enumerable per agent.
+- **ModelChoice** — not one flat id but three nested picks: **Model** (the family — `opus`,
+  `sonnet`, `gpt-5-codex`), **Version** (the dated release under it — `opus 4.8`, `sonnet 5`),
+  and **Reasoning effort** (`low | medium | high | xhigh | max`, where the agent/model exposes
+  it). Each is enumerated per agent; the last two default sensibly so the common case is one pick.
 
 A Task **inherits a default Runtime** from its repo → milestone → goal (same cascade as the
 repo default), pre-filled and freely overridden. That's the "mix and match many models" —
 per-task selection, rarely typed by hand.
+
+## Model, version, and reasoning effort
+
+"Model" is really three nested dimensions, and collapsing them into one string is the mistake
+to avoid — it's what makes a picker unusable and a default un-inheritable:
+
+- **Model** — the family: `opus`, `sonnet`, `haiku` for `claude`; `gpt-5-codex` for `codex`.
+  This is the choice you actually reason about ("cheap and fast" vs "deep").
+- **Version** — the dated release pinning that family: `opus 4.8`, `sonnet 5`, `haiku 4.5`.
+  Defaults to the agent's current release for the family, but pinnable so a task is reproducible
+  and a version bump can't silently change a running plan's behavior.
+- **Reasoning effort** — `low | medium | high | xhigh | max`, the thinking-budget knob, **only
+  where the agent/model exposes it**. Not every backend has it (a fixed-effort model has none),
+  so it is a *capability*, not a required field — the picker shows the effort control only when
+  the selected model advertises efforts, and hides it otherwise.
+
+The three cascade: pick a Model, its Versions narrow, its Efforts narrow again. A `ModelChoice`
+is therefore `{ model, version?, effort? }` — the two optionals resolve to the agent's default
+release and default effort at dispatch, so `{ model: "opus" }` is a complete, valid choice.
 
 ## The invariant that makes this tractable
 
@@ -42,11 +64,23 @@ Adding an agent must not mean forking `dispatch.ts`. A Runtime is a **registry e
 typed spec — the same anti-slop stance as the action catalog in `supervisor-copilot.md`:
 
 ```ts
+type Effort = "low" | "medium" | "high" | "xhigh" | "max"
+
+interface ModelDef {
+  id: string                               // family: "opus" | "sonnet" | "gpt-5-codex"
+  versions: string[]                       // dated releases, newest first: ["4.8", "4.7"]
+  defaultVersion: string                   // pre-filled version for this family
+  efforts?: Effort[]                       // present only if the model exposes effort
+  defaultEffort?: Effort                   // pre-filled effort, when efforts is present
+}
+
+interface ModelChoice { model: string; version?: string; effort?: Effort }
+
 interface Agent {
   id: "claude" | "codex" | "pi"          // extensible
   locations: ("local" | "cloud")[]        // which it supports
-  models(): ModelId[]                      // static list or queried from the tool
-  command(ctx): string                     // invocation template: {prompt_file} {cwd} {model}
+  models(): ModelDef[]                     // families + versions + efforts; static or queried
+  command(ctx): string                     // template: {prompt_file} {cwd} {model} {version} {effort}
   tty: boolean                             // needs a PTY? (claude --remote does)
   caps: {
     opensPr: boolean                       // cloud agents open their own PR
@@ -57,6 +91,12 @@ interface Agent {
   capture(output): { sessionUrl?: string; branch?: string }  // read back the run's handle
 }
 ```
+
+`models()` returns families, not flat ids, so a picker can cascade Model → Version → Effort and
+a default can be inherited at any of the three levels. `command(ctx)` interpolates the resolved
+choice: `{model} {version}` map to the agent's model flag (`claude --model opus-4.8`,
+`codex --model gpt-5-codex`) and `{effort}` to its effort flag where the model has one, dropped
+otherwise.
 
 `PM_DISPATCH_CMD` / `PM_SESSION_CMD` become the *default* templates for the `claude` entry;
 every other agent is another entry. One registry; add an agent = add a row.
@@ -89,8 +129,10 @@ Agent and model vary within it, but **local vs cloud is where the real differenc
 
 - **Agent registry** (Settings): which agents are available, their models, local binary paths /
   API keys, and whether cloud is enabled. This is where `codex`/`pi` get turned on.
-- **Per-task Runtime picker** — agent + location + model, pre-filled from the inherited default.
-  Dispatch resolves the task's Runtime; nothing is hand-typed in the common case.
+- **Per-task Runtime picker** — agent + location + **model → version → effort**, each pre-filled
+  from the inherited default and cascading (choosing a model narrows its versions, then its
+  efforts; the effort control appears only for models that expose one). Dispatch resolves the
+  task's Runtime; the common case is one visible pick and three sensible defaults.
 - **As an action** (`supervisor-copilot.md`): dispatch carries `{ taskId, runtime }`. The
   Runtime is a typed parameter of the `task.dispatch` command, so the co-pilot selects a
   backend the same way you do — one catalog, two clients.
@@ -108,7 +150,9 @@ side by side. Normalizing cost across providers into one number is a spike, not 
 - `dispatch` / `start-local` resolve the task's Runtime → choose the agent's command template,
   location, and cwd (the repo cache clone) → spawn (PTY when `tty`) → `capture()` the handle
   (cloud URL or local branch).
-- `sessions` gain `agent` + `model` (today's `kind: local | remote` becomes the `location` axis).
+- `sessions` gain `agent` + `model` + `version` + `effort` (today's `kind: local | remote`
+  becomes the `location` axis) — the fully-resolved choice is recorded on the run, not just the
+  family, so a session is reproducible and the status bar can group by exact model.
 - **Reconciliation is unchanged** — trailers off `main`, agent-agnostic.
 
 ## Decisions (and why)
@@ -124,6 +168,11 @@ side by side. Normalizing cost across providers into one number is a spike, not 
 4. **Local vs cloud is the primary axis; model is a sub-selection.** Auth, isolation, cost, and
    speed all split on location — so the abstraction is built around it, with agent and model
    varying inside.
+5. **Model is three nested picks, not one string.** Model → version → effort cascade, with
+   version and effort optional and defaulted. Keeps the picker one visible choice in the common
+   case, lets a default cascade at any level, and pins a version so a plan is reproducible.
+   Reasoning effort is a *capability* — surfaced only where the model has it, never a required
+   field — so fixed-effort backends don't grow a dead control.
 
 ## Prior art
 
@@ -140,6 +189,13 @@ side by side. Normalizing cost across providers into one number is a spike, not 
 - **Capability gating.** Should a task or repo be able to *require* a capability (cloud
   isolation, a specific model) so incompatible Runtimes are rejected before dispatch?
 - **Cost normalization.** One budget number across providers, or per-provider meters only?
-- **Model enumeration.** Static per-agent list, or queried from the tool at registration?
+- **Model enumeration.** Static per-agent list, or queried from the tool at registration? And is
+  the version list pinned in the registry or pulled live so new releases appear without a redeploy?
+- **Effort normalization.** `low..max` is Claude's ladder; other agents expose different or no
+  effort rungs. Do we map every backend onto one shared ladder (and how do the rungs line up), or
+  keep effort agent-native and only show what each backend actually advertises?
+- **Default granularity.** The inherited default is a `ModelChoice` — should repo/milestone/goal
+  be able to fix just the model family and let version/effort float to the agent's current
+  default, or must a default pin all three?
 - **Fallback / routing.** Auto-retry on another backend when one fails or is at cap — worth it,
   or explicit-only? (Likely later.)
