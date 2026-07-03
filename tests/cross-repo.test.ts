@@ -1,10 +1,16 @@
 import { beforeAll, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
 process.env.PM_DISPATCH_DRY_RUN = "1"; // never touch the cloud from the same-repo path
+// Dispatch ensures a cache clone of the task's pinned repo before the dry-run
+// branch, so the repos referenced below must be cloneable. Point the cache and
+// clone base at scratch dirs and build local bare remotes — no network.
+const remotesRoot = mkdtempSync(join(tmpdir(), "pm-remotes-"));
+process.env.PM_REPOS_DIR = mkdtempSync(join(tmpdir(), "pm-repos-"));
+process.env.PM_CLONE_BASE = `${remotesRoot}/`;
 
 const { ready } = await import("../src/server/db.ts");
 const { spansRepos, dispatchTask, CROSS_REPO_ERROR } = await import("../src/server/dispatch.ts");
@@ -12,6 +18,32 @@ const { goalRepo, milestoneRepo, taskRepo, repoRepo } = await import("../src/ser
 import type { Task } from "../src/server/schema.ts";
 
 const asTask = (repoId: number | null): Task => ({ repoId }) as Task;
+
+async function git(cwd: string, ...args: string[]): Promise<void> {
+  const proc = Bun.spawn(["git", ...args], {
+    cwd,
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "t",
+      GIT_AUTHOR_EMAIL: "t@t",
+      GIT_COMMITTER_NAME: "t",
+      GIT_COMMITTER_EMAIL: "t@t",
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  await proc.exited;
+}
+
+/** Build the local bare remote PM_CLONE_BASE + "<slug>.git" resolves to. */
+async function seedRemote(slug: string): Promise<void> {
+  const seed = mkdtempSync(join(tmpdir(), "pm-seed-"));
+  await git(seed, "init", "-b", "main");
+  writeFileSync(join(seed, "README.md"), "hello\n");
+  await git(seed, "add", ".");
+  await git(seed, "commit", "-m", "root");
+  await git(seed, "clone", "--bare", seed, join(remotesRoot, `${slug}.git`));
+}
 
 let milestoneId: number;
 let repoA: number;
@@ -23,7 +55,8 @@ beforeAll(async () => {
   milestoneId = (await milestoneRepo.create({ goalId: goal.id, title: "m" })).id;
   repoA = (await repoRepo.create({ slug: "o/a", owner: "o", name: "a" })).id;
   repoB = (await repoRepo.create({ slug: "o/b", owner: "o", name: "b" })).id;
-});
+  await seedRemote("o/a");
+}, 30_000);
 
 test("spansRepos: same repo (and all repo-less) pass; differing repos span", () => {
   expect(spansRepos([asTask(repoA), asTask(repoA)])).toBe(false);
