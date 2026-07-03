@@ -7,8 +7,8 @@ export function DisconnectBanner() {
         left: 0,
         right: 0,
         zIndex: 10000,
-        background: "#b54708", // straitjacket-allow:color: fixed alert color — a disconnect warning must read the same in every theme
-        color: "#fff", // straitjacket-allow:color: text on the fixed alert background
+        background: "#b54708",
+        color: "#fff",
         textAlign: "center",
         padding: "5px 10px",
         fontSize: "0.8125rem",

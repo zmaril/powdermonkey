@@ -136,7 +136,7 @@ export function BrowserPane({
         style={{
           flex: 1,
           minHeight: 0,
-          background: "#fff", // straitjacket-allow:color: neutral white backdrop behind an arbitrary embedded page, not app chrome
+          background: "#fff",
         }}
       >
         {current ? (
