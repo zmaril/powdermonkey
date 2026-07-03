@@ -133,11 +133,21 @@ export type PlanData = {
   error: string | null;
 };
 
-/** The shared indexes + derived active set, now sourced from the TanStack DB
- *  collections (synced live from PGlite). No store, no poll, no refetch: each
- *  collection re-emits as deltas arrive and this re-derives. The Indexes shape is
- *  unchanged, so the panes are untouched. */
-export function usePlanData(): PlanData {
+type RawCollections = {
+  goals: Goal[];
+  milestones: Milestone[];
+  tasks: Task[];
+  phases: Phase[];
+  sessions: Session[];
+  links: SessionLink[];
+  prs: CloudPr[];
+  loading: boolean;
+};
+
+/** The seven live collections that back both read-model hooks below, unwrapped to
+ *  plain arrays with one shared `loading` calc — so usePlanData and useFullData
+ *  differ only in how they filter/derive, not in how they subscribe. */
+function useRawCollections(): RawCollections {
   const goals = useLiveQuery(() => goalsCollection);
   const milestones = useLiveQuery(() => milestonesCollection);
   const tasks = useLiveQuery(() => tasksCollection);
@@ -146,20 +156,37 @@ export function usePlanData(): PlanData {
   const sessionTasks = useLiveQuery(() => sessionTasksCollection);
   const cloudPrs = useLiveQuery(() => pullRequestsCollection);
 
-  const g = (goals.data ?? []).filter(notArchived);
-  const m = (milestones.data ?? []).filter(notArchived);
-  const t = (tasks.data ?? []).filter(notArchived);
-  const p = (phases.data ?? []).filter(notArchived);
-  const s = (sessions.data ?? []).filter(notArchived);
-  const links: SessionLink[] = sessionTasks.data ?? [];
-  const prs = cloudPrs.data ?? [];
+  // "loading" until the core plan tables have delivered their first snapshot.
+  const loading = goals.isLoading || milestones.isLoading || tasks.isLoading || sessions.isLoading;
+  return {
+    goals: goals.data ?? [],
+    milestones: milestones.data ?? [],
+    tasks: tasks.data ?? [],
+    phases: phases.data ?? [],
+    sessions: sessions.data ?? [],
+    links: sessionTasks.data ?? [],
+    prs: cloudPrs.data ?? [],
+    loading,
+  };
+}
+
+/** The shared indexes + derived active set, now sourced from the TanStack DB
+ *  collections (synced live from PGlite). No store, no poll, no refetch: each
+ *  collection re-emits as deltas arrive and this re-derives. The Indexes shape is
+ *  unchanged, so the panes are untouched. */
+export function usePlanData(): PlanData {
+  const raw = useRawCollections();
+  const g = raw.goals.filter(notArchived);
+  const m = raw.milestones.filter(notArchived);
+  const t = raw.tasks.filter(notArchived);
+  const p = raw.phases.filter(notArchived);
+  const s = raw.sessions.filter(notArchived);
+  const { links, prs } = raw;
 
   const idx = useMemo(() => buildIndexes(g, m, t, p, s, links, prs), [g, m, t, p, s, links, prs]);
   const activeIds = useMemo(() => activeTaskIds(s, links), [s, links]);
 
-  // "loading" until the core plan tables have delivered their first snapshot.
-  const loading = goals.isLoading || milestones.isLoading || tasks.isLoading || sessions.isLoading;
-  return { idx, activeIds, loading, error: null };
+  return { idx, activeIds, loading: raw.loading, error: null };
 }
 
 /** Pending proposals' create-task changes, projected into ghost cards keyed by the
@@ -197,27 +224,13 @@ export type FullData = {
  *  resolves its context. `activeIds` is still derived from LIVE sessions only — an
  *  archived session never makes a task "active". */
 export function useFullData(): FullData {
-  const goals = useLiveQuery(() => goalsCollection);
-  const milestones = useLiveQuery(() => milestonesCollection);
-  const tasks = useLiveQuery(() => tasksCollection);
-  const phases = useLiveQuery(() => phasesCollection);
-  const sessions = useLiveQuery(() => sessionsCollection);
-  const sessionTasks = useLiveQuery(() => sessionTasksCollection);
-  const cloudPrs = useLiveQuery(() => pullRequestsCollection);
-
-  const g = goals.data ?? [];
-  const m = milestones.data ?? [];
-  const t = tasks.data ?? [];
-  const p = phases.data ?? [];
-  const s = sessions.data ?? [];
-  const links: SessionLink[] = sessionTasks.data ?? [];
-  const prs = cloudPrs.data ?? [];
+  const raw = useRawCollections();
+  const { goals: g, milestones: m, tasks: t, phases: p, sessions: s, links, prs } = raw;
 
   const idx = useMemo(() => buildIndexes(g, m, t, p, s, links, prs), [g, m, t, p, s, links, prs]);
   // Liveness is the session's own — only a non-archived session marks its tasks active.
   const liveSessions = useMemo(() => s.filter(notArchived), [s]);
   const activeIds = useMemo(() => activeTaskIds(liveSessions, links), [liveSessions, links]);
 
-  const loading = goals.isLoading || milestones.isLoading || tasks.isLoading || sessions.isLoading;
-  return { idx, activeIds, sessions: s, tasks: t, loading };
+  return { idx, activeIds, sessions: s, tasks: t, loading: raw.loading };
 }

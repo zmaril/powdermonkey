@@ -2,6 +2,8 @@
 // or reports — NOT for execution correctness (the cloud always execs against
 // main regardless). See design.md "Running".
 
+import { spawnCapture } from "./proc.ts";
+
 export type GitResult = { ok: boolean; output: string };
 
 /** Run `git` in a repo. Defaults to the supervisor's own checkout
@@ -9,16 +11,9 @@ export type GitResult = { ok: boolean; output: string };
  *  `~/.powdermonkey/repos` (see repo-cache.ts) — that's how worktree ops and
  *  fetches target the task's repo rather than the supervisor's. */
 async function run(args: string[], cwd?: string): Promise<GitResult> {
-  const proc = Bun.spawn(["git", ...args], {
+  const { code, stdout, stderr } = await spawnCapture(["git", ...args], {
     cwd: cwd ?? process.env.PM_REPO_DIR ?? process.cwd(),
-    stdout: "pipe",
-    stderr: "pipe",
   });
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  const code = await proc.exited;
   return { ok: code === 0, output: (stdout + stderr).trim() };
 }
 
