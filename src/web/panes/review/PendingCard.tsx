@@ -10,8 +10,8 @@ export function PendingCard({ draft, onRemove }: { draft: DraftComment; onRemove
         px="sm"
         py="snug"
         style={{
-          border: "1px dashed #b8893a", // lint-allow-color: fixed amber "draft" cue, a deliberately distinct state
-          background: "#221d16", // lint-allow-color: amber draft background
+          border: "1px dashed #b8893a",
+          background: "#221d16",
           borderRadius: 4,
         }}
       >

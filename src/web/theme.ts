@@ -1,3 +1,4 @@
+// straitjacket-allow-file:inline-font  the blessed theme config wires the SANS/MONO font tokens here
 import { Badge, Button, Card, type MantineTheme, Title, createTheme } from "@mantine/core";
 import { spacingFor } from "./appearance.ts";
 import type { EditorTheme } from "./themes.ts";

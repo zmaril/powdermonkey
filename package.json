@@ -24,8 +24,7 @@
     "desktop:build": "tauri build",
     "build:compile": "bun run build:web && rm -rf dist && mkdir -p dist && bun build --compile bin/powdermonkey.ts --outfile dist/powdermonkey && cp -r public drizzle dist/ && cp node_modules/@electric-sql/pglite/dist/postgres.wasm node_modules/@electric-sql/pglite/dist/postgres.data dist/",
     "db:generate": "drizzle-kit generate",
-    "check": "biome check src && bun run scripts/lint-strings.ts && bun run scripts/lint-emojis.ts && bun run scripts/lint-colors.ts && bun run scripts/lint-fonts.ts && bun run scripts/lint-dock-theme.ts && bun run scripts/lint-svg.ts && bun run scripts/lint-spacing.ts && bun run scripts/lint-motion.ts",
-    "check:components": "bun scripts/check-one-component.ts src",
+    "check": "biome check src && bun run scripts/lint-strings.ts && bun run scripts/lint-dock-theme.ts && bun run scripts/lint-spacing.ts",
     "size": "git ls-files 'src/**/*.ts' 'src/**/*.tsx' | xargs wc -l | tail -1",
     "test": "for f in tests/*.test.ts; do echo \"# $f\"; bun test \"$f\" || exit 1; done",
     "prepublishOnly": "bun run build:web"

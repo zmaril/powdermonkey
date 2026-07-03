@@ -25,9 +25,6 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - run: bun run check
-      # One React component per file (Biome has no react/no-multi-comp); fails
-      # the job if any .tsx/.jsx file declares more than one component.
-      - run: bun run check:components
 
   test:
     name: Tests (bun test)

@@ -1,8 +1,9 @@
+/* straitjacket-allow-file:motion  the single blessed home for all animation — motion lives here by design */
 /* The single home for ALL animation in the app — transitions and keyframes. Every rule
  * reads the `--pm-dur-*` / `--pm-ease` variables that motion.ts sets from the user's
  * motion setting, so motion softens (Subtle) or stops (Off) from one control. Nothing
  * else in src/web may declare a transition / animation / @keyframes — enforced by
- * scripts/lint-motion.ts. To add an animation, add it here against the duration tokens.
+ * straitjacket (motion rule). To add an animation, add it here against the duration tokens.
  *
  * Fallbacks below are the "Full" defaults, used until motion.ts runs. */
 
