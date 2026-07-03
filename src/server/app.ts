@@ -147,6 +147,22 @@ function orBadRequest<T extends { ok: boolean }>(set: { status?: number | string
   if (!result.ok) set.status = 400;
   return result;
 }
+// The /prs routes' shared address: a PR number in the path plus an optional
+// `?repo=owner/name` naming which registered repo it lives in (numbers collide
+// across repos). Routes with a richer query spread this and override `query`.
+const prAddress = {
+  params: t.Object({ number: t.String() }),
+  query: t.Object({ repo: t.Optional(t.String()) }),
+};
+// Third idiom, for the /prs review routes: pr-review results carry their OWN failure
+// status (400 bad ask vs 502 GitHub unreachable) plus a message — shape that one way.
+function reviewError(
+  set: { status?: number | string },
+  r: { status: number; error: string },
+): { error: string } {
+  set.status = r.status;
+  return { error: r.error };
+}
 
 /** A CRUD route group: list / get / create / update / archive(DELETE) / restore. */
 function resource(name: string, repo: Repo, body: { create: TSchema; update: TSchema }) {
@@ -438,17 +454,15 @@ export const app = new Elysia()
   // In-app PR review: a PR's diff (raw patch per file) + its inline review comments,
   // so review happens here instead of bouncing to github.com. Backed by `gh api`
   // (or PM_PR_FIXTURE_DIR for offline/demo). 502 when GitHub is unreachable.
+  // `?repo=owner/name` names the repo the PR lives in (numbers collide across the
+  // registered repos); when absent the watcher's PR store resolves it if it can.
   .get(
     "/prs/:number/review",
-    async ({ params, set }) => {
-      const result = await getPrReview(Number(params.number));
-      if (!result.ok) {
-        set.status = result.status;
-        return { error: result.error };
-      }
-      return result.review;
+    async ({ params, query, set }) => {
+      const result = await getPrReview(Number(params.number), query.repo);
+      return result.ok ? result.review : reviewError(set, result);
     },
-    { params: t.Object({ number: t.String() }) },
+    prAddress,
   )
   // Full old+new contents of one file, fetched on demand so the diff can expand
   // collapsed context (only when the operator asks — a large PR won't pull every blob).
@@ -460,19 +474,18 @@ export const app = new Elysia()
         query.path,
         query.base ?? "",
         query.head ?? "",
+        query.repo,
       );
-      if (!result.ok) {
-        set.status = result.status;
-        return { error: result.error };
-      }
+      if (!result.ok) return reviewError(set, result);
       return { oldText: result.oldText, newText: result.newText };
     },
     {
-      params: t.Object({ number: t.String() }),
+      ...prAddress,
       query: t.Object({
         path: t.String(),
         base: t.Optional(t.String()),
         head: t.Optional(t.String()),
+        repo: t.Optional(t.String()),
       }),
     },
   )
@@ -480,16 +493,12 @@ export const app = new Elysia()
   // the UI confirms before calling. Echoes the created comment back.
   .post(
     "/prs/:number/comments",
-    async ({ params, body, set }) => {
-      const result = await postPrComment(Number(params.number), body);
-      if (!result.ok) {
-        set.status = result.status;
-        return { error: result.error };
-      }
-      return result.comment;
+    async ({ params, query, body, set }) => {
+      const result = await postPrComment(Number(params.number), body, query.repo);
+      return result.ok ? result.comment : reviewError(set, result);
     },
     {
-      params: t.Object({ number: t.String() }),
+      ...prAddress,
       body: t.Object({
         body: t.String(),
         commitId: t.String(),
@@ -505,16 +514,12 @@ export const app = new Elysia()
   // single event instead of one per comment.
   .post(
     "/prs/:number/review-submit",
-    async ({ params, body, set }) => {
-      const result = await submitReview(Number(params.number), body);
-      if (!result.ok) {
-        set.status = result.status;
-        return { error: result.error };
-      }
-      return { ok: true };
+    async ({ params, query, body, set }) => {
+      const result = await submitReview(Number(params.number), body, query.repo);
+      return result.ok ? { ok: true } : reviewError(set, result);
     },
     {
-      params: t.Object({ number: t.String() }),
+      ...prAddress,
       body: t.Object({
         event: t.Union([t.Literal("APPROVE"), t.Literal("REQUEST_CHANGES"), t.Literal("COMMENT")]),
         body: t.String(),

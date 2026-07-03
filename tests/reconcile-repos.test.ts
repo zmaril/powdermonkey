@@ -1,7 +1,8 @@
 import { beforeAll, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { setupTestDb, tmp } from "./db-harness.ts";
+import { git } from "./git-helper.ts";
 
 // Reconciliation loops the registered repos: each pass ensures every live repo's
 // cache clone (clone/fetch), scans `origin/<defaultBranch>` for PM trailers, and
@@ -10,34 +11,17 @@ import { join } from "node:path";
 // different registered repos both mark their phases, a later push is seen on the
 // next pass (fetch-to-freshness), and an unresolvable repo is skipped without
 // poisoning the others.
-process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
-const supervisorDir = mkdtempSync(join(tmpdir(), "pm-repo-"));
+const supervisorDir = tmp("pm-repo-");
 process.env.PM_REPO_DIR = supervisorDir;
 process.env.PM_MAIN_BRANCH = "main";
-process.env.PM_REPOS_DIR = mkdtempSync(join(tmpdir(), "pm-repos-"));
-const remotesRoot = mkdtempSync(join(tmpdir(), "pm-remotes-"));
+process.env.PM_REPOS_DIR = tmp("pm-repos-");
+const remotesRoot = tmp("pm-remotes-");
 process.env.PM_CLONE_BASE = `${remotesRoot}/`;
 
-const { ready } = await import("../src/server/db.ts");
+const { ready } = await setupTestDb();
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
 const { phaseRepo, repoRepo, taskRepo } = await import("../src/server/crud.ts");
 const { reconcile } = await import("../src/server/reconcile.ts");
-
-async function git(cwd: string, ...args: string[]): Promise<void> {
-  const proc = Bun.spawn(["git", ...args], {
-    cwd,
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "t",
-      GIT_AUTHOR_EMAIL: "t@t",
-      GIT_COMMITTER_NAME: "t",
-      GIT_COMMITTER_EMAIL: "t@t",
-    },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  await proc.exited;
-}
 
 // One seed working copy per remote, kept around so later tests can push more
 // trailered commits to the bare remote (the fetch-to-freshness case).
@@ -46,7 +30,7 @@ const seedDirs = new Map<string, string>();
 /** Build `<remotesRoot>/<slug>.git` — a bare remote a cache clone resolves to —
  *  seeded with one root commit. Returns nothing; push via commitTo. */
 async function makeRemote(slug: string): Promise<void> {
-  const seed = mkdtempSync(join(tmpdir(), "pm-seed-"));
+  const seed = tmp("pm-seed-");
   seedDirs.set(slug, seed);
   await git(seed, "init", "-b", "main");
   writeFileSync(join(seed, "README.md"), `${slug}\n`);

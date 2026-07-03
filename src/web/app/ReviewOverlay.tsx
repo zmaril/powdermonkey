@@ -22,7 +22,7 @@ export function ReviewOverlay() {
         flexDirection: "column",
       }}
     >
-      <ReviewPane number={review.number} onClose={closeReview} />
+      <ReviewPane number={review.number} repo={review.repo} onClose={closeReview} />
     </div>
   );
 }

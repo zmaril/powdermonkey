@@ -57,7 +57,7 @@ export function PrRow({ pr }: { pr: CloudPr }) {
           component="button"
           size="sm"
           fw={500}
-          onClick={() => openReview(pr.number, pr.title)}
+          onClick={() => openReview(pr.number, pr.title, pr.repo)}
           title="Review this PR's diff and inline comments in-app"
           style={{ flexShrink: 0 }}
         >

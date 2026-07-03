@@ -5,7 +5,8 @@ import {
   type LinguistRule,
   parseGitattributes,
 } from "./generated.ts";
-import { gh, resolveRepo } from "./gh.ts";
+import { gh } from "./gh.ts";
+import { listPrs } from "./pr-store.ts";
 
 // Review a PR from inside PowderMonkey instead of bouncing to github.com: pull a
 // PR's diff and its inline review comments, and post new inline comments back. All
@@ -52,6 +53,10 @@ export type ReviewComment = {
 
 export type PrReview = {
   number: number;
+  /** The repo the PR lives in ("owner/name") — echoed back so follow-up calls
+   *  (file contents, comments, submit) can name it without re-resolving. Empty in
+   *  fixture mode when the caller didn't pass one. */
+  repo: string;
   title: string;
   /** The PR description (markdown source), shown in the review sidebar. */
   body: string;
@@ -75,6 +80,21 @@ type Json = any;
 function fixtureDir(): string | null {
   return process.env.PM_PR_FIXTURE_DIR || null;
 }
+
+/** Which repo does PR `number` live in? The caller's explicit "owner/name" wins
+ *  (the UI passes the slug it learned from the watcher); else the watcher's own
+ *  pull_requests store, when exactly one tracked PR carries that number. Null when
+ *  unresolvable — numbers collide across repos, so a bare number matching several
+ *  (or no) tracked PRs is refused rather than guessed. This replaced the old
+ *  module-cached global repo slug: review always names its repo per call now. */
+async function repoForPr(number: number, explicit?: string): Promise<string | null> {
+  if (explicit?.includes("/")) return explicit;
+  const matches = (await listPrs()).filter((p) => p.number === number);
+  return matches.length === 1 ? matches[0].repo : null;
+}
+
+const NO_REPO_ERROR = (number: number) =>
+  `can't tell which repo PR #${number} is in — pass ?repo=owner/name`;
 
 async function readFixture(name: string): Promise<Json | null> {
   const dir = fixtureDir();
@@ -148,8 +168,8 @@ function mapComments(raw: Json[]): ReviewComment[] {
 }
 
 /** Fetch a PR's diff + inline comments. Reads from PM_PR_FIXTURE_DIR when set,
- *  otherwise three `gh api` calls. */
-export async function getPrReview(number: number): Promise<ReviewResult> {
+ *  otherwise three `gh api` calls against the PR's own repo. */
+export async function getPrReview(number: number, repo?: string): Promise<ReviewResult> {
   const fixturePr = await readFixture(`pr-${number}.json`);
   if (fixturePr) {
     const files = (await readFixture(`pr-${number}-files.json`)) ?? [];
@@ -158,6 +178,7 @@ export async function getPrReview(number: number): Promise<ReviewResult> {
       ok: true,
       review: {
         number,
+        repo: repo ?? "",
         title: fixturePr.title ?? `PR #${number}`,
         body: fixturePr.body ?? "",
         state: fixturePr.state ?? "open",
@@ -170,10 +191,9 @@ export async function getPrReview(number: number): Promise<ReviewResult> {
     };
   }
 
-  const repo = await resolveRepo();
-  if (!repo)
-    return { ok: false, status: 502, error: "no GitHub repo (set PM_GITHUB_REPO or auth `gh`)" };
-  const base = `repos/${repo.owner}/${repo.name}/pulls/${number}`;
+  const slug = await repoForPr(number, repo);
+  if (!slug) return { ok: false, status: 400, error: NO_REPO_ERROR(number) };
+  const base = `repos/${slug}/pulls/${number}`;
   const [pr, files, comments] = await Promise.all([
     ghApiJson(base),
     ghApiJson(`${base}/files`, true),
@@ -183,13 +203,12 @@ export async function getPrReview(number: number): Promise<ReviewResult> {
   // Honour the repo's own .gitattributes (linguist-generated/vendored) when deciding
   // what to collapse — fetched at the PR head so it reflects this branch's rules.
   const headSha = pr.head?.sha ?? "";
-  const attrs = parseGitattributes(
-    await contentAtRef(`${repo.owner}/${repo.name}`, ".gitattributes", headSha),
-  );
+  const attrs = parseGitattributes(await contentAtRef(slug, ".gitattributes", headSha));
   return {
     ok: true,
     review: {
       number,
+      repo: slug,
       title: pr.title ?? `PR #${number}`,
       body: pr.body ?? "",
       state: pr.state ?? "open",
@@ -219,14 +238,18 @@ export type PostResult =
 
 /** Post an inline review comment (or a threaded reply) via `gh api`. A real,
  *  outward-facing write — surfaced behind a confirm in the UI. */
-export async function postPrComment(number: number, c: PostCommentBody): Promise<PostResult> {
+export async function postPrComment(
+  number: number,
+  c: PostCommentBody,
+  repo?: string,
+): Promise<PostResult> {
   if (fixtureDir())
     return { ok: false, status: 400, error: "fixture mode is read-only (PM_PR_FIXTURE_DIR set)" };
   if (!c.body.trim()) return { ok: false, status: 400, error: "comment body is empty" };
-  const repo = await resolveRepo();
-  if (!repo) return { ok: false, status: 502, error: "no GitHub repo configured" };
+  const slug = await repoForPr(number, repo);
+  if (!slug) return { ok: false, status: 400, error: NO_REPO_ERROR(number) };
 
-  const path = `repos/${repo.owner}/${repo.name}/pulls/${number}/comments`;
+  const path = `repos/${slug}/pulls/${number}/comments`;
   const args = ["api", "--method", "POST", path, "-f", `body=${c.body}`];
   if (c.inReplyTo != null) {
     args.push("-F", `in_reply_to=${c.inReplyTo}`);
@@ -286,15 +309,19 @@ export type SubmitReviewBody = {
 export type SubmitResult = { ok: true } | { ok: false; error: string; status: number };
 
 /** Submit a whole review in one call: all draft comments + a verdict. */
-export async function submitReview(number: number, r: SubmitReviewBody): Promise<SubmitResult> {
+export async function submitReview(
+  number: number,
+  r: SubmitReviewBody,
+  repo?: string,
+): Promise<SubmitResult> {
   if (fixtureDir())
     return { ok: false, status: 400, error: "fixture mode is read-only (PM_PR_FIXTURE_DIR set)" };
   if (r.event === "REQUEST_CHANGES" && !r.body.trim())
     return { ok: false, status: 400, error: "Request changes needs a summary" };
   if (r.event === "COMMENT" && !r.body.trim() && r.comments.length === 0)
     return { ok: false, status: 400, error: "a Comment review needs a summary or inline comments" };
-  const repo = await resolveRepo();
-  if (!repo) return { ok: false, status: 502, error: "no GitHub repo configured" };
+  const slug = await repoForPr(number, repo);
+  if (!slug) return { ok: false, status: 400, error: NO_REPO_ERROR(number) };
 
   // gh can't express a nested comments[] array via -f flags, so POST the JSON body
   // on stdin with `--input -`.
@@ -314,7 +341,7 @@ export async function submitReview(number: number, r: SubmitReviewBody): Promise
       body: c.body,
     })),
   });
-  const path = `repos/${repo.owner}/${repo.name}/pulls/${number}/reviews`;
+  const path = `repos/${slug}/pulls/${number}/reviews`;
   const res = await gh(["api", "--method", "POST", path, "--input", "-"], payload);
   if (!res.ok)
     return {
@@ -354,15 +381,15 @@ export async function getFileContents(
   path: string,
   base: string,
   head: string,
+  repo?: string,
 ): Promise<FileContentsResult> {
   const fixture = await readFixture(`pr-${number}-contents.json`);
   if (fixture) {
     const entry = fixture[path];
     return { ok: true, oldText: entry?.oldText ?? "", newText: entry?.newText ?? "" };
   }
-  const repo = await resolveRepo();
-  if (!repo) return { ok: false, status: 502, error: "no GitHub repo configured" };
-  const slug = `${repo.owner}/${repo.name}`;
+  const slug = await repoForPr(number, repo);
+  if (!slug) return { ok: false, status: 400, error: NO_REPO_ERROR(number) };
   const [oldText, newText] = await Promise.all([
     contentAtRef(slug, path, base),
     contentAtRef(slug, path, head),

@@ -109,8 +109,10 @@ export type State = {
   flagTab: (paneId: string) => void;
   clearTab: (paneId: string) => void;
   // The PR currently under review, shown as a full-window takeover overlay (not a
-  // dockview panel — review is a focused activity). null = no overlay.
-  review: { number: number; title: string } | null;
+  // dockview panel — review is a focused activity). null = no overlay. `repo` is the
+  // "owner/name" the PR lives in — PR numbers collide across registered repos, so
+  // callers pass it when they know it (the server falls back to its PR store).
+  review: { number: number; title: string; repo?: string } | null;
   // The registry (windows.ts, docs/windows.md): every currently-open PM window, each a
   // set of repo tabs + a dockview layout + a cursor into Scratch. Persisted per-device
   // and shared across every native window / browser tab on the origin. `activeWindowId`
@@ -142,7 +144,7 @@ export type State = {
   openSessionTerminal: (sessionId: number, title: string) => void;
   openBrowser: (url?: string) => void;
   loadSettings: () => Promise<void>;
-  openReview: (number: number, title: string) => void;
+  openReview: (number: number, title: string, repo?: string) => void;
   closeReview: () => void;
   // The scratchpad is a single note. Returns it, creating the row on first use.
   ensureScratch: () => Promise<Note | null>;
@@ -368,7 +370,7 @@ export const useStore = create<State>()(
         set((s) => ({
           browserReq: { url: url ?? s.lastBrowserUrl, n: (s.browserReq?.n ?? 0) + 1 },
         })),
-      openReview: (number, title) => set({ review: { number, title } }),
+      openReview: (number, title, repo) => set({ review: { number, title, repo } }),
       closeReview: () => set({ review: null }),
       loadSettings: async () => {
         const { data, error } = await api.settings.get();

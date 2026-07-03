@@ -1,13 +1,27 @@
 import { isNull } from "drizzle-orm";
 import { repoRepo } from "./crud.ts";
 import { db } from "./db.ts";
-import { gh, resolveRepo } from "./gh.ts";
+import { gh } from "./gh.ts";
 import { type Repo, tasks } from "./schema.ts";
 
 // Upgrade path from a single-repo install to the flat repo registry: on boot, make
 // sure the supervisor's own repo (the one it was pointed at before repos existed) is
 // in the registry, so PowderMonkey-on-itself becomes "a window showing one repo."
 // See docs/vocabulary.md § Migration.
+
+/** The supervisor's own repo: $PM_GITHUB_REPO, else `gh repo view` in the cwd.
+ *  A boot-time one-shot — the registry is the durable answer afterwards, so there
+ *  is no cache (the old module-level "the repo" slug is retired). */
+async function detectSupervisorRepo(): Promise<{ owner: string; name: string } | null> {
+  let slug = process.env.PM_GITHUB_REPO;
+  if (!slug) {
+    const r = await gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]);
+    if (r.ok) slug = r.stdout.trim();
+  }
+  if (!slug?.includes("/")) return null;
+  const [owner, name] = slug.split("/");
+  return { owner, name };
+}
 
 /** The repo's default branch + homepage from `gh`, tolerating any failure (headless
  *  container, no auth, unexpected shape) — the caller falls back to sensible defaults
@@ -45,7 +59,7 @@ async function repoMeta(slug: string): Promise<{ defaultBranch?: string; homepag
  *  `resolve` is injectable for tests. Returns the existing/created row, or null when
  *  skipped. */
 export async function seedSupervisorRepo(
-  resolve: typeof resolveRepo = resolveRepo,
+  resolve: typeof detectSupervisorRepo = detectSupervisorRepo,
 ): Promise<Repo | null> {
   const slugParts = await resolve();
   if (!slugParts) return null;

@@ -49,7 +49,12 @@ export function FileBlock({ file }: { file: ReviewFile }) {
     setLoadingContents(true);
     try {
       const { data, error } = await api.prs({ number: review.number }).file.get({
-        query: { path: file.filename, base: review.baseSha, head: review.headSha },
+        query: {
+          path: file.filename,
+          base: review.baseSha,
+          head: review.headSha,
+          repo: review.repo || undefined,
+        },
       });
       if (!error && data) setContents(data as { oldText: string; newText: string });
     } finally {

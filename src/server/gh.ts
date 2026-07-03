@@ -5,9 +5,10 @@
 // Two readers/writers share this seam: github-watch.ts polls PR state and runs the
 // @claude remote-control channel (a comment tagging `@claude` on a task's PR wakes a
 // live `claude --remote` worker), and pr-review.ts reads diffs/comments and posts
-// inline review comments. Keeping the spawn + repo resolution here means there's a
-// single seam to fake in tests (PM_PR_FIXTURE_DIR, see pr-review.ts) and one
-// definition of "which repo are we talking to".
+// inline review comments. Keeping the spawn here means there's a single seam to
+// fake in tests (PM_PR_FIXTURE_DIR, see pr-review.ts). There is deliberately no
+// "the repo" here: every caller names the repo it's talking to (the registry is
+// the source of repos — see docs/vocabulary.md).
 
 import { spawnCapture } from "./proc.ts";
 
@@ -25,22 +26,6 @@ export async function gh(args: string[], stdin?: string): Promise<GhResult> {
     // `gh` not on PATH (e.g. a stripped container) — Bun.spawn throws synchronously.
     return { ok: false, stdout: "", stderr: e instanceof Error ? e.message : String(e) };
   }
-}
-
-let repoSlug: { owner: string; name: string } | null = null;
-
-/** owner/name from $PM_GITHUB_REPO, else `gh repo view`. Cached after first hit. */
-export async function resolveRepo(): Promise<{ owner: string; name: string } | null> {
-  if (repoSlug) return repoSlug;
-  let slug = process.env.PM_GITHUB_REPO;
-  if (!slug) {
-    const r = await gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]);
-    if (r.ok) slug = r.stdout.trim();
-  }
-  if (!slug?.includes("/")) return null;
-  const [owner, name] = slug.split("/");
-  repoSlug = { owner, name };
-  return repoSlug;
 }
 
 // ---- the @claude remote-control channel ------------------------------------

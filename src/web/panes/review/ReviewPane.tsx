@@ -63,7 +63,18 @@ function useLoadPersistedViewed(
   }, [viewedKey, setViewed]);
 }
 
-export function ReviewPane({ number, onClose }: { number: number; onClose?: () => void }) {
+export function ReviewPane({
+  number,
+  repo,
+  onClose,
+}: {
+  number: number;
+  /** The "owner/name" the PR lives in, when the opener knows it — numbers collide
+   *  across registered repos. The loaded payload echoes the resolved slug back, so
+   *  follow-up calls (replies, submit, file contents) use that. */
+  repo?: string;
+  onClose?: () => void;
+}) {
   const [review, setReview] = useState<PrReview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -111,14 +122,25 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
       return next;
     });
 
+  // Every call shapes an Eden failure the same way; true when the call failed.
+  const showError = (error: { status: number | string; value: unknown } | null): boolean => {
+    if (!error) return false;
+    setError(String((error.value as { error?: string })?.error ?? error.status));
+    return true;
+  };
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, error } = await api.prs({ number }).review.get();
+    const { data, error } = await api.prs({ number }).review.get({ query: { repo } });
     if (error) setError(String((error.value as { error?: string })?.error ?? error.status));
     else setReview(data as PrReview);
     setLoading(false);
-  }, [number]);
+  }, [number, repo]);
+
+  // The repo follow-up calls should name: the loaded payload's resolved slug (the
+  // server echoes it back), else the opener's. One place, one answer.
+  const repoQuery = { query: { repo: review?.repo || repo } };
 
   useRunEffect(load);
 
@@ -150,18 +172,13 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
     if (!review) return;
     setPosting(true);
     try {
-      const { error } = await api.prs({ number }).comments.post({
-        body,
-        commitId: review.headSha,
-        path,
-        line: anchor.line,
-        side: anchor.side,
-        inReplyTo,
-      });
-      if (error) {
-        setError(String((error.value as { error?: string })?.error ?? error.status));
-        return;
-      }
+      const { error } = await api
+        .prs({ number })
+        .comments.post(
+          { body, commitId: review.headSha, path, line: anchor.line, side: anchor.side, inReplyTo },
+          repoQuery,
+        );
+      if (showError(error)) return;
       await load();
     } finally {
       setPosting(false);
@@ -174,22 +191,22 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
     setSubmitting(true);
     setError(null);
     try {
-      const { error } = await api.prs({ number })["review-submit"].post({
-        event,
-        body: summary,
-        commitId: review.headSha,
-        comments: draft.map(({ path, line, side, startLine, body }) => ({
-          path,
-          line,
-          side,
-          ...(startLine != null ? { startLine, startSide: side } : {}),
-          body,
-        })),
-      });
-      if (error) {
-        setError(String((error.value as { error?: string })?.error ?? error.status));
-        return;
-      }
+      const { error } = await api.prs({ number })["review-submit"].post(
+        {
+          event,
+          body: summary,
+          commitId: review.headSha,
+          comments: draft.map(({ path, line, side, startLine, body }) => ({
+            path,
+            line,
+            side,
+            ...(startLine != null ? { startLine, startSide: side } : {}),
+            body,
+          })),
+        },
+        repoQuery,
+      );
+      if (showError(error)) return;
       setDraft([]);
       setSummary("");
       await load(); // the submitted comments now come back as posted threads
