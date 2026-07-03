@@ -6,6 +6,7 @@ import {
   type SerializedDockview,
 } from "dockview-react";
 import { type RefObject, useEffect, useRef } from "react";
+import { usePickerBootParam } from "../new-window.ts";
 import { useNeedsInputNotifications } from "../notifications.ts";
 import { RepoPickerModal } from "../picker/RepoPickerModal.tsx";
 import { useRevealEntity } from "../reveal.ts";
@@ -206,6 +207,10 @@ export function App() {
   // Jump to a plan entity when its id is clicked in the terminal (pm-id links): focus
   // the pane it lives in, scroll it into view, and flash it.
   useRevealEntity(apiRef);
+
+  // A `?pick=1` boot (a window spawned onto the picker, or a deep-link): bring the
+  // picker up and clean the URL. See new-window.ts.
+  usePickerBootParam();
 
   // Show this webview's window on the dock: restore its saved layout, else lay out the
   // default. A corrupt/incompatible saved layout (or one that restores to nothing)
