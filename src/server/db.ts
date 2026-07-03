@@ -50,6 +50,24 @@ export const pg = client as unknown as PGliteWithLive;
 
 let migrated = false;
 
+/** The `live` extension registers each live query as a temporary view
+ *  (`pg_temp*.live_query_*_view`). PGlite persists the *whole* cluster — the temp
+ *  schema included — so a crash-restart leaves these views behind, and on the next
+ *  boot they sit in the catalog still depending on their base tables. A migration
+ *  that alters a column such a view touches then fails hard with "cannot alter type
+ *  of a column used by a view or rule", wedging the store on every boot. The views
+ *  are derived (rebuilt when the app re-subscribes), so drop any leftovers before
+ *  migrating. Runs before migrate() precisely because the app hasn't registered its
+ *  own live queries yet — the only views present here are stale ones. */
+export async function dropStaleLiveViews(): Promise<void> {
+  const { rows } = await client.query<{ schemaname: string; viewname: string }>(
+    "SELECT schemaname, viewname FROM pg_views WHERE schemaname LIKE 'pg_temp%' AND viewname LIKE 'live_query_%'",
+  );
+  // Names come from the catalog, not user input — safe to interpolate.
+  for (const v of rows)
+    await client.exec(`DROP VIEW IF EXISTS "${v.schemaname}"."${v.viewname}" CASCADE`);
+}
+
 /** Apply migrations once at boot. Safe to call repeatedly. */
 export async function ready(): Promise<void> {
   // Single-process footgun guard. db.ts opens PGlite ONCE at import, on the DATA_DIR it
@@ -66,6 +84,9 @@ export async function ready(): Promise<void> {
     );
   }
   if (migrated) return;
+  // Clear leftover live-query views before migrating, or a column-type migration on a
+  // synced table fails against a data dir that has them (see dropStaleLiveViews).
+  await dropStaleLiveViews();
   // Resolved against the package, not the cwd: a global install supervises a
   // foreign project, where a "drizzle" relative path wouldn't exist.
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
