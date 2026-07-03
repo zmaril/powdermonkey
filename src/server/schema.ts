@@ -10,6 +10,7 @@ import {
   ProposalStatus,
   SessionKind,
   SessionState,
+  TaskKind,
   TaskStatus,
 } from "../shared/types.ts";
 
@@ -63,6 +64,13 @@ export const tasks = pgTable("tasks", {
   // backfills them to the supervisor's own repo. See docs/vocabulary.md.
   repoId: integer("repo_id").references(() => repos.id),
   title: text("title").notNull(),
+  // What flavour of work this is (task | bug | spike). Descriptive only — it colors
+  // the card and sets authoring expectations, never behaviour. See TaskKind.
+  kind: text("kind").$type<TaskKind>().notNull().default(TaskKind.Task),
+  // Free-form context: why the task exists, what's known, where it was seen. Kept
+  // apart from phases on purpose — phases stay pure work steps (the grain progress
+  // is measured at), the description carries the narrative. Null = none.
+  description: text("description"),
   position: integer("position").notNull().default(0),
   // Operator priority: a starred task sorts to the top of its group (active/backlog).
   starred: boolean("starred").notNull().default(false),

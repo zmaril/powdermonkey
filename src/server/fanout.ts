@@ -1,5 +1,5 @@
 import { and, eq, isNull } from "drizzle-orm";
-import { PhaseStatus } from "../shared/types.ts";
+import { PhaseStatus, type TaskKind } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { type Task, milestones, phases, repos, tasks } from "./schema.ts";
 
@@ -16,6 +16,10 @@ export type FanOutPhase = { name: string };
 export type FanOutInput = {
   milestoneId: number;
   title: string;
+  // Shared by every fanned-out task, like the title: the kind (defaults to `task`)
+  // and the free-form description (context; phases stay pure work).
+  kind?: TaskKind;
+  description?: string;
   repoIds: number[];
   phases?: FanOutPhase[];
   // Where the fanned tasks sit in the milestone. Omitted → appended after the existing
@@ -67,7 +71,14 @@ export async function fanOutTasks(input: FanOutInput): Promise<FanOutResult> {
     for (const [i, repoId] of repoIds.entries()) {
       const [t] = await tx
         .insert(tasks)
-        .values({ milestoneId: input.milestoneId, title: input.title, position: base + i, repoId })
+        .values({
+          milestoneId: input.milestoneId,
+          title: input.title,
+          kind: input.kind,
+          description: input.description,
+          position: base + i,
+          repoId,
+        })
         .returning();
       if (phaseInputs.length > 0) {
         await tx.insert(phases).values(

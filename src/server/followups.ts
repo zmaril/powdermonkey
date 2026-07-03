@@ -1,5 +1,5 @@
 import { asc, eq, isNull } from "drizzle-orm";
-import { ProposalOp, VocabKind } from "../shared/types.ts";
+import { ProposalOp, TaskKind, VocabKind } from "../shared/types.ts";
 import { db } from "./db.ts";
 import type { CloudPr } from "./events.ts";
 import { createProposal } from "./proposals.ts";
@@ -48,6 +48,24 @@ async function targetMilestoneId(sourceTaskId?: number | null): Promise<number |
   return first?.id ?? null;
 }
 
+// The longest title a follow-up may author onto a task card. Workers routinely hand
+// back a whole paragraph as the "title" (t927 was a wall of text); past this the text
+// is clamped to a scannable card title and the FULL text moves to the description.
+const MAX_TITLE = 80;
+
+/** Clamp a wall-of-text title to a short card title, cutting at a word boundary when
+ *  one falls late enough to keep the title substantial. Flags whether it clamped so
+ *  the caller can preserve the full text in the description. */
+function shortTitle(full: string): { title: string; truncated: boolean } {
+  if (full.length <= MAX_TITLE) return { title: full, truncated: false };
+  const hard = full.slice(0, MAX_TITLE);
+  const atWord = hard.slice(0, hard.lastIndexOf(" "));
+  return {
+    title: `${(atWord.length >= MAX_TITLE / 2 ? atWord : hard).trimEnd()}…`,
+    truncated: true,
+  };
+}
+
 /** One-line provenance note appended to the proposal summary, so the operator
  *  reviewing the change knows it came from a worker hand-back and from where. */
 function provenanceNote(input: FollowupInput): string {
@@ -59,22 +77,38 @@ function provenanceNote(input: FollowupInput): string {
 }
 
 /** Author a follow-up as a pending `create task` proposal under the resolved
- *  milestone, stamped with its provenance. Returns the created proposal, or an error
- *  when the title is empty or the plan has no milestone to attach a task to. */
+ *  milestone, stamped with its provenance. The proposed task is a `bug` (a worker
+ *  hand-back is a spotted defect/cleanup — discovery-first, so no phases either) with
+ *  a SHORT title; the worker's body — plus the full text of a clamped wall-of-text
+ *  title — lands in the task's description, not the title. Returns the created
+ *  proposal, or an error when the title is empty or the plan has no milestone to
+ *  attach a task to. */
 export async function proposeFollowup(input: FollowupInput): Promise<FollowupResult> {
-  const title = input.title.trim();
-  if (!title) return { ok: false, error: "follow-up title is empty" };
+  const full = input.title.trim();
+  if (!full) return { ok: false, error: "follow-up title is empty" };
+  const { title, truncated } = shortTitle(full);
 
   const milestoneId = await targetMilestoneId(input.sourceTaskId);
   if (milestoneId == null)
     return { ok: false, error: "no milestone to attach the follow-up to (load a plan first)" };
 
+  // The task's own context field: the untruncated title (when it was clamped) plus
+  // the worker's body. The proposal summary below still carries the body too — that's
+  // what the operator reads in the decision queue.
+  const description = [truncated ? full : null, input.body?.trim() || null]
+    .filter(Boolean)
+    .join("\n\n");
   const summary = [input.body?.trim(), provenanceNote(input)].filter(Boolean).join("\n\n");
   const proposal = await createProposal({
     title: `Follow-up: ${title}`,
     summary,
     changes: [
-      { op: ProposalOp.Create, kind: VocabKind.Task, parentId: milestoneId, fields: { title } },
+      {
+        op: ProposalOp.Create,
+        kind: VocabKind.Task,
+        parentId: milestoneId,
+        fields: { title, kind: TaskKind.Bug, ...(description && { description }) },
+      },
     ],
   });
 

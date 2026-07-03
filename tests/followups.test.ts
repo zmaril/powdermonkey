@@ -68,10 +68,41 @@ test("proposeFollowup authors a pending create-task proposal under the first mil
   if (!r.ok) throw new Error(r.error);
   expect(r.proposal.status).toBe("pending");
   expect(r.proposal.title).toBe("Follow-up: Dedup helpers");
+  // The proposed task is a bug (a hand-back is a spotted defect/cleanup) and the
+  // worker's body rides in the task's own description, not just the summary.
   expect(r.proposal.changes).toEqual([
-    { op: "create", kind: "task", parentId: milestoneA, fields: { title: "Dedup helpers" } },
+    {
+      op: "create",
+      kind: "task",
+      parentId: milestoneA,
+      fields: { title: "Dedup helpers", kind: "bug", description: "two copies" },
+    },
   ]);
   expect(r.proposal.summary).toContain("two copies");
+});
+
+test("proposeFollowup clamps a wall-of-text title and preserves the full text in the description", async () => {
+  const wall =
+    "The reconcile loop rescans every repo on every tick even when nothing changed, " +
+    "which hammers the GitHub API and makes the Active panel lag behind by several seconds";
+  const r = await proposeFollowup({ title: wall, body: "spotted while working t927" });
+  if (!r.ok) throw new Error(r.error);
+  const change = r.proposal.changes[0] as { fields: Record<string, unknown> };
+  const title = change.fields.title as string;
+  expect(title.length).toBeLessThanOrEqual(81); // 80 + the ellipsis
+  expect(title.endsWith("…")).toBe(true);
+  expect(wall.startsWith(title.slice(0, -1))).toBe(true); // a prefix, cut at a word
+  // Nothing lost: the full title AND the body both land in the description.
+  expect(change.fields.description as string).toContain(wall);
+  expect(change.fields.description as string).toContain("spotted while working t927");
+  expect(change.fields.kind).toBe("bug");
+});
+
+test("proposeFollowup omits the description when there is no body and no clamp", async () => {
+  const r = await proposeFollowup({ title: "Short and bodyless" });
+  if (!r.ok) throw new Error(r.error);
+  const change = r.proposal.changes[0] as { fields: Record<string, unknown> };
+  expect(change.fields).toEqual({ title: "Short and bodyless", kind: "bug" });
 });
 
 test("proposeFollowup parents the task under the SOURCE task's milestone + stamps provenance", async () => {

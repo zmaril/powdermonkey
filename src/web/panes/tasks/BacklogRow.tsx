@@ -3,7 +3,7 @@ import type { Phase, Task } from "../../../server/schema.ts";
 import { Decision, ProposalOp, TaskStatus } from "../../../shared/types.ts";
 import { type EntityEdit, type Ghost, editLabel } from "../../ghosts.ts";
 import type { Indexes } from "../../plan-data.ts";
-import { IdTag, ProgressPill, StarToggle } from "../../plan-ui";
+import { IdTag, KindBadge, ProgressPill, StarToggle } from "../../plan-ui";
 import { ProposedStrip } from "./ProposedStrip.tsx";
 import { TaskActions } from "./TaskActions.tsx";
 import { TaskOutcome } from "./TaskOutcome.tsx";
@@ -115,6 +115,7 @@ export function BacklogRow({
         <Box style={{ flex: 1, minWidth: 0 }}>
           <Group gap="snug" wrap="nowrap">
             <IdTag prefix="t" id={task.id} />
+            <KindBadge kind={task.kind} />
             <Text
               size="sm"
               fw={500}

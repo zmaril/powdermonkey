@@ -61,6 +61,23 @@ export const TaskStatus = {
 export type TaskStatus = ValueOf<typeof TaskStatus>;
 
 /**
+ * What flavour of work a task is. Purely descriptive — it colors the card and sets
+ * authoring expectations, never behaviour (dispatch, reconciliation, and progress
+ * are identical across kinds):
+ *
+ * - `Task` — the default: planned, build-shaped work.
+ * - `Bug` — something is wrong and needs fixing. Discovery-first.
+ * - `Spike` — a timeboxed investigation whose deliverable is understanding.
+ *
+ * Kinds deliberately do NOT template phases: discovery-first work (a bug, a spike)
+ * can't be pre-canned — such a task usually starts with few or no phases and
+ * accrues them (hand-authored or co-pilot-proposed) as the work is understood.
+ * See docs/vocabulary.md § Task.
+ */
+export const TaskKind = { Task: "task", Bug: "bug", Spike: "spike" } as const;
+export type TaskKind = ValueOf<typeof TaskKind>;
+
+/**
  * Runtime state of a `claude --remote` session.
  * `Waiting` is the "Try Again" state — inference finished, the session is parked
  * waiting to resume; Playwright is what reads this back and (later) re-clicks it.

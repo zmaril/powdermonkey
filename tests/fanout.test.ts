@@ -82,3 +82,23 @@ test("appends after existing tasks by default", async () => {
   // Appended past the existing position-0 task.
   expect(Math.min(...result.tasks.map((t) => t.position))).toBeGreaterThan(0);
 });
+
+test("stamps kind + description on every fanned task; omitted → plain task, no description", async () => {
+  const result = await fanOutTasks({
+    milestoneId,
+    title: "hunt the crash",
+    kind: "bug",
+    description: "seen in prod on startup",
+    repoIds: [repoA, repoB],
+  });
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(result.tasks.every((t) => t.kind === "bug")).toBe(true);
+  expect(result.tasks.every((t) => t.description === "seen in prod on startup")).toBe(true);
+
+  const plain = await fanOutTasks({ milestoneId, title: "no kind given", repoIds: [repoA] });
+  expect(plain.ok).toBe(true);
+  if (!plain.ok) return;
+  expect(plain.tasks[0].kind).toBe("task");
+  expect(plain.tasks[0].description).toBeNull();
+});

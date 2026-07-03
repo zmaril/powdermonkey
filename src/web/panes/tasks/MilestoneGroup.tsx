@@ -136,8 +136,11 @@ export function MilestoneGroup({
           ))}
           {adding ? (
             <CardEditor
-              onCreate={async (title, names) => {
-                const id = await createTaskWithPhases(milestone.id, title, names, tasks.length);
+              onCreate={async (title, names, kind, description) => {
+                const id = await createTaskWithPhases(milestone.id, title, names, tasks.length, {
+                  kind,
+                  description: description ?? undefined,
+                });
                 // Only a task YOU just added here earns an auto-scroll-into-view.
                 if (id != null) requestReveal(id);
               }}

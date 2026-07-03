@@ -2,7 +2,7 @@ import type { SerializedDockview } from "dockview-react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Note } from "../server/schema.ts";
-import type { Decision } from "../shared/types.ts";
+import type { Decision, TaskKind } from "../shared/types.ts";
 import { DEFAULT_DENSITY, DEFAULT_FONT_SCALE } from "./appearance.ts";
 import { api } from "./client.ts";
 import { DEFAULT_MOTION } from "./motion.ts";
@@ -104,11 +104,14 @@ type State = {
   // without a refetch.
   // Returns the new task's id (or null on failure) so the caller — the Tasks pane's
   // "+ Add task" editor — can queue it for an auto-scroll-into-view as a local add.
+  // `extras` carries the card's non-craft fields: the kind (task | bug | spike) and
+  // the free-form description (context; phases stay pure work).
   createTaskWithPhases: (
     milestoneId: number,
     title: string,
     phaseNames: string[],
     position?: number,
+    extras?: { kind?: TaskKind; description?: string },
   ) => Promise<number | null>;
   // Fan-out create: author one task spec across several repos → one task per repo, all
   // under the same milestone. Returns the created task ids (for reveal), or null on
@@ -120,7 +123,10 @@ type State = {
     repoIds: number[],
     position?: number,
   ) => Promise<number[] | null>;
-  updateTask: (taskId: number, fields: { title?: string }) => Promise<void>;
+  updateTask: (
+    taskId: number,
+    fields: { title?: string; kind?: TaskKind; description?: string | null },
+  ) => Promise<void>;
   createPhase: (taskId: number, name: string, position?: number) => Promise<void>;
   updatePhase: (phaseId: number, fields: { name?: string }) => Promise<void>;
   deletePhase: (phaseId: number) => Promise<void>;
@@ -295,11 +301,13 @@ export const useStore = create<State>()(
         const { error } = await api.tasks({ id: taskId }).patch({ starred });
         if (error) set({ error: String(error.value ?? error.status) });
       },
-      createTaskWithPhases: async (milestoneId, title, phaseNames, position) => {
+      createTaskWithPhases: async (milestoneId, title, phaseNames, position, extras) => {
         const { data, error } = await api.tasks.post({
           milestoneId,
           title,
           ...(position != null && { position }),
+          ...(extras?.kind != null && { kind: extras.kind }),
+          ...(extras?.description != null && { description: extras.description }),
         });
         if (error) {
           set({ error: errMsg(error) });

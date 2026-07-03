@@ -116,3 +116,44 @@ test("soft delete: archive hides from list, get still finds it, restore brings i
   expect(restored?.archivedAt).toBeNull();
   expect((await goalRepo.list()).some((g) => g.id === goal.id)).toBe(true);
 });
+
+test("plan loader carries kind + description through; omitted → plain task, no description", async () => {
+  await loadPlan(
+    parsePlan({
+      goals: [
+        {
+          title: "kinds goal",
+          milestones: [
+            {
+              title: "kinds ms",
+              tasks: [
+                { title: "why is it slow", kind: "spike", description: "profile before guessing" },
+                { title: "just work" },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const tasks = await taskRepo.list();
+  const spike = tasks.find((t) => t.title === "why is it slow");
+  expect(spike?.kind).toBe("spike");
+  expect(spike?.description).toBe("profile before guessing");
+  const plain = tasks.find((t) => t.title === "just work");
+  expect(plain?.kind).toBe("task");
+  expect(plain?.description).toBeNull();
+});
+
+test("plan parse rejects a kind outside task|bug|spike", () => {
+  expect(() =>
+    parsePlan({
+      goals: [
+        {
+          title: "g",
+          milestones: [{ title: "m", tasks: [{ title: "t", kind: "chore" }] }],
+        },
+      ],
+    }),
+  ).toThrow();
+});

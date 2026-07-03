@@ -1,5 +1,5 @@
 import { type Icon, IconCloud, IconDeviceLaptop } from "@tabler/icons-react";
-import { SessionKind, SessionState, TaskStatus } from "../../shared/types.ts";
+import { SessionKind, SessionState, TaskKind, TaskStatus } from "../../shared/types.ts";
 
 // Shared lookup maps for the task/session badges rendered across the panes
 // (Active, Backlog, Archive). Keeping them in one place means a task looks the
@@ -18,6 +18,15 @@ export const SESSION_BADGE: Record<SessionState, { label: string; color: string 
   [SessionState.Waiting]: { label: "Try Again", color: "yellow" },
   [SessionState.Idle]: { label: "idle", color: "gray" }, // lint-allow-string: UI label
   [SessionState.Stopped]: { label: "stopped", color: "red" }, // lint-allow-string: UI label
+};
+
+// Badge color per task kind. Total over TaskKind so adding a kind is a compile
+// error here until it has a color. `task` has one for totality, but KindBadge
+// never renders it — the default kind on every card would be noise.
+export const TASK_KIND_COLOR: Record<TaskKind, string> = {
+  [TaskKind.Task]: "gray",
+  [TaskKind.Bug]: "red",
+  [TaskKind.Spike]: "grape",
 };
 
 // Icon per session kind. Typed as Record<SessionKind, Icon> so adding a kind is a

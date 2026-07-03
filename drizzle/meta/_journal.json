@@ -148,6 +148,13 @@
       "when": 1783035955480,
       "tag": "0020_acoustic_pride",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1783110953165,
+      "tag": "0021_zippy_stingray",
+      "breakpoints": true
     }
   ]
 }
