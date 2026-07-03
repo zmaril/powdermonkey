@@ -94,6 +94,18 @@ GET $PM_URL/notes/:id  # a single note
 
 Treat the `body` of each note as operator instructions/context. The same CRUD as other entities applies (`POST`/`PATCH`/`DELETE` + soft-delete), so you can append or amend a note on request — but the operator usually writes these by hand; default to reading, and only write when asked.
 
+**Task comments (the task's diary) — read them as intent/mood context.** Each task carries an append-only diary of one-line comments the operator mutters onto it from the card ("not sure about the FK here", "blocked on the design call", "this feels wrong"). They're *muttering, not documenting* — unstructured, timestamped, cheap — and they are your best window into what the operator was thinking at that task:
+
+```
+GET  $PM_URL/tasks/:id/comments   # → [{ id, taskId, author, body, createdAt }], oldest first
+POST $PM_URL/tasks/:id/comments   # { "body": "…", "author": "supervisor" } → append one line
+DELETE $PM_URL/tasks/:id/comments/:commentId   # take one of your lines back
+```
+
+Before you touch a task — authoring a **proposal** that reshapes it, deciding what to suggest next, briefing a worker, or being asked "what's the state of t41?" — read its diary first. A line like *"not sure this belongs here"* is a signal the operator was unsure: reflect that in what you author (say so in the proposal's `summary`, e.g. *"operator was unsure about the FK here — this proposal splits it out"*), rather than proposing as if the plan text were the whole truth.
+
+You can speak in the diary too — **always with `"author": "supervisor"`** so your lines are honestly attributed (the UI renders them with the robot glyph, like your other override calls). Use it to leave short context on the task itself: what you noticed, why you proposed something, a heads-up the operator will want at the card. The diary is append-only for you as well: no edit exists — post a new line, or delete one of *your own* lines and re-post. Never delete the operator's lines.
+
 ## Working a task (inside a worktree)
 
 You've been started on one **Task**, on branch `pm/task-<id>`. It has ordered **Phases**, each with a numeric id (in your prompt; or `GET $PM_URL/tasks/<id>` + `/phases` filtered by `task_id`).
