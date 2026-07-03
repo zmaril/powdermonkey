@@ -5,7 +5,7 @@ import { useState } from "react";
 import type { Phase, Task } from "../../../server/schema.ts";
 import { Decision, ProposalOp, TaskStatus } from "../../../shared/types.ts";
 import { type EntityEdit, type Ghost, editLabel } from "../../ghosts.ts";
-import { IdTag, PhaseList, StarToggle } from "../../plan-ui";
+import { IdTag, KindBadge, PhaseList, StarToggle } from "../../plan-ui";
 import { CardEditor } from "./CardEditor.tsx";
 import { GhostCardBody } from "./GhostCardBody.tsx";
 import { ProposedStrip } from "./ProposedStrip.tsx";
@@ -110,6 +110,7 @@ export function BacklogCard({
           {handle}
           <StarToggle task={task} />
           <IdTag prefix="t" id={task.id} />
+          <KindBadge kind={task.kind} />
           <Text
             fw={500}
             size="md"
@@ -133,6 +134,20 @@ export function BacklogCard({
           ✎ Edit
         </Button>
       </Group>
+      {/* Free-form context, kept visually apart from the phases below — the
+          description is the narrative, the phases are the pure work steps. */}
+      {task.description && (
+        <Text
+          size="sm"
+          c="dimmed"
+          lineClamp={3}
+          mb="snug"
+          td={archiveProposed ? "line-through" : undefined}
+          style={{ whiteSpace: "pre-wrap" }}
+        >
+          {task.description}
+        </Text>
+      )}
       {/* A proposed delete strikes the whole task — title and every phase. */}
       <PhaseList phases={phases} struck={archiveProposed} />
       {!selection.active && (

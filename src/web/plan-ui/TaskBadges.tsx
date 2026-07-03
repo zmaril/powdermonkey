@@ -1,5 +1,6 @@
 import { Badge, Group } from "@mantine/core";
 import type { Session, Task } from "../../server/schema.ts";
+import { KindBadge } from "./KindBadge.tsx";
 import { SESSION_BADGE, STATUS_COLOR } from "./constants.ts";
 
 /** The session/status badge cluster shown next to a task title. `showStatus` is off
@@ -16,6 +17,7 @@ export function TaskBadges({
   const state = session?.state ?? task.sessionState;
   return (
     <Group gap="snug" wrap="nowrap">
+      <KindBadge kind={task.kind} />
       {session?.needsInput && (
         <Badge color="yellow" variant="filled">
           needs you
