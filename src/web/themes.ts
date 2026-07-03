@@ -1,3 +1,4 @@
+// straitjacket-allow-file:color  the blessed palette source of truth — every editor palette's hex values live here by design
 import type { MantineColorsTuple } from "@mantine/core";
 import {
   themeAbyss,

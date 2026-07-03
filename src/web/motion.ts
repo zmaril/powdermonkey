@@ -2,7 +2,7 @@
 // density / font. ALL animation in the app is defined in one place — motion.css for the
 // CSS (transitions, keyframes) and this file for the durations/easing — and keyed off a
 // single setting so it can be softened or switched off entirely. Components never write
-// ad-hoc transitions; that's enforced by scripts/lint-motion.ts.
+// ad-hoc transitions; that.s enforced by straitjacket (motion rule).
 //
 // How the setting reaches everything:
 //   • Our own transitions/keyframes (motion.css) read the `--pm-dur-*` variables this

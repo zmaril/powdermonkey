@@ -1,3 +1,4 @@
+/* straitjacket-allow-file:color  blessed palette file — hardcoded colors live here by design */
 /* App-wide chrome that lives outside Mantine's theme object: base canvas, text
  * smoothing, scrollbars, text selection, and re-skinning the dockview "abyss"
  * theme. Everything color-ish here reads off the `--pm-*` custom properties that
