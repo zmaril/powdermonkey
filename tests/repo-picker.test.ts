@@ -86,8 +86,13 @@ describe("listMyRepos", () => {
   });
 
   test("maps a failed gh to ok:false with the stderr message", async () => {
-    const r = await listMyRepos(async () => fail("gh: To get started with GitHub CLI, run gh auth login"));
-    expect(r).toEqual({ ok: false, error: "gh: To get started with GitHub CLI, run gh auth login" });
+    const r = await listMyRepos(async () =>
+      fail("gh: To get started with GitHub CLI, run gh auth login"),
+    );
+    expect(r).toEqual({
+      ok: false,
+      error: "gh: To get started with GitHub CLI, run gh auth login",
+    });
   });
 });
 
