@@ -12,6 +12,7 @@ import { GhostCardBody } from "./GhostCardBody.tsx";
 import { useHighlighted } from "./new-task.ts";
 import { shiftSelectHandlers, useSelection } from "./selection-context.ts";
 import { TaskActions } from "./TaskActions.tsx";
+import { TaskDiary } from "./TaskDiary.tsx";
 import { TaskOutcome } from "./TaskOutcome.tsx";
 import { TaskProposalStrips } from "./TaskProposalStrips.tsx";
 import { isTerminal } from "./task-status.ts";
@@ -125,6 +126,8 @@ export function BacklogCard({
       )}
       {/* A proposed delete strikes the whole task — title and every phase. */}
       <PhaseList phases={phases} struck={archiveProposed} />
+      {/* The task's diary: comments in time order, with the one-line composer below. */}
+      <TaskDiary taskId={task.id} />
       {!selection.active && (
         <Group justify="flex-end" mt="cozy">
           {terminal ? <TaskOutcome task={task} /> : <TaskActions ids={[task.id]} />}

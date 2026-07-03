@@ -1,7 +1,7 @@
 import type { SerializedDockview } from "dockview-react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Note } from "../server/schema.ts";
+import type { Note, TaskComment } from "../server/schema.ts";
 import type { Decision, TaskKind } from "../shared/types.ts";
 import { DEFAULT_DENSITY, DEFAULT_FONT_SCALE } from "./appearance.ts";
 import { api } from "./client.ts";
@@ -132,6 +132,11 @@ export type State = {
       repoId?: number | null;
     },
   ) => Promise<void>;
+  // The task's diary (append-only): append a line, or take one back. No edit —
+  // there is no route for it. Append returns the created row so the composer can
+  // reconcile its optimistic echo against the synced insert; null on failure.
+  appendComment: (taskId: number, body: string) => Promise<TaskComment | null>;
+  deleteComment: (taskId: number, commentId: number) => Promise<void>;
   createPhase: (taskId: number, name: string, position?: number) => Promise<void>;
   updatePhase: (phaseId: number, fields: { name?: string }) => Promise<void>;
   deletePhase: (phaseId: number) => Promise<void>;
@@ -346,6 +351,18 @@ export const useStore = create<State>()(
       },
       updateTask: async (taskId, fields) => {
         const { error } = await api.tasks({ id: taskId }).patch(fields);
+        if (error) set({ error: errMsg(error) });
+      },
+      appendComment: async (taskId, body) => {
+        const { data, error } = await api.tasks({ id: taskId }).comments.post({ body });
+        if (error) {
+          set({ error: errMsg(error) });
+          return null;
+        }
+        return data && "id" in data ? data : null;
+      },
+      deleteComment: async (taskId, commentId) => {
+        const { error } = await api.tasks({ id: taskId }).comments({ commentId }).delete();
         if (error) set({ error: errMsg(error) });
       },
       createPhase: async (taskId, name, position) => {
