@@ -115,37 +115,44 @@ const SYNC_TABLES: Record<string, { sql: string; key: string }> = Object.fromEnt
   }),
 );
 
+// The two response-shaping idioms every route below repeats: 404 when a lookup
+// misses, 400 when an action reports `{ ok: false }`. Factored out so each handler
+// stays a one-liner and the status codes live in one place.
+function orNotFound<T>(
+  set: { status?: number | string },
+  row: T | null | undefined,
+): T | { error: string } {
+  if (!row) {
+    set.status = 404;
+    return { error: "not found" };
+  }
+  return row;
+}
+function orBadRequest<T extends { ok: boolean }>(set: { status?: number | string }, result: T): T {
+  if (!result.ok) set.status = 400;
+  return result;
+}
+
 /** A CRUD route group: list / get / create / update / archive(DELETE) / restore. */
 function resource(name: string, repo: Repo, body: { create: TSchema; update: TSchema }) {
   return new Elysia({ prefix: `/${name}` })
     .get("/", ({ query }) => repo.list({ includeArchived: query.archived === "true" }), {
       query: t.Object({ archived: t.Optional(t.String()) }),
     })
-    .get("/:id", async ({ params, set }) => {
-      const row = await repo.get(Number(params.id));
-      if (!row) set.status = 404;
-      return row ?? { error: "not found" };
-    })
+    .get("/:id", async ({ params, set }) => orNotFound(set, await repo.get(Number(params.id))))
     .post("/", ({ body }) => repo.create(body), { body: body.create })
     .patch(
       "/:id",
-      async ({ params, body, set }) => {
-        const row = await repo.update(Number(params.id), body as Record<string, unknown>);
-        if (!row) set.status = 404;
-        return row ?? { error: "not found" };
-      },
+      async ({ params, body, set }) =>
+        orNotFound(set, await repo.update(Number(params.id), body as Record<string, unknown>)),
       { body: body.update },
     )
-    .delete("/:id", async ({ params, set }) => {
-      const row = await repo.archive(Number(params.id));
-      if (!row) set.status = 404;
-      return row ?? { error: "not found" };
-    })
-    .post("/:id/restore", async ({ params, set }) => {
-      const row = await repo.restore(Number(params.id));
-      if (!row) set.status = 404;
-      return row ?? { error: "not found" };
-    });
+    .delete("/:id", async ({ params, set }) =>
+      orNotFound(set, await repo.archive(Number(params.id))),
+    )
+    .post("/:id/restore", async ({ params, set }) =>
+      orNotFound(set, await repo.restore(Number(params.id))),
+    );
 }
 
 // Tasks carry runtime routes (dispatch/status) on top of CRUD. Keeping them in the
@@ -179,124 +186,88 @@ const tasksGroup = resource("tasks", taskRepo, models.tasks)
   // Fan-out create: author one task spec across N repos → one task per repo, all under
   // the same milestone (see fanout.ts). The multi-select repo picker POSTs here instead
   // of the single-task create so "add the linter to three repos" is authored once.
-  .post(
-    "/fan-out",
-    async ({ body, set }) => {
-      const result = await fanOutTasks(body);
-      if (!result.ok) set.status = 400;
-      return result;
-    },
-    {
-      body: t.Object({
-        milestoneId: t.Number(),
-        title: t.String({ minLength: 1 }),
-        repoIds: t.Array(t.Number(), { minItems: 1 }),
-        phases: t.Optional(t.Array(t.Object({ name: t.String({ minLength: 1 }) }))),
-        position: t.Optional(t.Number()),
-      }),
-    },
-  )
+  .post("/fan-out", async ({ body, set }) => orBadRequest(set, await fanOutTasks(body)), {
+    body: t.Object({
+      milestoneId: t.Number(),
+      title: t.String({ minLength: 1 }),
+      repoIds: t.Array(t.Number(), { minItems: 1 }),
+      phases: t.Optional(t.Array(t.Object({ name: t.String({ minLength: 1 }) }))),
+      position: t.Optional(t.Number()),
+    }),
+  })
   .post(
     "/:id/dispatch",
-    async ({ params, body, set }) => {
-      const result = await dispatchTask(launchIds(params.id, body), body?.comment);
-      if (!result.ok) set.status = 400;
-      return result;
-    },
+    async ({ params, body, set }) =>
+      orBadRequest(set, await dispatchTask(launchIds(params.id, body), body?.comment)),
     { body: launchBody },
   )
   // Start a local session: worktree on pm/task-<id> + a session row + trailer block.
   // Accepts extra `taskIds` to fold several tasks into the one worktree session.
   .post(
     "/:id/start-local",
-    async ({ params, body, set }) => {
-      const result = await startLocalSession(launchIds(params.id, body), {
-        comment: body?.comment,
-      });
-      if (!result.ok) set.status = 400;
-      return result;
-    },
+    async ({ params, body, set }) =>
+      orBadRequest(
+        set,
+        await startLocalSession(launchIds(params.id, body), { comment: body?.comment }),
+      ),
     { body: launchBody },
   )
   // Teleport a running cloud session down to a local worktree session, continuing
   // the same conversation via `claude --teleport <id>`.
-  .post("/:id/teleport", async ({ params, set }) => {
-    const result = await teleportTask(Number(params.id));
-    if (!result.ok) set.status = 400;
-    return result;
-  })
+  .post("/:id/teleport", async ({ params, set }) =>
+    orBadRequest(set, await teleportTask(Number(params.id))),
+  )
   // Re-fetch the worker prompt + phase trailers for a task — the same content
   // start-local/dispatch hand to a worker, available read-only without starting one.
-  .get("/:id/prompt", async ({ params, set }) => {
-    const result = await loadTaskPrompt(Number(params.id));
-    if (!result) set.status = 404;
-    return result ?? { error: "not found" };
-  })
+  .get("/:id/prompt", async ({ params, set }) =>
+    orNotFound(set, await loadTaskPrompt(Number(params.id))),
+  )
   // Override decisions (the non-reconciled path): close a task by hand for work that
   // never landed a trailer (`complete` → merged), abandon it (`cancel` → cancelled),
   // or walk either back (`reopen`). Each stamps `decision_source` with the caller's
   // `source` (operator default, or supervisor). Reconciled rows are never touched.
   .post(
     "/:id/complete",
-    async ({ params, body, set }) => {
-      const row = await completeTask(Number(params.id), decisionSource(body));
-      if (!row) set.status = 404;
-      return row ?? { error: "not found" };
-    },
+    async ({ params, body, set }) =>
+      orNotFound(set, await completeTask(Number(params.id), decisionSource(body))),
     { body: sourceBody },
   )
   .post(
     "/:id/cancel",
-    async ({ params, body, set }) => {
-      const row = await cancelTask(Number(params.id), decisionSource(body));
-      if (!row) set.status = 404;
-      return row ?? { error: "not found" };
-    },
+    async ({ params, body, set }) =>
+      orNotFound(set, await cancelTask(Number(params.id), decisionSource(body))),
     { body: sourceBody },
   )
-  .post("/:id/reopen", async ({ params, set }) => {
-    const row = await reopenTask(Number(params.id));
-    if (!row) set.status = 404;
-    return row ?? { error: "not found" };
-  });
+  .post("/:id/reopen", async ({ params, set }) =>
+    orNotFound(set, await reopenTask(Number(params.id))),
+  );
 
 // Phases carry the same complete/reopen on top of CRUD — the grain at which a
 // squash-dropped trailer is most often patched up by hand.
 const phasesGroup = resource("phases", phaseRepo, models.phases)
   .post(
     "/:id/complete",
-    async ({ params, body, set }) => {
-      const row = await completePhase(Number(params.id), decisionSource(body));
-      if (!row) set.status = 404;
-      return row ?? { error: "not found" };
-    },
+    async ({ params, body, set }) =>
+      orNotFound(set, await completePhase(Number(params.id), decisionSource(body))),
     { body: sourceBody },
   )
-  .post("/:id/reopen", async ({ params, set }) => {
-    const row = await reopenPhase(Number(params.id));
-    if (!row) set.status = 404;
-    return row ?? { error: "not found" };
-  });
+  .post("/:id/reopen", async ({ params, set }) =>
+    orNotFound(set, await reopenPhase(Number(params.id))),
+  );
 
 // Sessions carry `land` (graceful teardown of finished work), `stop` (abort a
 // running session) and `open-editor` (VS Code on the operator's machine) on top
 // of CRUD.
 const sessionsGroup = resource("sessions", sessionRepo, models.sessions)
-  .post("/:id/land", async ({ params, set }) => {
-    const result = await landSession(Number(params.id));
-    if (!result.ok) set.status = 400;
-    return result;
-  })
-  .post("/:id/stop", async ({ params, set }) => {
-    const result = await stopSession(Number(params.id));
-    if (!result.ok) set.status = 400;
-    return result;
-  })
-  .post("/:id/open-editor", async ({ params, set }) => {
-    const result = await openSessionEditor(Number(params.id));
-    if (!result.ok) set.status = 400;
-    return result;
-  });
+  .post("/:id/land", async ({ params, set }) =>
+    orBadRequest(set, await landSession(Number(params.id))),
+  )
+  .post("/:id/stop", async ({ params, set }) =>
+    orBadRequest(set, await stopSession(Number(params.id))),
+  )
+  .post("/:id/open-editor", async ({ params, set }) =>
+    orBadRequest(set, await openSessionEditor(Number(params.id))),
+  );
 
 // Proposals: a pending change-set the operator decides on. Authored when the
 // supervisor is SUGGESTING a change; reviewed as markdown (GET /:id/markdown renders
@@ -308,11 +279,7 @@ const proposalsGroup = new Elysia({ prefix: "/proposals" })
   .get("/", ({ query }) => listProposals({ status: query.status }), {
     query: t.Object({ status: t.Optional(t.String()) }),
   })
-  .get("/:id", async ({ params, set }) => {
-    const row = await getProposal(Number(params.id));
-    if (!row) set.status = 404;
-    return row ?? { error: "not found" };
-  })
+  .get("/:id", async ({ params, set }) => orNotFound(set, await getProposal(Number(params.id))))
   .post("/", ({ body }) => createProposal(body as CreateProposalInput), {
     body: proposalCreateBody,
   })
@@ -358,11 +325,7 @@ const proposalsGroup = new Elysia({ prefix: "/proposals" })
 // worker was on, which picks the milestone) sharpen the proposal.
 const followupsGroup = new Elysia({ prefix: "/followups" }).post(
   "/",
-  async ({ body, set }) => {
-    const result = await proposeFollowup(body);
-    if (!result.ok) set.status = 400;
-    return result;
-  },
+  async ({ body, set }) => orBadRequest(set, await proposeFollowup(body)),
   {
     body: t.Object({
       title: t.String(),
