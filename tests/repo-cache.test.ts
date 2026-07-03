@@ -1,44 +1,29 @@
 import { beforeAll, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { setupTestDb, tmp } from "./db-harness.ts";
 
 // Point the DB + cache root at scratch dirs, and clone from a LOCAL remote (no
 // network): PM_CLONE_BASE + "<slug>.git" resolves to the bare repo we build below.
-process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
-const cacheRoot = mkdtempSync(join(tmpdir(), "pm-repos-"));
-const remotesRoot = mkdtempSync(join(tmpdir(), "pm-remotes-"));
+const cacheRoot = tmp("pm-repos-");
+const remotesRoot = tmp("pm-remotes-");
 process.env.PM_REPOS_DIR = cacheRoot;
 process.env.PM_CLONE_BASE = `${remotesRoot}/`;
 
-const { ready } = await import("../src/server/db.ts");
+const { ready } = await setupTestDb();
 const { ensureRepo, repoCachePath, repoDirForTask } = await import("../src/server/repo-cache.ts");
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
 const { taskRepo, repoRepo } = await import("../src/server/crud.ts");
 
 const SLUG = "acme/widget";
 
-async function git(cwd: string, ...args: string[]): Promise<void> {
-  const proc = Bun.spawn(["git", ...args], {
-    cwd,
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "t",
-      GIT_AUTHOR_EMAIL: "t@t",
-      GIT_COMMITTER_NAME: "t",
-      GIT_COMMITTER_EMAIL: "t@t",
-    },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  await proc.exited;
-}
+import { git } from "./git-helper.ts";
 
 beforeAll(async () => {
   await ready();
   // Build a local "remote" the ensureRepo clone URL resolves to: <remotesRoot>/acme/widget.git
   const remote = join(remotesRoot, `${SLUG}.git`);
-  const seed = mkdtempSync(join(tmpdir(), "pm-seed-"));
+  const seed = tmp("pm-seed-");
   await git(seed, "init", "-b", "main");
   writeFileSync(join(seed, "README.md"), "hello\n");
   await git(seed, "add", ".");

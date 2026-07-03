@@ -1,15 +1,12 @@
 import { beforeAll, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { setupTestDb } from "./db-harness.ts";
 
 // Follow-up capture: a worker hand-back becomes a pending `create task` proposal in
 // the existing review flow, and the cloud slurp (ingestFollowups) is idempotent by
 // GitHub comment id — the watcher re-reads the same `<!-- pm:followup -->` comment
 // every tick and on a restart catch-up, so a comment must become a proposal exactly
 // once. Run against a throwaway PGlite store, like the other DB-touching suites.
-process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
-const { ready } = await import("../src/server/db.ts");
+const { ready } = await setupTestDb();
 const { loadPlan } = await import("../src/server/plan.ts");
 const { milestoneRepo, taskRepo } = await import("../src/server/crud.ts");
 const { listProposals, decideProposal } = await import("../src/server/proposals.ts");
@@ -165,7 +162,15 @@ test("ingestFollowups handles a real (billions-range) GitHub comment id without 
   const p = (await listProposals()).find((x) => x.sourceCommentId === bigId);
   expect(p).toMatchObject({ sourcePr: 9, sourceTaskId: taskInB, status: "pending" });
   // And still idempotent at that magnitude (the dedup WHERE also compares the big id).
-  expect(await ingestFollowups(cloudPr({ number: 9, taskId: taskInB, followups: [{ commentId: bigId, title: "Big-id follow-up", body: "ctx", updatedAt: "t3" }] }))).toBe(0);
+  expect(
+    await ingestFollowups(
+      cloudPr({
+        number: 9,
+        taskId: taskInB,
+        followups: [{ commentId: bigId, title: "Big-id follow-up", body: "ctx", updatedAt: "t3" }],
+      }),
+    ),
+  ).toBe(0);
 });
 
 test("ingestFollowups is idempotent — re-reading the same comments creates nothing new", async () => {

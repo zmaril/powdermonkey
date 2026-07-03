@@ -1,14 +1,11 @@
 import { beforeAll, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { setupTestDb } from "./db-harness.ts";
 
 // pr-store persists the PR state github-watch polls, and — crucially — the rebase
 // ask ledger alongside it. The invariant that lets those two share a row is that a
 // poll upsert NEVER disturbs the ledger. These tests pin that, plus the round-trip
 // and the mark/clear episode lifecycle, against a throwaway PGlite store.
-process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
-const { ready } = await import("../src/server/db.ts");
+const { ready } = await setupTestDb();
 const { listPrs, upsertPrState, isRebaseAsked, markRebaseAsked, clearRebaseAsked } = await import(
   "../src/server/pr-store.ts"
 );
