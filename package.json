@@ -26,7 +26,7 @@
     "db:generate": "drizzle-kit generate",
     "check": "biome check src && bun run scripts/lint-strings.ts && bun run scripts/lint-dock-theme.ts && bun run scripts/lint-spacing.ts",
     "size": "git ls-files 'src/**/*.ts' 'src/**/*.tsx' | xargs wc -l | tail -1",
-    "test": "for f in tests/*.test.ts; do echo \"# $f\"; bun test \"$f\" || exit 1; done",
+    "test": "for f in tests/*.test.ts; do echo \"# $f\"; bun test --preload ./tests/_teardown.ts \"$f\" || exit 1; done",
     "prepublishOnly": "bun run build:web"
   },
   "dependencies": {
