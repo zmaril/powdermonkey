@@ -40,6 +40,7 @@ import {
 } from "./proposals.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { reconcile } from "./reconcile.ts";
+import { repoIconResponse } from "./repo-icon.ts";
 import {
   goals as goalsTable,
   milestones as milestonesTable,
@@ -270,6 +271,19 @@ const sessionsGroup = resource("sessions", sessionRepo, models.sessions)
   .post("/:id/open-editor", async ({ params, set }) =>
     orBadRequest(set, await openSessionEditor(Number(params.id))),
   );
+
+// Repos carry the identity-icon route on top of CRUD: the cached favicon/avatar
+// (resolved lazily on the first ask — see repo-icon.ts), or 404 when nothing
+// resolved (the UI falls back to the repo's color swatch).
+const reposGroup = resource("repos", repoRepo, models.repos).get(
+  "/:id/icon",
+  async ({ params, set }) => {
+    const res = await repoIconResponse(Number(params.id));
+    if (res) return res;
+    set.status = 404;
+    return { error: "no icon" };
+  },
+);
 
 // Proposals: a pending change-set the operator decides on. Authored when the
 // supervisor is SUGGESTING a change; reviewed as markdown (GET /:id/markdown renders
@@ -681,7 +695,7 @@ export const app = new Elysia()
   .use(phasesGroup)
   .use(sessionsGroup)
   .use(resource("notes", noteRepo, models.notes))
-  .use(resource("repos", repoRepo, models.repos))
+  .use(reposGroup)
   .use(proposalsGroup)
   .use(followupsGroup)
   // Static: bundled web app, SPA fallback to index.html. Served from the package's

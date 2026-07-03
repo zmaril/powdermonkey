@@ -164,8 +164,9 @@ export const repos = pgTable("repos", {
   // palette (re-skins on theme change). Null means "derive from the slug"; an operator
   // override stores an explicit seed here.
   colorSeed: text("color_seed"),
-  // Cached icon under ~/.powdermonkey/repos/<slug>/icon.png (favicon, else owner
-  // avatar), served at /repos/:id/icon. Null until resolved.
+  // Cached icon under ~/.powdermonkey/repos/.icons/<owner>/<name>.png (favicon,
+  // else owner avatar — see repo-icon.ts), served at /repos/:id/icon. Null until
+  // resolved (lazily, on the first icon request).
   iconPath: text("icon_path"),
   ...timestamps,
 });
