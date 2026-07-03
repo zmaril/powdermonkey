@@ -4,14 +4,11 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { pullMain } from "./git.ts";
+import { repoDirForTask, supervisorRepoDir } from "./repo-cache.ts";
 import { type Phase, type Session, type Task, phases, sessions, tasks } from "./schema.ts";
 import { linkSessionTasks } from "./session-tasks.ts";
 
 const SHELL = process.env.SHELL || "bash";
-
-function repoDir(): string {
-  return process.env.PM_REPO_DIR ?? process.cwd();
-}
 
 // Dispatches a Task as a `claude --remote` session against main.
 //
@@ -147,10 +144,10 @@ function dispatchCmd(promptPath: string): string {
  *  Given a real terminal it uses its own runtime — same as an interactive shell.
  *  We run through a login shell so PATH/profile resolve `claude`, and DON'T fall
  *  through to an interactive shell, so the process exits once the command returns. */
-function runInPty(launch: string): Promise<{ code: number; output: string }> {
+function runInPty(launch: string, cwd: string): Promise<{ code: number; output: string }> {
   let buf = "";
   const options = {
-    cwd: repoDir(),
+    cwd,
     env: { ...process.env, TERM: "xterm-256color" },
     terminal: {
       cols: 120,
@@ -192,10 +189,28 @@ export async function dispatchTask(
   const ids = built.tasks.map((t) => t.id);
   const primary = ids[0];
 
-  // Know the repo's current state before dispatching. A non-ff pull is logged
-  // but not fatal — dispatch still execs against main in the cloud.
-  const pull = await pullMain();
-  if (!pull.ok) console.warn(`git pull (non-fatal): ${pull.output}`);
+  // Resolve the repo this task runs in and make its cache clone current: dispatch's
+  // PTY runs with that clone as cwd, so `claude --remote` infers the right GitHub
+  // repo from its remote (no repo flag needed). A clone we can't produce is fatal —
+  // there'd be no working tree to infer the repo from. A repo-less task falls back to
+  // the supervisor's own checkout (repoDirForTask), preserving single-repo behavior.
+  const resolved = await repoDirForTask(primary, { ensure: true });
+  if (resolved.error) {
+    return {
+      ok: false,
+      error: `repo cache unavailable: ${resolved.error}`,
+      output: resolved.output,
+    };
+  }
+  const runDir = resolved.dir;
+
+  // Know the repo's current state before dispatching. A per-repo cache clone was just
+  // fetched by ensureRepo; for the supervisor-repo fallback, pull main here instead. A
+  // non-ff pull is logged but not fatal — dispatch still execs against main in the cloud.
+  if (runDir === supervisorRepoDir()) {
+    const pull = await pullMain();
+    if (!pull.ok) console.warn(`git pull (non-fatal): ${pull.output}`);
+  }
 
   const { prompt } = built;
   let output: string;
@@ -204,12 +219,15 @@ export async function dispatchTask(
     output = `Created cloud session\nView: https://claude.ai/code/dry-run-${primary}`;
   } else {
     // Stash the prompt in a file so a multi-line prompt never has to survive shell
-    // quoting, then run the dispatch command in a PTY (claude needs a TTY).
-    const dir = join(repoDir(), "data", "prompts");
+    // quoting, then run the dispatch command in a PTY (claude needs a TTY) with the
+    // task's cache clone as cwd. The prompt file lives under the supervisor's own data
+    // dir — never inside the cache clone — so it can't dirty the clone. Its absolute
+    // path is fed to `cat`, so cwd being the clone doesn't matter for reading it.
+    const dir = join(supervisorRepoDir(), "data", "prompts");
     mkdirSync(dir, { recursive: true });
     const promptPath = join(dir, `dispatch-${primary}.md`);
     writeFileSync(promptPath, `${prompt}\n`);
-    const { code, output: out } = await runInPty(dispatchCmd(promptPath));
+    const { code, output: out } = await runInPty(dispatchCmd(promptPath), runDir);
     output = out;
     if (code !== 0) return { ok: false, error: `dispatch exited ${code}`, output };
   }
