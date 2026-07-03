@@ -1,0 +1,17 @@
+name: straitjacket
+
+# Scan the repo for the weird code and text LLMs tend to generate.
+# https://straitjacket.dev
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  scan:
+    name: straitjacket
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: zmaril/straitjacket@v0.1.0
