@@ -49,6 +49,25 @@ A coherent grouping of tasks toward a goal — a checkpoint, an area, a chapter.
 ### Task
 A unit of dispatchable work. **Targets exactly one Repo** — its environment. Id chip `t`.
 
+**Kind (`task` | `bug` | `spike`).** What flavour of work it is — purely descriptive
+(it colors the card and sets authoring expectations), never behaviour: dispatch,
+reconciliation, and progress are identical across kinds.
+
+- **task** — the default: planned, build-shaped work.
+- **bug** — something is wrong and needs fixing.
+- **spike** — a timeboxed investigation whose deliverable is understanding.
+
+Kinds deliberately do **not** template phases. Bugs and spikes are **discovery-first**:
+what the work actually is emerges from doing it, so it can't be pre-canned into a
+checklist at authoring time. Such a task usually starts with **few or no phases** and
+accrues them — hand-authored, or co-pilot-proposed — as the work is understood. (This is
+also why a worker's follow-up hand-back is authored as a phase-less `bug`.)
+
+**Description vs. phases.** A task may carry a free-form **description** — the *context*:
+why it exists, what's known, where it was seen. Phases stay **pure work** — discrete,
+completable steps, the grain progress is measured at. Narrative goes in the description,
+never smuggled into phase names; a phase you can't complete isn't a phase.
+
 A task **inherits its default repo(s)** from its milestone, else its goal — so a goal
 scoped to a repo group pre-fills every task under it. Authoring still offers a
 **multi-select repo picker** (pre-filled from the inherited default, freely overridden):
@@ -60,6 +79,9 @@ three times.
 ### Phase
 An author-defined sub-step within a Task. **The grain at which progress is measured**
 (reconciliation marks phases done from `PM-Phase:` commit trailers on `main`). Id chip `#`.
+**Pure work only**: a phase is a discrete, completable step — context and narrative belong
+in the task's description. Discovery-first tasks (bugs, spikes) legitimately start with
+none and gain phases as the work is understood.
 
 ### Repo
 A **GitHub git repo** (`owner/repo`, a default branch), in a **flat global list** you
