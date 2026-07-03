@@ -29,10 +29,11 @@ export async function currentBranch(): Promise<string> {
 /**
  * Concatenated commit message bodies for every commit reachable from `branch`.
  * Reconciliation scans these for PM trailers. Returns "" if the branch is missing
- * (e.g. a fresh repo) rather than throwing.
+ * (e.g. a fresh repo) rather than throwing. `cwd` selects the repo to read —
+ * reconciliation passes each registered repo's cache clone in turn.
  */
-export async function commitBodies(branch: string): Promise<string> {
-  const r = await run(["log", branch, "--format=%B%x00"]);
+export async function commitBodies(branch: string, cwd?: string): Promise<string> {
+  const r = await run(["log", branch, "--format=%B%x00"], cwd);
   return r.ok ? r.output : "";
 }
 

@@ -7,8 +7,10 @@ import {
   SessionState,
   TaskStatus,
 } from "../shared/types.ts";
+import { repoRepo } from "./crud.ts";
 import { db } from "./db.ts";
 import { commitBodies } from "./git.ts";
+import { ensureRepo } from "./repo-cache.ts";
 import { phases, sessions, sessionTasks, tasks } from "./schema.ts";
 import { landSession } from "./worktree.ts";
 
@@ -18,9 +20,14 @@ import { landSession } from "./worktree.ts";
 //   PM-Phase: <id>     one or more phases finished (repeatable / comma-separated)
 //   PM-Task:  <id>     shortcut: the whole task finished (all its phases)
 //
-// Reconciliation scans every commit reachable from main, marks those phases done,
-// and rolls a task to `merged` once all its phases are done. It is idempotent:
-// re-marking a done phase is a no-op, so it is safe to run on a poll loop.
+// Reconciliation loops every registered repo: it brings the repo's cache clone to
+// freshness (clone/fetch via ensureRepo), scans every commit reachable from
+// `origin/<defaultBranch>` for trailers, and unions the ids across repos — phase
+// and task ids are globally unique, so a trailer names its work no matter which
+// repo it landed in. The supervisor's own checkout is always scanned too (the
+// pre-registry path — and the fallback for repo-less tasks). Marked phases roll
+// a task to `merged` once all its phases are done. It is idempotent: re-marking a
+// done phase is a no-op, so it is safe to run on a poll loop.
 
 const MAIN_BRANCH = process.env.PM_MAIN_BRANCH ?? "main";
 
@@ -28,6 +35,9 @@ export type ReconcileResult = {
   phasesMarked: number;
   tasksCompleted: number;
   sessionsArchived: number;
+  /** Registered repos whose cache clone was scanned this pass (the supervisor's
+   *  own checkout is scanned besides and not counted here). */
+  reposScanned: number;
   phaseTrailers: number[];
   taskTrailers: number[];
 };
@@ -102,8 +112,29 @@ async function archiveMergedTaskSessions(): Promise<number> {
   return archived;
 }
 
+// The trailer text of every repo we know about: the supervisor's own checkout
+// (its local MAIN_BRANCH — pulled on merge events, never fetched here), then each
+// live registered repo's cache clone, fetched to freshness and read at
+// `origin/<defaultBranch>` so trailers merged on GitHub are seen without any local
+// branch bookkeeping. A repo whose clone can't be ensured (bad slug, offline first
+// clone) is skipped with a warning — the others still reconcile.
+async function scanRepos(): Promise<{ log: string; reposScanned: number }> {
+  const texts = [await commitBodies(MAIN_BRANCH)];
+  let reposScanned = 0;
+  for (const repo of await repoRepo.list()) {
+    const res = await ensureRepo(repo.slug);
+    if (!res.ok) {
+      console.warn(`reconcile: skipping ${repo.slug}: ${res.error}`);
+      continue;
+    }
+    texts.push(await commitBodies(`origin/${repo.defaultBranch}`, res.dir));
+    reposScanned++;
+  }
+  return { log: texts.join("\n"), reposScanned };
+}
+
 export async function reconcile(): Promise<ReconcileResult> {
-  const log = await commitBodies(MAIN_BRANCH);
+  const { log, reposScanned } = await scanRepos();
   const phaseTrailers = scanTrailers(log, "PM-Phase");
   const taskTrailers = scanTrailers(log, "PM-Task");
 
@@ -212,6 +243,7 @@ export async function reconcile(): Promise<ReconcileResult> {
     phasesMarked,
     tasksCompleted,
     sessionsArchived,
+    reposScanned,
     phaseTrailers: [...phaseTrailers],
     taskTrailers: [...taskTrailers],
   };

@@ -247,8 +247,8 @@ milestone, `t41` a task, `#137` a phase, `r4` a repo.
 - **Local worktree sessions** (in scope for v1) cut `pm/task-<id>` from the task's repo cache
   clone rather than the supervisor's own repo, so `start-local` works on any registered repo.
 - **Reconciliation** loops the registered repos, `git fetch`es each cache clone, and scans
-  its `main` for `PM-Phase:` / `PM-Task:` trailers. (Today it scans a single repo — the
-  loop is the main new piece of plumbing.)
+  its `origin/<default branch>` for `PM-Phase:` / `PM-Task:` trailers (the supervisor's own
+  checkout is scanned besides, for repo-less installs).
 - **PR watching** polls each registered repo instead of one cached global slug.
 - **Windows are per-device** — session-restore state lives in the browser/desktop client, not
   synced across machines (for now).
