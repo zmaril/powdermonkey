@@ -6,6 +6,7 @@ import { Elysia, t } from "elysia";
 import { P, match } from "ts-pattern";
 import { Decision, OverrideSource, ProposalStatus, SessionState } from "../shared/types.ts";
 import { applyProposal, decideChange } from "./apply.ts";
+import { type SqlClient, dumpSnapshot } from "./backup.ts";
 import { getClaudeUsage } from "./claude-usage.ts";
 import { cancelTask, completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
 import { cors } from "./cors.ts";
@@ -388,6 +389,15 @@ export const app = new Elysia()
   // Persisted in the pull_requests table, so it's served from last-known state on
   // boot — the Active panel reads it for status badges.
   .get("/cloud-prs", () => currentCloudPrs())
+  // On-demand logical backup of the whole store — a version-independent JSON snapshot
+  // (see backup.ts). Served from the live connection because the supervisor holds the
+  // single writer lock; the CLI `powdermonkey backup` just saves this response.
+  .get("/backup", async ({ set }) => {
+    const snap = await dumpSnapshot(pg as unknown as SqlClient, new Date().toISOString());
+    set.headers["content-disposition"] =
+      `attachment; filename="pm-backup-${snap.meta.takenAt.replace(/[:.]/g, "-")}.json"`;
+    return snap;
+  })
   // The operator's Claude usage/limits (rolling 5-hour + weekly windows), read from
   // the same OAuth usage endpoint Claude Code's `/usage` uses. Best-effort: returns
   // `available: false` with a reason when there's no login / the API is down, never

@@ -16,10 +16,11 @@
 // there); PowderMonkey only supplies the code. `attach` doesn't even need the cwd —
 // the tmux socket is global per user — so it works from anywhere.
 
-import { symlinkSync, unlinkSync } from "node:fs";
+import { mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import pkg from "../package.json" with { type: "json" };
 import { attachDashboard, attachTo } from "../src/server/attach.ts";
+import type { SqlClient } from "../src/server/backup.ts";
 import { launchServer, runWithBackoff } from "../src/server/supervise.ts";
 import { TMUX_BIN } from "../src/server/tmux.ts";
 
@@ -31,6 +32,10 @@ usage:
   powdermonkey attach           open the tmux dashboard: one pane per session + server
   powdermonkey attach <target>  attach to one named session (e.g. pm-server, pm-session-7)
   powdermonkey alias [dir]      symlink a short \`pm\` alongside powdermonkey (opt-in)
+  powdermonkey backup [file]    save a version-independent JSON snapshot of the store
+                                (from the running supervisor; default data/backups/…)
+  powdermonkey restore <file>   load a snapshot into a fresh store (stop the supervisor
+                                first — restore needs the exclusive writer lock)
   powdermonkey --version        print the version
 
 Needs tmux and git on PATH (and, unless you run the compiled binary, bun).`;
@@ -107,6 +112,66 @@ switch (cmd) {
   case "alias":
     process.exit(installAlias(rest[0]));
     break;
+  case "backup": {
+    // Backups go through the running supervisor — it holds the single writer lock, so a
+    // second process can't open the store. Save the /backup response to disk.
+    const base = process.env.PM_URL ?? `http://localhost:${process.env.PORT ?? "4500"}`;
+    let res: Response;
+    try {
+      res = await fetch(`${base}/backup`);
+    } catch {
+      console.error(
+        `couldn't reach the supervisor at ${base} — is it running? (powdermonkey serve)`,
+      );
+      process.exit(1);
+    }
+    if (!res.ok) {
+      console.error(`backup failed: ${res.status} ${res.statusText}`);
+      process.exit(1);
+    }
+    const text = await res.text();
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const file = rest[0] ?? join("data", "backups", `pm-backup-${stamp}.json`);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, text);
+    const snap = JSON.parse(text) as {
+      data: Record<string, unknown[]>;
+      meta: { tables: string[] };
+    };
+    const rows = Object.values(snap.data).reduce((a, v) => a + v.length, 0);
+    console.log(`backed up ${rows} rows across ${snap.meta.tables.length} tables → ${file}`);
+    process.exit(0);
+    break;
+  }
+  case "restore": {
+    const file = rest[0];
+    if (!file) {
+      console.error("usage: powdermonkey restore <file.json>");
+      process.exit(2);
+    }
+    const snap = JSON.parse(readFileSync(file, "utf8"));
+    // Importing db.ts opens the store and takes the exclusive writer lock — it throws if
+    // the supervisor is still up, which is exactly the guard we want.
+    let dbmod: typeof import("../src/server/db.ts");
+    try {
+      dbmod = await import("../src/server/db.ts");
+    } catch (e) {
+      console.error(`can't open the store: ${e instanceof Error ? e.message : e}`);
+      console.error("stop the supervisor first — restore needs the exclusive writer lock.");
+      process.exit(1);
+    }
+    const { restoreSnapshot } = await import("../src/server/backup.ts");
+    await dbmod.ready(); // build the schema on the (expected-fresh) store
+    try {
+      const n = await restoreSnapshot(dbmod.pg as unknown as SqlClient, snap);
+      console.log(`restored ${n} rows from ${file}`);
+      process.exit(0);
+    } catch (e) {
+      console.error(`restore failed: ${e instanceof Error ? e.message : e}`);
+      process.exit(1);
+    }
+    break;
+  }
   case "-v":
   case "--version":
     console.log(pkg.version);
