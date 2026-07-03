@@ -12,14 +12,14 @@ jobs:
   scan:
     name: straitjacket
     runs-on: ubuntu-latest
-    # v0.2.0 uploads findings to code scanning (SARIF) by default; that needs
+    # v0.2.x uploads findings to code scanning (SARIF) by default; that needs
     # security-events: write. Without it the scan still runs, just no annotations.
     permissions:
       security-events: write
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: zmaril/straitjacket@v0.2.0
+      - uses: zmaril/straitjacket@v0.2.1
         with:
           # Report-only while adopting: findings show in the log (and as code-scanning
           # annotations) but don't fail the job. Flip off once the count is worked down.
