@@ -1,10 +1,22 @@
 import { Button, Group, Text } from "@mantine/core";
+import { IconAlertTriangle } from "@tabler/icons-react";
 import { TaskActions } from "./TaskActions.tsx";
+
+// Shown when the selection spans repos: one session is one repo, so the batch can't be
+// launched together (closing it is still fine). Mirrors the server's CROSS_REPO_ERROR.
+const CROSS_REPO_REASON =
+  "These tasks target different repos. A session runs one repo, so launch each repo's tasks separately — or author cross-repo work with the fan-out.";
 
 /** The batch action bar, shown while one or more tasks are selected: bigger and lit
  *  with an electric-blue edge so it's unmissable. Same action cluster as a card, but
- *  applied to the whole selection as ONE launch. */
-export function SelectionBar({ ids, clear }: { ids: number[]; clear: () => void }) {
+ *  applied to the whole selection as ONE launch. `crossRepo` disables the launch buttons
+ *  (and shows why) when the selection spans repos — the client-side twin of the server's
+ *  cross-repo dispatch guard. */
+export function SelectionBar({
+  ids,
+  clear,
+  crossRepo = false,
+}: { ids: number[]; clear: () => void; crossRepo?: boolean }) {
   return (
     <Group
       justify="space-between"
@@ -17,11 +29,25 @@ export function SelectionBar({ ids, clear }: { ids: number[]; clear: () => void 
         boxShadow: "0 -4px 22px 2px rgba(59,130,246,0.5)",
       }}
     >
-      <Text size="md" fw={700}>
-        {ids.length} selected
-      </Text>
       <Group gap="sm" wrap="nowrap">
-        <TaskActions ids={ids} onDone={clear} />
+        <Text size="md" fw={700}>
+          {ids.length} selected
+        </Text>
+        {crossRepo && (
+          <Group gap="tight" wrap="nowrap" c="yellow.6">
+            <IconAlertTriangle size={16} />
+            <Text size="xs" fw={600}>
+              spans repos — can't launch together
+            </Text>
+          </Group>
+        )}
+      </Group>
+      <Group gap="sm" wrap="nowrap">
+        <TaskActions
+          ids={ids}
+          onDone={clear}
+          blockedReason={crossRepo ? CROSS_REPO_REASON : undefined}
+        />
         <Button size="compact-sm" variant="subtle" color="gray" onClick={clear}>
           clear
         </Button>

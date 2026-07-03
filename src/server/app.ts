@@ -21,6 +21,7 @@ import {
 import { pg } from "./db.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
+import { fanOutTasks } from "./fanout.ts";
 import { proposeFollowup } from "./followups.ts";
 import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
 import { models } from "./models.ts";
@@ -174,6 +175,26 @@ function decisionSource(body?: { source?: OverrideSource } | null): OverrideSour
 }
 
 const tasksGroup = resource("tasks", taskRepo, models.tasks)
+  // Fan-out create: author one task spec across N repos → one task per repo, all under
+  // the same milestone (see fanout.ts). The multi-select repo picker POSTs here instead
+  // of the single-task create so "add the linter to three repos" is authored once.
+  .post(
+    "/fan-out",
+    async ({ body, set }) => {
+      const result = await fanOutTasks(body);
+      if (!result.ok) set.status = 400;
+      return result;
+    },
+    {
+      body: t.Object({
+        milestoneId: t.Number(),
+        title: t.String({ minLength: 1 }),
+        repoIds: t.Array(t.Number(), { minItems: 1 }),
+        phases: t.Optional(t.Array(t.Object({ name: t.String({ minLength: 1 }) }))),
+        position: t.Optional(t.Number()),
+      }),
+    },
+  )
   .post(
     "/:id/dispatch",
     async ({ params, body, set }) => {

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
-import { loadTaskPrompt } from "./dispatch.ts";
+import { CROSS_REPO_ERROR, loadTaskPrompt, spansRepos } from "./dispatch.ts";
 import { worktreeAdd, worktreeAddRemote, worktreeRemove } from "./git.ts";
 import { repoDirForTask, supervisorRepoDir } from "./repo-cache.ts";
 import { type Session, sessions, tasks } from "./schema.ts";
@@ -88,6 +88,7 @@ export async function startLocalSession(
 ): Promise<StartLocalResult> {
   const built = await loadTaskPrompt(taskIds, opts.comment);
   if (!built) return { ok: false, error: `unknown task "${[taskIds].flat().join(", ")}"` };
+  if (spansRepos(built.tasks)) return { ok: false, error: CROSS_REPO_ERROR };
   const { prompt, trailers } = built;
   const ids = built.tasks.map((t) => t.id);
   const primary = ids[0];

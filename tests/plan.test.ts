@@ -8,7 +8,9 @@ process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
 
 const { ready } = await import("../src/server/db.ts");
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
-const { goalRepo, milestoneRepo, taskRepo, phaseRepo } = await import("../src/server/crud.ts");
+const { goalRepo, milestoneRepo, taskRepo, phaseRepo, repoRepo } = await import(
+  "../src/server/crud.ts"
+);
 
 beforeAll(async () => {
   await ready();
@@ -47,6 +49,44 @@ test("nested plan loads and wires foreign keys, assigning int ids", async () => 
   expect(phases.every((p) => tasks.some((t) => t.id === p.taskId))).toBe(true);
   // phases default to "todo"
   expect(phases.every((p) => p.status === "todo")).toBe(true);
+});
+
+test("plan loader cascades the default repo: milestone overrides goal, task overrides both", async () => {
+  const goalRepoRow = await repoRepo.create({ slug: "o/goal", owner: "o", name: "goal" });
+  const msRepoRow = await repoRepo.create({ slug: "o/ms", owner: "o", name: "ms" });
+  const taskRepoRow = await repoRepo.create({ slug: "o/task", owner: "o", name: "task" });
+
+  await loadPlan(
+    parsePlan({
+      goals: [
+        {
+          title: "cascade goal",
+          repoId: goalRepoRow.id,
+          milestones: [
+            // No milestone repo → tasks inherit the goal's.
+            { title: "inherits goal", tasks: [{ title: "a" }] },
+            // Milestone repo overrides the goal for its tasks, but an explicit
+            // task.repoId still wins.
+            {
+              title: "overrides goal",
+              repoId: msRepoRow.id,
+              tasks: [{ title: "b" }, { title: "c", repoId: taskRepoRow.id }],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+
+  const byTitle = Object.fromEntries((await taskRepo.list()).map((t) => [t.title, t]));
+  expect(byTitle.a.repoId).toBe(goalRepoRow.id); // inherited from the goal
+  expect(byTitle.b.repoId).toBe(msRepoRow.id); // milestone overrides the goal
+  expect(byTitle.c.repoId).toBe(taskRepoRow.id); // explicit task repo wins
+
+  const ms = await milestoneRepo.list();
+  expect(ms.find((m) => m.title === "overrides goal")?.repoId).toBe(msRepoRow.id);
+  const goal = (await goalRepo.list()).find((g) => g.title === "cascade goal");
+  expect(goal?.repoId).toBe(goalRepoRow.id);
 });
 
 test("CRUD: create, update, get", async () => {

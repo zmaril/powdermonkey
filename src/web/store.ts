@@ -110,6 +110,16 @@ type State = {
     phaseNames: string[],
     position?: number,
   ) => Promise<number | null>;
+  // Fan-out create: author one task spec across several repos → one task per repo, all
+  // under the same milestone. Returns the created task ids (for reveal), or null on
+  // failure. The single-repo path stays on createTaskWithPhases above.
+  fanOutTasks: (
+    milestoneId: number,
+    title: string,
+    phaseNames: string[],
+    repoIds: number[],
+    position?: number,
+  ) => Promise<number[] | null>;
   updateTask: (taskId: number, fields: { title?: string }) => Promise<void>;
   createPhase: (taskId: number, name: string, position?: number) => Promise<void>;
   updatePhase: (phaseId: number, fields: { name?: string }) => Promise<void>;
@@ -305,6 +315,21 @@ export const useStore = create<State>()(
           }
         }
         return taskId;
+      },
+      fanOutTasks: async (milestoneId, title, phaseNames, repoIds, position) => {
+        const { data, error } = await api.tasks["fan-out"].post({
+          milestoneId,
+          title,
+          repoIds,
+          phases: phaseNames.map((name) => ({ name })),
+          ...(position != null && { position }),
+        });
+        if (error) {
+          set({ error: errMsg(error) });
+          return null;
+        }
+        if (data && "ok" in data && data.ok) return data.tasks.map((t) => t.id);
+        return null;
       },
       updateTask: async (taskId, fields) => {
         const { error } = await api.tasks({ id: taskId }).patch(fields);
