@@ -111,6 +111,12 @@ export type State = {
   // The PR currently under review, shown as a full-window takeover overlay (not a
   // dockview panel — review is a focused activity). null = no overlay.
   review: { number: number; title: string } | null;
+  // The Blender-style repo picker modal (picker/RepoPickerModal.tsx) — add repos to
+  // the flat registry. Opened from the TopBar or a `?pick=1` boot (a fresh window
+  // opened onto the picker). Transient — never persisted.
+  repoPicker: boolean;
+  openRepoPicker: () => void;
+  closeRepoPicker: () => void;
   // The registry (windows.ts, docs/windows.md): every currently-open PM window, each a
   // set of repo tabs + a dockview layout + a cursor into Scratch. Persisted per-device
   // and shared across every native window / browser tab on the origin. `activeWindowId`
@@ -314,6 +320,9 @@ export const useStore = create<State>()(
           return { tabActivity: rest };
         }),
       review: null,
+      repoPicker: false,
+      openRepoPicker: () => set({ repoPicker: true }),
+      closeRepoPicker: () => set({ repoPicker: false }),
       ...(() => {
         // The pre-rehydrate default: one fresh unscoped window. persist overwrites
         // this the moment a device has saved state.

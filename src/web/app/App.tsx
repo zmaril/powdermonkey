@@ -7,6 +7,7 @@ import {
 } from "dockview-react";
 import { type RefObject, useEffect, useRef } from "react";
 import { useNeedsInputNotifications } from "../notifications.ts";
+import { RepoPickerModal } from "../picker/RepoPickerModal.tsx";
 import { useRevealEntity } from "../reveal.ts";
 import { useActiveTheme, useStore } from "../store.ts";
 import { ActivityTab, useTabActivity } from "../TabActivity.tsx";
@@ -282,6 +283,7 @@ export function App() {
         </div>
       </div>
       <ReviewOverlay />
+      <RepoPickerModal />
     </div>
   );
 }

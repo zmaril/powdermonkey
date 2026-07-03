@@ -21,6 +21,7 @@ export function TopBar() {
   const openPane = useStore((s) => s.openPane);
   const openTerminal = useStore((s) => s.openTerminal);
   const openBrowser = useStore((s) => s.openBrowser);
+  const openRepoPicker = useStore((s) => s.openRepoPicker);
   const error = useStore((s) => s.error);
   // "loading" until the first collection snapshot lands.
   const loading = useLiveQuery(() => tasksCollection).isLoading;
@@ -71,6 +72,9 @@ export function TopBar() {
           <Divider orientation="vertical" my="tight" />
           <PaneButton label="Sessions" onClick={() => openPane("sessions")} />
           <PaneButton label="Tasks" onClick={() => openPane("tasks")} />
+          {/* The Blender-style picker (add repos, fork-first). Also on Ctrl/Cmd+N —
+              but browsers reserve Ctrl+N, so the button is the reliable path. */}
+          <PaneButton label="Repos" onClick={openRepoPicker} />
           <Divider orientation="vertical" my="tight" />
           <PaneButton label="Shell" onClick={() => openTerminal("")} />
           <PaneButton label="Browser" onClick={() => openBrowser()} />
