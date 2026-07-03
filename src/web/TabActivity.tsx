@@ -6,6 +6,7 @@ import {
 } from "dockview-react";
 import { type RefObject, useEffect, useRef } from "react";
 import { sessionsCollection, tasksCollection } from "./collections.ts";
+import { RepoBadge, useSessionRepo } from "./plan-ui";
 import { useStore } from "./store.ts";
 import { type ActivitySnapshot, paneActivity, snapshotActivity } from "./tab-activity.ts";
 
@@ -21,12 +22,18 @@ import { type ActivitySnapshot, paneActivity, snapshotActivity } from "./tab-act
 // controls it like every other animation.
 
 /** Custom dockview tab = the default tab (title + close) prefixed with an activity
- *  dot when this pane is flagged. Clears its own flag the moment the tab is viewed
- *  (becomes visible), so the cue is self-extinguishing. */
+ *  dot when this pane is flagged — and, for a session's shell pane, the repo's
+ *  identity badge (icon in its color ring), so the tab strip reads like a rail of
+ *  repo-tagged sessions. Clears its own flag the moment the tab is viewed (becomes
+ *  visible), so the cue is self-extinguishing. */
 export function ActivityTab(props: IDockviewPanelHeaderProps) {
   const id = props.api.id;
   const flagged = useStore((s) => !!s.tabActivity[id]);
   const clearTab = useStore((s) => s.clearTab);
+  // Shell panels carry their session id in the panel params (see App.tsx); every
+  // other pane has no session key and renders no badge.
+  const session = (props.params as { session?: number | null } | undefined)?.session;
+  const repo = useSessionRepo(session);
 
   useEffect(() => {
     const clearIfVisible = () => {
@@ -44,6 +51,11 @@ export function ActivityTab(props: IDockviewPanelHeaderProps) {
   return (
     <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
       {flagged && <span className="pm-tab-dot" aria-hidden />}
+      {repo && (
+        <span style={{ display: "inline-flex", marginLeft: "0.5em" }}>
+          <RepoBadge repo={repo} showName={false} />
+        </span>
+      )}
       <DockviewDefaultTab {...props} />
     </div>
   );
