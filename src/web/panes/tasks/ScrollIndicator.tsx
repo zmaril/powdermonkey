@@ -22,7 +22,7 @@ export function ScrollIndicator({ dir, onClick }: { dir: "up" | "down"; onClick:
         transform: "translateX(-50%)",
         [dir === "up" ? "top" : "bottom"]: "var(--mantine-spacing-sm)",
         zIndex: 5,
-        boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
+        boxShadow: "0 2px 8px var(--pm-drop-shadow)",
       }}
     >
       New task

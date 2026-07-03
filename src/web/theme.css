@@ -20,6 +20,19 @@
   --pm-scroll-thumb-hover: #5c6370;
   --pm-card-hover-border: #5c6370;
   --pm-selection: rgba(97, 175, 239, 0.3);
+
+  /* Semantic, theme-independent colors — the fixed cues that must read the same in
+   * every palette (alerts, draft state, scrims, shadows, the selection glow). One
+   * home so they can be tuned — or made palette-aware — later, instead of hiding
+   * inline in components. */
+  --pm-alert-bg: #b54708;
+  --pm-alert-text: #fff;
+  --pm-draft-border: #b8893a;
+  --pm-draft-bg: #221d16;
+  --pm-overlay-scrim: rgba(26, 27, 30, 0.88);
+  --pm-drop-shadow: rgba(0, 0, 0, 0.35);
+  --pm-selection-glow: rgba(59, 130, 246, 0.55);
+  --pm-embed-backdrop: #fff;
 }
 
 html,

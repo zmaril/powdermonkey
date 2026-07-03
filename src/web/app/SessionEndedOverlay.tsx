@@ -38,7 +38,7 @@ export function SessionEndedOverlay({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "rgba(26,27,30,0.88)",
+        background: "var(--pm-overlay-scrim)",
         padding: 16,
       }}
     >

@@ -10,8 +10,8 @@ export function PendingCard({ draft, onRemove }: { draft: DraftComment; onRemove
         px="sm"
         py="snug"
         style={{
-          border: "1px dashed #b8893a",
-          background: "#221d16",
+          border: "1px dashed var(--pm-draft-border)",
+          background: "var(--pm-draft-bg)",
           borderRadius: 4,
         }}
       >

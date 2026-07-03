@@ -4,7 +4,7 @@ import { THEMES, THEME_ORDER } from "../src/web/themes.ts";
 
 // Guardrail: no theme may ship text that can't be read against its own surfaces. This
 // is what caught GitHub Light rendering the terminal white-on-white (the foreground was
-// never derived off a token, so xterm's default white sat on a #ffffff background) and
+// never derived off a token, so xterm's default white sat on a white background) and
 // Solarized Light's body/dimmed text dropping under AA on its cream page.
 //
 // We pin the token pairs the UI actually paints (themes.ts#applyThemeVars maps these):
