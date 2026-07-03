@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import type { Session, Task } from "../src/server/schema.ts";
-import { buildIndexes } from "../src/web/plan-data.ts";
 import {
   ANY,
   DEFAULT_SESSION_FILTER,
@@ -14,14 +13,14 @@ import {
   sessionBucket,
   taskBucket,
 } from "../src/web/panes/filters.ts";
+import { buildIndexes } from "../src/web/plan-data.ts";
 
 // The pure filter/search core both reframed panes slice with. These pin the bucket
 // derivation (the axis the Archive tab folded into) and each filter axis, plus the
 // goal/milestone scope encoding the single Select rides on.
 
-const goal = (id: number, title = `g${id}`) => ({ id, title, objective: "" }) as Parameters<
-  typeof buildIndexes
->[0][number];
+const goal = (id: number, title = `g${id}`) =>
+  ({ id, title, objective: "" }) as Parameters<typeof buildIndexes>[0][number];
 const milestone = (id: number, goalId: number, title = `m${id}`) =>
   ({ id, goalId, title, position: 0 }) as Parameters<typeof buildIndexes>[1][number];
 const task = (id: number, milestoneId: number, over: Partial<Task> = {}): Task =>
@@ -36,7 +35,14 @@ const task = (id: number, milestoneId: number, over: Partial<Task> = {}): Task =
     ...over,
   }) as Task;
 const session = (id: number, over: Partial<Session> = {}): Session =>
-  ({ id, kind: "local", state: "running", needsInput: false, archivedAt: null, ...over }) as Session;
+  ({
+    id,
+    kind: "local",
+    state: "running",
+    needsInput: false,
+    archivedAt: null,
+    ...over,
+  }) as Session;
 
 const idxOf = (
   tasks: Task[],
@@ -77,9 +83,9 @@ test("matchTask: default (backlog) hides active/done; status filter widens", () 
   // default backlog filter hides the active task
   expect(matchTask(t, idx, new Set([1]), DEFAULT_TASK_FILTER)).toBe(false);
   // switch to active and it shows
-  expect(matchTask(t, idx, new Set([1]), { ...DEFAULT_TASK_FILTER, status: TaskBucket.Active })).toBe(
-    true,
-  );
+  expect(
+    matchTask(t, idx, new Set([1]), { ...DEFAULT_TASK_FILTER, status: TaskBucket.Active }),
+  ).toBe(true);
   // ANY shows it regardless
   expect(matchTask(t, idx, new Set([1]), { ...DEFAULT_TASK_FILTER, status: ANY })).toBe(true);
 });

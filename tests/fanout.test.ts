@@ -1,12 +1,9 @@
 import { beforeAll, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { setupTestDb } from "./db-harness.ts";
 
 // Isolate the store before importing anything that opens the DB.
-process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
 
-const { ready } = await import("../src/server/db.ts");
+const { ready } = await setupTestDb();
 const { fanOutTasks } = await import("../src/server/fanout.ts");
 const { goalRepo, milestoneRepo, taskRepo, phaseRepo, repoRepo } = await import(
   "../src/server/crud.ts"

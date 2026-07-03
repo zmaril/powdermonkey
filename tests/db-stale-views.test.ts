@@ -1,14 +1,11 @@
 import { beforeAll, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { setupTestDb } from "./db-harness.ts";
 
 // The `live` extension leaves `pg_temp*.live_query_*_view` views in the persisted data
 // dir across a crash-restart; on the next boot they still depend on their base tables, so
 // a column-type migration on a synced table fails ("cannot alter type of a column used by
 // a view"). dropStaleLiveViews clears them before migrate() runs. Throwaway PGlite store.
-process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
-const { ready, dropStaleLiveViews, pg } = await import("../src/server/db.ts");
+const { ready, dropStaleLiveViews, pg } = await setupTestDb();
 
 type ViewRow = { viewname: string };
 const tempViews = async () =>

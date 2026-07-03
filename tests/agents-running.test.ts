@@ -9,7 +9,14 @@ import { countRunningAgents } from "../src/web/app/agents-running.ts";
 // do.
 
 const session = (id: number, over: Partial<Session> = {}): Session =>
-  ({ id, kind: "local", state: "running", needsInput: false, archivedAt: null, ...over }) as Session;
+  ({
+    id,
+    kind: "local",
+    state: "running",
+    needsInput: false,
+    archivedAt: null,
+    ...over,
+  }) as Session;
 
 test("counts every live session, whatever its inner state", () => {
   const sessions = [

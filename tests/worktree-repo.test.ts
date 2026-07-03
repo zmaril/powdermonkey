@@ -1,25 +1,24 @@
 import { beforeAll, expect, test } from "bun:test";
-import { existsSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { setupTestDb, tmp } from "./db-harness.ts";
 
 // start-local against a task pinned to a Repo cuts `pm/task-<id>` from that repo's
 // cache clone under ~/.powdermonkey/repos — NOT the supervisor's own checkout — and
 // land removes it from that same clone. The repo is cloned from a local remote so no
 // network is touched. (tests/worktree.test.ts covers the repo-less fallback.)
-process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
-const repoDir = mkdtempSync(join(tmpdir(), "pm-repo-"));
+const repoDir = tmp("pm-repo-");
 process.env.PM_REPO_DIR = repoDir;
 process.env.PM_MAIN_BRANCH = "main";
-process.env.PM_WORKTREE_DIR = join(mkdtempSync(join(tmpdir(), "pm-wt-")), "wt");
-const cacheRoot = mkdtempSync(join(tmpdir(), "pm-repos-"));
-const remotesRoot = mkdtempSync(join(tmpdir(), "pm-remotes-"));
+process.env.PM_WORKTREE_DIR = join(tmp("pm-wt-"), "wt");
+const cacheRoot = tmp("pm-repos-");
+const remotesRoot = tmp("pm-remotes-");
 process.env.PM_REPOS_DIR = cacheRoot;
 process.env.PM_CLONE_BASE = `${remotesRoot}/`;
 process.env.PM_TMUX_SOCKET = `pm-test-${process.pid}`;
 process.env.PM_SESSION_CMD = "";
 
-const { ready } = await import("../src/server/db.ts");
+const { ready } = await setupTestDb();
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
 const { taskRepo, sessionRepo, repoRepo } = await import("../src/server/crud.ts");
 const { startLocalSession, landSession } = await import("../src/server/worktree.ts");
@@ -27,21 +26,7 @@ const { repoCachePath } = await import("../src/server/repo-cache.ts");
 
 const SLUG = "acme/widget";
 
-async function git(cwd: string, ...args: string[]): Promise<void> {
-  const proc = Bun.spawn(["git", ...args], {
-    cwd,
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "t",
-      GIT_AUTHOR_EMAIL: "t@t",
-      GIT_COMMITTER_NAME: "t",
-      GIT_COMMITTER_EMAIL: "t@t",
-    },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  await proc.exited;
-}
+import { git } from "./git-helper.ts";
 
 async function gitOut(cwd: string, ...args: string[]): Promise<string> {
   const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
@@ -54,7 +39,7 @@ beforeAll(async () => {
   await ready();
   // A local "remote" for the task's repo.
   const remote = join(remotesRoot, `${SLUG}.git`);
-  const seed = mkdtempSync(join(tmpdir(), "pm-seed-"));
+  const seed = tmp("pm-seed-");
   await git(seed, "init", "-b", "main");
   await git(seed, "commit", "--allow-empty", "-m", "root");
   await git(seed, "clone", "--bare", seed, remote);
