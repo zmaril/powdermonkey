@@ -26,7 +26,7 @@ export function SelectionBar({
         flex: "0 0 auto",
         borderTop: "2px solid var(--mantine-color-blue-5)",
         background: "var(--pm-surface)",
-        boxShadow: "0 -4px 22px 2px rgba(59,130,246,0.5)",
+        boxShadow: "0 -4px 22px 2px var(--pm-selection-glow)",
       }}
     >
       <Group gap="sm" wrap="nowrap">
