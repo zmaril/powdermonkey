@@ -48,6 +48,7 @@ import {
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { reconcile } from "./reconcile.ts";
 import { repoIconResponse } from "./repo-icon.ts";
+import { listMyRepos, searchRepos } from "./repo-picker.ts";
 import {
   goals as goalsTable,
   milestones as milestonesTable,
@@ -376,6 +377,25 @@ const proposalsGroup = new Elysia({ prefix: "/proposals" })
 // leaves a `<!-- pm:followup -->` PR comment that github-watch slurps into the same
 // path. Just the title is required; body (context) and sourceTaskId (the task the
 // worker was on, which picks the milestone) sharpen the proposal.
+// The picker's read sources (docs/vocabulary.md § Repo): the operator's own repos
+// and a public GitHub search, both through the operator's authed `gh`. 502 when gh
+// is missing/unauthed/unreachable — the picker surfaces the message in place.
+const ghGroup = new Elysia({ prefix: "/gh" })
+  .get("/repos", async ({ set }) => {
+    const result = await listMyRepos();
+    if (!result.ok) set.status = 502;
+    return result;
+  })
+  .get(
+    "/search",
+    async ({ query, set }) => {
+      const result = await searchRepos(query.q);
+      if (!result.ok) set.status = 502;
+      return result;
+    },
+    { query: t.Object({ q: t.String({ minLength: 1 }) }) },
+  );
+
 const followupsGroup = new Elysia({ prefix: "/followups" }).post(
   "/",
   async ({ body, set }) => orBadRequest(set, await proposeFollowup(body)),
@@ -733,6 +753,7 @@ export const app = new Elysia()
   .use(sessionsGroup)
   .use(resource("notes", noteRepo, models.notes))
   .use(reposGroup)
+  .use(ghGroup)
   .use(proposalsGroup)
   .use(followupsGroup)
   // Static: bundled web app, SPA fallback to index.html. Served from the package's
