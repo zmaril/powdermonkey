@@ -204,3 +204,21 @@ commands — reserved session names, detaching safely, killing a stuck session, 
 finding the supervisor pane.
 
 
+
+## Powderworks
+
+PowderMonkey is part of [powderworks](https://github.com/zmaril?tab=repositories),
+an agentic consortium building for the here and now. Its siblings:
+[Straitjacket](https://github.com/zmaril/Straitjacket) keeps the slop out of the
+code your agents write, and [housekeeping](https://github.com/zmaril/housekeeping)
+keeps the repos they write it in squared away.
+
+## Contributing
+
+Issues and PRs welcome — PowderMonkey is young and opinionated, so open an
+issue first if you're planning something big. Reports from real sessions help
+most: what you ran, what the supervisor said, what broke.
+
+## License
+
+[MIT](LICENSE).

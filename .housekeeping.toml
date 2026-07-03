@@ -1,0 +1,3 @@
+[stray-files]
+# design.md is the living design doc, kept at root on purpose
+allow = ["design.md"]
