@@ -66,18 +66,26 @@ holding a repo id that has since been archived just drops that tab on render.
 - **A local-scratch pane** — a dock panel like Scratch, but bound to the active
   window's `scratch` string instead of the server note.
 
+## Decisions (settled with the operator on the PR)
+
+- **Union, not focused-tab.** The panes show the *union* of the window's repos —
+  the tab strip is the working set's composition, not a one-at-a-time focus.
+- **Nothing is repo-less.** A task always targets a repo (the boot seed backfills
+  legacy nulls); there is no "no repo" tab. A scoped window filters the panes by
+  its repo set; an unscoped window (`repoIds: []`) sees everything.
+- **Picker scope for v1.** The new-window picker offers *registered* repos only;
+  the Blender-style gh-sourced picker (yours / public search / fork-first) is its
+  own follow-up.
+
 ## Open questions (being settled on the PR)
 
-1. **Rail-switching vs. real side-by-side windows.** Is v1 one browser tab that
-   switches between windows via the rail, or should a PM window map onto an
-   actual browser/OS window (two monitors, two windows)? Proposal: rail-switching,
-   but pin each browser tab to a window id via the URL (`#w=<id>`) so opening the
-   app in a second OS window naturally shows a different PM window.
-2. **Union or focused tab.** Do the panes show the *union* of the window's repos
-   (tab strip = the working set's composition), or is exactly one repo tab
-   focused at a time, Firefox-literal?
-3. **Picker scope for v1.** New-window picker over *registered* repos only; the
-   Blender-style gh-sourced picker (yours / public search / fork-first) is its
-   own follow-up.
-4. **Repo-less rows.** Tasks with `repo_id = null` in a repo-scoped window:
-   hidden, or surfaced under a "no repo" tab?
+1. **Rail-switching vs. real side-by-side windows.** Rail-switching = a Slack-style
+   workspace switcher: a thin always-open strip on the left edge, one entry per
+   window, click to swap the whole dock (layout + scope) to that window. The
+   alternative is a PM window per actual browser/OS window. Proposal: the rail,
+   plus pinning a browser tab to a window id via the URL (`#w=<id>`) so a second
+   OS window naturally shows a different PM window — side-by-side for free.
+2. **Naming the two scratchpads.** Per-window scratch (device-local, dies with the
+   window) vs. the global server-side note the supervisor reads as `@notes`.
+   Proposal: the per-window pane takes the name "Scratch"; the global pane is
+   renamed "Notes" to match `@notes`.

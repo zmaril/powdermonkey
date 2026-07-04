@@ -11,6 +11,7 @@ import { useRevealEntity } from "../reveal.ts";
 import { useActiveTheme, useStore } from "../store.ts";
 import { ActivityTab, useTabActivity } from "../TabActivity.tsx";
 import { useRunEffect } from "../use-run-effect.ts";
+import { resolveActive } from "../windows.ts";
 import { DisconnectBanner } from "./DisconnectBanner.tsx";
 import { buildDefaultLayout, dockComponents, PANE_TITLES } from "./layout.ts";
 import { ReviewOverlay } from "./ReviewOverlay.tsx";
@@ -97,6 +98,25 @@ export function usePaneLauncher(apiRef: RefObject<DockviewApi | null>, paneReq: 
   }, [paneReq, apiRef]);
 }
 
+/** Switching windows swaps the dock wholesale to the incoming window's layout. The
+ *  `shownWindowRef` distinguishes a real switch from the initial mount (onReady
+ *  already showed the first window) and from unrelated re-renders. The layout
+ *  subscription stays live through the swap — the change events it fires just write
+ *  the incoming window's own layout back to it. */
+export function useWindowSwitch(
+  apiRef: RefObject<DockviewApi | null>,
+  shownWindowRef: RefObject<string | null>,
+  activeWindowId: string,
+  showWindow: (api: DockviewApi) => void,
+): void {
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!api || shownWindowRef.current === activeWindowId) return;
+    shownWindowRef.current = activeWindowId;
+    showWindow(api);
+  });
+}
+
 // The single pane of glass. The plan is split into two list panels — a SESSIONS
 // monitor (every run of work, live + history) and a TASKS launchpad/record (every
 // task, any status) — alongside the scratchpad and the supervisor shell. Done/archived
@@ -104,10 +124,12 @@ export function usePaneLauncher(apiRef: RefObject<DockviewApi | null>, paneReq: 
 // collections (collections.ts) that sync themselves live from PGlite over /sync —
 // no store data, no poll, no refetch (see plan-data.ts).
 //
-// The dock layout is store state (useStore.layout), persisted by the store's
-// `persist` middleware so the disconnect→reload recovery (and any plain browser
-// refresh) keeps your panes. App mirrors that state onto the dockview api: onReady
-// restores it, and onDidLayoutChange writes every change back via setLayout.
+// The dock layout is the *active window's* layout (store.windows, windows.ts) —
+// each Window is a saved view (repo tabs + layout + local scratchpad), persisted
+// per-device by the store's `persist` middleware so the disconnect→reload recovery
+// (and any plain browser refresh) keeps your panes. App mirrors that state onto the
+// dockview api: onReady restores the active window, switching windows swaps the
+// dock wholesale, and onDidLayoutChange writes every change back via setLayout.
 
 // True when every panel in a saved layout maps to a component we still register, so
 // dockview's fromJSON won't try to mount a panel whose component was renamed away. A
@@ -122,6 +144,10 @@ function layoutIsCompatible(saved: SerializedDockview): boolean {
 export function App() {
   const apiRef = useRef<DockviewApi | null>(null);
   const layoutSubRef = useRef<{ dispose: () => void } | null>(null);
+  // Which window the dock currently shows — lets the switch effect below tell a real
+  // switch apart from the initial mount and from unrelated re-renders.
+  const shownWindowRef = useRef<string | null>(null);
+  const activeWindowId = useStore((s) => s.activeWindowId);
   const shellReq = useStore((s) => s.shellReq);
   const browserReq = useStore((s) => s.browserReq);
   const paneReq = useStore((s) => s.paneReq);
@@ -146,32 +172,46 @@ export function App() {
   // the pane it lives in, scroll it into view, and flash it.
   useRevealEntity(apiRef);
 
-  const onReady = (event: DockviewReadyEvent) => {
-    apiRef.current = event.api;
-    // Restore the layout from the store (rehydrated from localStorage by persist);
-    // otherwise lay out the default. A corrupt/incompatible saved layout (or one
-    // that restores to nothing) falls back to the default so a reload can never
-    // leave you staring at a blank dock. A layout saved before a pane rename can
-    // still reference a component id we no longer register (e.g. the old
-    // active/backlog panes) — applying that would render a broken panel, so we
-    // discard it up front and rebuild the default.
-    const saved = useStore.getState().layout;
+  // Show a window on the dock: restore its saved layout, else lay out the default.
+  // A corrupt/incompatible saved layout (or one that restores to nothing) falls back
+  // to the default so a reload can never leave you staring at a blank dock. A layout
+  // saved before a pane rename can still reference a component id we no longer
+  // register (e.g. the old active/backlog panes) — applying that would render a
+  // broken panel, so we discard it up front and rebuild the default. clear() first:
+  // on a window *switch* the dock still holds the outgoing window's panels, and
+  // buildDefaultLayout on a dirty dock would duplicate them (fromJSON replaces
+  // wholesale, so the clear is only load-bearing on the fallback path).
+  const showWindow = (api: DockviewApi) => {
+    const s = useStore.getState();
+    const saved = resolveActive(s.windows, s.activeWindowId)?.layout ?? null;
     let restored = false;
     if (saved && layoutIsCompatible(saved)) {
       try {
-        event.api.fromJSON(saved);
-        restored = event.api.panels.length > 0;
+        api.fromJSON(saved);
+        restored = api.panels.length > 0;
       } catch {
         restored = false;
       }
     }
-    if (!restored) buildDefaultLayout(event.api);
+    if (!restored) {
+      api.clear();
+      buildDefaultLayout(api);
+    }
+  };
+
+  const onReady = (event: DockviewReadyEvent) => {
+    apiRef.current = event.api;
+    shownWindowRef.current = useStore.getState().activeWindowId;
+    showWindow(event.api);
     // Mirror every layout change back into the store — add/move/close a panel,
-    // resize, focus a tab — so it persists and the next load (notably the
-    // disconnect→reload) comes back as-is. Subscribed after the initial build so
-    // restoring doesn't write over what we just restored.
+    // resize, focus a tab — so it persists into the active window and the next load
+    // (notably the disconnect→reload) comes back as-is. Subscribed after the initial
+    // build so restoring doesn't write over what we just restored.
     layoutSubRef.current = event.api.onDidLayoutChange(() => setLayout(event.api.toJSON()));
   };
+
+  // Switching windows swaps the dock wholesale to the incoming window's layout.
+  useWindowSwitch(apiRef, shownWindowRef, activeWindowId, showWindow);
 
   // Tear the layout subscription down with the component.
   useDisposeOnUnmount(layoutSubRef);
