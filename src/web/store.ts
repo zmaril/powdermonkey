@@ -9,7 +9,7 @@ import { DEFAULT_MOTION } from "./motion.ts";
 import type { PmKind } from "./pm-ids.ts";
 import { DEFAULT_THEME, type EditorTheme, getTheme } from "./themes.ts";
 import {
-  closeWindow,
+  dropWindow,
   fromLegacyLayout,
   newWindow,
   type PmWindow,
@@ -17,6 +17,11 @@ import {
   type ScratchCursor,
   updateWindow,
 } from "./windows.ts";
+
+// The registry (windows) is persisted and shared across every native window / browser
+// tab on the origin; `activeWindowId` is NOT — it's which registry entry THIS webview
+// renders, seeded from the `#w=<id>` URL hash on boot (window-bridge.bootWindow).
+// Persisting it would make every webview rehydrate some other webview's window.
 
 // UI + action store. All *plan/session data* now lives in TanStack DB collections
 // (collections.ts), synced live from PGlite — so this store no longer holds or
@@ -38,7 +43,6 @@ export type StartInfo = {
 // this shape too (it's what a v0 blob is upgraded into).
 type PersistedUi = {
   windows: PmWindow[];
-  activeWindowId: string;
   autoRebase: boolean;
   lastBrowserUrl: string;
   theme: string;
@@ -107,22 +111,29 @@ export type State = {
   // The PR currently under review, shown as a full-window takeover overlay (not a
   // dockview panel — review is a focused activity). null = no overlay.
   review: { number: number; title: string } | null;
-  // The device's Windows (windows.ts, docs/windows.md): Firefox-style saved views,
-  // each a set of repo tabs + a dockview layout + a cursor into Scratch. Persisted
-  // per-device, so a reload — notably the disconnect→refresh recovery — restores
-  // every window; the active one is what the dock shows. Never empty. This is the
-  // single source of truth for the dock; layout-changing buttons write the active
-  // window's layout here and App reflects it onto the dockview api.
+  // The registry (windows.ts, docs/windows.md): every currently-open PM window, each a
+  // set of repo tabs + a dockview layout + a cursor into Scratch. Persisted per-device
+  // and shared across every native window / browser tab on the origin. `activeWindowId`
+  // is which entry THIS webview renders — seeded from the `#w=<id>` hash on boot, NOT
+  // persisted (see the note up top). A reload (notably the disconnect→refresh recovery)
+  // comes back on the same window via its hash. This is the source of truth for the
+  // dock; layout-changing buttons write this window's layout here and App reflects it
+  // onto the dockview api.
   windows: PmWindow[];
   activeWindowId: string;
-  // Write the *active* window's dock layout (api.toJSON()); null = "lay out the
+  // Write THIS webview's window's dock layout (api.toJSON()); null = "lay out the
   // default on next show".
   setLayout: (layout: SerializedDockview | null) => void;
-  // Window surgery. Create switches to the new window; close never leaves the list
-  // empty (the last window is replaced by a fresh unscoped one) and hands focus to
-  // a neighbour when the active one goes.
+  // Window surgery. Create just registers a new PM window in the shared registry and
+  // returns its id — it does NOT switch this webview to it: a real OS window is
+  // spawned for it (window-bridge.ts), and this webview keeps showing its own window.
   createWindow: (repoIds?: number[]) => string;
-  switchWindow: (id: string) => void;
+  // Boot: make THIS webview render `win`, registering it first if the shared registry
+  // doesn't already hold it (a spawned/bookmarked window this webview hasn't seen).
+  // Called once from window-bridge.bootWindow off the `#w=<id>` hash.
+  adoptWindow: (win: PmWindow) => void;
+  // Drop a window from the shared registry when its OS window closes (Cmd/Ctrl-W or the
+  // native close button; window-bridge). Disposable — no synthetic replacement.
   removeWindow: (id: string) => void;
   renameWindow: (id: string, name: string | null) => void;
   setWindowRepos: (id: string, repoIds: number[]) => void;
@@ -317,16 +328,17 @@ export const useStore = create<State>()(
         }),
       createWindow: (repoIds = []) => {
         const w = newWindow(repoIds);
-        set((s) => ({ windows: [...s.windows, w], activeWindowId: w.id }));
+        // Register only — no activeWindowId change. The bridge spawns a real OS window
+        // for `w.id`; that window's webview adopts it via its `#w=` hash on boot.
+        set((s) => ({ windows: [...s.windows, w] }));
         return w.id;
       },
-      switchWindow: (id) =>
-        set((s) => (s.windows.some((w) => w.id === id) ? { activeWindowId: id } : {})),
-      removeWindow: (id) =>
-        set((s) => {
-          const next = closeWindow(s.windows, id, s.activeWindowId);
-          return { windows: next.windows, activeWindowId: next.activeId };
-        }),
+      adoptWindow: (win) =>
+        set((s) => ({
+          windows: s.windows.some((w) => w.id === win.id) ? s.windows : [...s.windows, win],
+          activeWindowId: win.id,
+        })),
+      removeWindow: (id) => set((s) => ({ windows: dropWindow(s.windows, id) })),
       renameWindow: (id, name) => set((s) => ({ windows: updateWindow(s.windows, id, { name }) })),
       setWindowRepos: (id, repoIds) =>
         set((s) => ({ windows: updateWindow(s.windows, id, { repoIds }) })),
@@ -598,7 +610,6 @@ export const useStore = create<State>()(
       // toggle would otherwise flip from the default once the server value arrives.
       partialize: (s) => ({
         windows: s.windows,
-        activeWindowId: s.activeWindowId,
         autoRebase: s.autoRebase,
         lastBrowserUrl: s.lastBrowserUrl,
         theme: s.theme,

@@ -1,15 +1,21 @@
 import type { SerializedDockview } from "dockview-react";
 
-// The Window model (docs/windows.md, vocabulary.md § Window): a Window is a saved
-// *view* — a set of repo "tabs" plus the dockview layout you look at them through.
-// Firefox-style: usually unnamed and disposable, identified by its repo set,
-// session-restored on launch. Pure frontend state, persisted per-device (the
-// store's localStorage persist) — never synced, never part of the plan hierarchy.
+// The Window model (docs/windows.md, vocabulary.md § Window): a Window is a real
+// native OS window — one per PM window, each owning its own repo "tabs" plus the
+// dockview layout you look at them through. Firefox-style: usually unnamed and
+// disposable, identified by its repo set, reopened on relaunch. Pure frontend state,
+// persisted per-device (the store's localStorage persist) — never synced, never part
+// of the plan hierarchy.
 //
-// This module is the pure core — window construction and list surgery, free of
-// React and the store — so the semantics (never-empty list, focus handoff on
-// close, the legacy single-layout migration) are unit-testable. The store holds
-// the list and delegates here.
+// The shared `windows` list is the *registry*: every currently-open PM window. Each
+// webview renders exactly ONE of them, chosen by its `#w=<id>` URL hash — there is no
+// in-app switcher. The registry is shared across every native window / browser tab on
+// the origin (same localStorage), so the merge rule (mergeExternalWindows) keeps each
+// webview authoritative for its own window while adopting the rest.
+//
+// This module is the pure core — window construction, list surgery, the boot planner,
+// and the legacy single-layout migration, free of React and the store — so the
+// semantics are unit-testable. The store holds the registry and delegates here.
 
 /** Where a window last was in the (global) Scratch note: selection + scroll. The
  *  CONTENT is global and server-side — closing a window loses nothing — a window
@@ -36,6 +42,28 @@ export function newWindow(repoIds: number[] = []): PmWindow {
   return { id: crypto.randomUUID(), name: null, repoIds, layout: null, scratchCursor: null };
 }
 
+/** An empty window under a *specific* id. A webview learns which window it is from its
+ *  `#w=<id>` hash; the full record should be in the shared registry, but when it isn't
+ *  — a stale bookmark, a since-closed window, a raced cross-tab write — we stand up an
+ *  empty (unscoped) window under that id so the webview still renders something. */
+export function windowWithId(id: string): PmWindow {
+  return { id, name: null, repoIds: [], layout: null, scratchCursor: null };
+}
+
+/** Boot planning for the *primary* webview — the one launched with no `#w=` hash (the
+ *  Tauri boot window, or a fresh browser visit). It adopts the first registered window
+ *  as its own, or mints a fresh one when the registry is empty. `spawn` is the rest of
+ *  the registry: the windows a desktop relaunch reopens as their own OS windows (the
+ *  primary webview fans them out; see window-bridge.ts). */
+export function planBoot(registry: PmWindow[]): {
+  adopt: PmWindow;
+  spawn: PmWindow[];
+  minted: boolean;
+} {
+  if (registry.length === 0) return { adopt: newWindow(), spawn: [], minted: true };
+  return { adopt: registry[0], spawn: registry.slice(1), minted: false };
+}
+
 /** Patch one window in place (immutably); unknown ids are a no-op. */
 export function updateWindow(
   list: PmWindow[],
@@ -45,24 +73,13 @@ export function updateWindow(
   return list.map((w) => (w.id === id ? { ...w, ...patch } : w));
 }
 
-/** Close a window. The list is never left empty — closing the last window replaces
- *  it with a fresh unscoped one (there is always a view to stand in). When the
- *  closed window was active, focus moves to its right-hand neighbour (else the new
- *  last); closing a background window leaves the active one alone. */
-export function closeWindow(
-  list: PmWindow[],
-  id: string,
-  activeId: string,
-): { windows: PmWindow[]; activeId: string } {
-  const idx = list.findIndex((w) => w.id === id);
-  if (idx === -1) return { windows: list, activeId };
-  const rest = list.filter((w) => w.id !== id);
-  if (rest.length === 0) {
-    const fresh = newWindow();
-    return { windows: [fresh], activeId: fresh.id };
-  }
-  const nextActive = id === activeId ? rest[Math.min(idx, rest.length - 1)].id : activeId;
-  return { windows: rest, activeId: nextActive };
+/** Drop a window from the registry. Real windows are Firefox-style disposable: a
+ *  closed window is gone — no synthetic replacement, no focus handoff (there's no
+ *  in-app active window to hand to; the OS window itself is closing). Closing the last
+ *  window empties the registry; the app quits (Tauri) / the tab closes (browser), and
+ *  the next launch mints a fresh window (planBoot). Unknown ids are a no-op. */
+export function dropWindow(list: PmWindow[], id: string): PmWindow[] {
+  return list.filter((w) => w.id !== id);
 }
 
 /** The active window, tolerating a stale id (persisted device state can drift —
