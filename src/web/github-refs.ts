@@ -1,3 +1,6 @@
+// straitjacket-allow-file:color  the `#N` tokens here are GitHub issue/PR references (the
+// whole domain of this file), not hex colors — same intrinsic-notation carve-out as themes.ts.
+//
 // GitHub issue / PR references in free text — the `#123`, `owner/repo#123`, and `GH-123`
 // mentions that git, gh, and the agents print all over their PTY output ("merged #66",
 // "see zmaril/powdermonkey#71", "fixed GH-42"). The terminal GitHub-ref link provider

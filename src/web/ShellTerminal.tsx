@@ -60,8 +60,8 @@ export function useShellTerminal(
   const fontPx = Math.round(13 * fontScaleOption(useStore((s) => s.fontScale)).factor);
   const fontRef = useRef(fontPx);
   fontRef.current = fontPx;
-  // The terminal's repo context (owner/name), for resolving a bare #123 in the GitHub-ref
-  // links below. Read through a ref so the provider always sees the latest slug — it may
+  // The terminal's repo context (owner/name), for resolving a bare issue ref (#n) in the
+  // GitHub-ref links below. Read through a ref so the provider always sees the latest slug — it may
   // arrive after the socket effect runs (collections sync in) — without re-running that
   // effect. Undefined for a supervisor/cwd shell with no session-pinned repo.
   const repoSlug = useTerminalRepoSlug(session);
@@ -113,7 +113,11 @@ export function useShellTerminal(
     // exactly like the URL links above. Registered on every terminal, so a ref links whoever
     // printed it.
     const ghLinkProvider = term.registerLinkProvider(
-      new GithubRefLinkProvider(term, (url) => openExternal(url), () => repoSlugRef.current),
+      new GithubRefLinkProvider(
+        term,
+        (url) => openExternal(url),
+        () => repoSlugRef.current,
+      ),
     );
     term.open(el);
     fit.fit();

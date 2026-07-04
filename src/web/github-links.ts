@@ -1,6 +1,8 @@
+// straitjacket-allow-file:color  the `#N` tokens here are GitHub issue/PR references (the
+// whole domain of this file), not hex colors — same intrinsic-notation carve-out as themes.ts.
 import type { ILink, ILinkProvider, Terminal } from "@xterm/xterm";
 import { findGithubRefs, githubRefUrl } from "./github-refs.ts";
-import { cellRange, readLogicalLine } from "./terminal-link-cells.ts";
+import { collectLinks } from "./terminal-link-cells.ts";
 
 // The GitHub-ref link provider for the terminal — a sibling of PmIdLinkProvider
 // (pm-id-links.ts) over the same PTY stream. xterm asks a provider for the links on a
@@ -30,23 +32,22 @@ export class GithubRefLinkProvider implements ILinkProvider {
   ) {}
 
   provideLinks(y: number, callback: (links: ILink[] | undefined) => void): void {
-    if (!this.term.buffer.active.getLine(y - 1)) {
-      callback(undefined);
-      return;
-    }
-    const { text, pos } = readLogicalLine(this.term, y);
-
-    const links: ILink[] = [];
-    for (const m of findGithubRefs(text)) {
-      // A qualified ref carries its own repo; a bare one resolves against the terminal's
-      // context. No slug either way (bare ref, no context) → not linkable, skip it.
-      const slug = m.repo ?? this.repoSlug();
-      if (!slug) continue;
-      const range = cellRange(pos, m.index, m.length);
-      if (!range) continue;
-      const url = githubRefUrl(slug, m.number);
-      links.push({ text: m.text, range, activate: () => this.onActivate(url) });
-    }
-    callback(links.length > 0 ? links : undefined);
+    collectLinks(
+      this.term,
+      y,
+      findGithubRefs,
+      (m, range) => {
+        // A qualified ref carries its own repo; a bare one resolves against the terminal's
+        // context. No slug either way (bare ref, no context) → not linkable, skip it.
+        const slug = m.repo ?? this.repoSlug();
+        if (!slug) return null;
+        return {
+          text: m.text,
+          range,
+          activate: () => this.onActivate(githubRefUrl(slug, m.number)),
+        };
+      },
+      callback,
+    );
   }
 }

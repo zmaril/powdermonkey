@@ -1,6 +1,6 @@
 import type { ILink, ILinkProvider, Terminal } from "@xterm/xterm";
 import { findPmIds, type PmKind } from "./pm-ids.ts";
-import { cellRange, readLogicalLine } from "./terminal-link-cells.ts";
+import { collectLinks } from "./terminal-link-cells.ts";
 
 // The PM-id link provider for the terminal — the counterpart to the WebLinksAddon
 // that already linkifies URLs in the same PTY stream (and a sibling of the GitHub-ref
@@ -23,23 +23,15 @@ export class PmIdLinkProvider implements ILinkProvider {
   ) {}
 
   provideLinks(y: number, callback: (links: ILink[] | undefined) => void): void {
-    if (!this.term.buffer.active.getLine(y - 1)) {
-      callback(undefined);
-      return;
-    }
-    const { text, pos } = readLogicalLine(this.term, y);
-
-    const links: ILink[] = [];
-    for (const m of findPmIds(text)) {
-      const range = cellRange(pos, m.index, m.length);
-      if (!range) continue;
-      const { kind, id } = m;
-      links.push({
-        text: m.text,
-        range,
-        activate: () => this.onActivate(kind, id),
-      });
-    }
-    callback(links.length > 0 ? links : undefined);
+    collectLinks(
+      this.term,
+      y,
+      findPmIds,
+      (m, range) => {
+        const { kind, id } = m;
+        return { text: m.text, range, activate: () => this.onActivate(kind, id) };
+      },
+      callback,
+    );
   }
 }

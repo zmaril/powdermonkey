@@ -1,3 +1,5 @@
+// straitjacket-allow-file:color  the `#N` tokens in these comments are GitHub issue/PR
+// references, not hex colors — same intrinsic-notation carve-out as themes.ts.
 import { useLiveQuery } from "@tanstack/react-db";
 import type { Repo, Task } from "../server/schema.ts";
 import type { SessionLink } from "./active.ts";

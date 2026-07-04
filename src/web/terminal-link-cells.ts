@@ -62,3 +62,33 @@ export function cellRange(pos: CellPos[], index: number, length: number): ILink[
   if (!start || !end) return null;
   return { start: { x: start.x, y: start.y }, end: { x: end.x, y: end.y } };
 }
+
+/** A token a matcher found in the logical line: its char offset/length (to map onto cells)
+ *  plus whatever the provider needs to build the link. */
+export type LinkToken = { index: number; length: number };
+
+/** The provideLinks body shared by the terminal link providers: read the logical line at
+ *  `y`, run the provider's `find` matcher over it, map each match onto its cells, and let
+ *  `toLink` turn (match, range) into an ILink — or null to skip it (e.g. a ref with no
+ *  resolvable repo). Hands the collected links (or undefined) to xterm's callback. */
+export function collectLinks<M extends LinkToken>(
+  term: Terminal,
+  y: number,
+  find: (text: string) => M[],
+  toLink: (match: M, range: ILink["range"]) => ILink | null,
+  callback: (links: ILink[] | undefined) => void,
+): void {
+  if (!term.buffer.active.getLine(y - 1)) {
+    callback(undefined);
+    return;
+  }
+  const { text, pos } = readLogicalLine(term, y);
+  const links: ILink[] = [];
+  for (const m of find(text)) {
+    const range = cellRange(pos, m.index, m.length);
+    if (!range) continue;
+    const link = toLink(m, range);
+    if (link) links.push(link);
+  }
+  callback(links.length > 0 ? links : undefined);
+}
