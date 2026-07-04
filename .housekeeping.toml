@@ -1,3 +1,7 @@
+[checks]
+# firetheslopcannon.com isn't live yet — flip to "required" when it is
+website = "off"
+
 [stray-files]
 # design.md is the living design doc, kept at root on purpose
 allow = ["design.md"]
