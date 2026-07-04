@@ -11,23 +11,10 @@ import {
   SessionStateBadge,
   useRepo,
 } from "../../plan-ui";
+import { timeAgo } from "../../time.ts";
 import { ColumnLabel } from "./ColumnLabel.tsx";
 import { contextOf, workerPrs } from "./grouping.ts";
 import { TaskLine } from "./TaskLine.tsx";
-
-/** Compact relative time ("5m ago") for the agent-comment stamp. Null on bad input. */
-function timeAgo(iso: string | null): string | null {
-  if (!iso) return null;
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return null;
-  const s = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (s < 60) return `${s}s ago`;
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.round(h / 24)}d ago`;
-}
 
 /** One worker = one card. The header holds everything session-level (kind · state ·
  *  shared context · session link · Teleport · Stop); the task(s) the worker is

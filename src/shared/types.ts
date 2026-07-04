@@ -46,6 +46,16 @@ export const OverrideSource = {
 } as const;
 export type OverrideSource = ValueOf<typeof OverrideSource>;
 
+/** Who wrote a task-comment line: the operator (the UI's one-line composer) or the
+ *  supervisor agent (through the API, e.g. leaving context on a task it's watching).
+ *  The same two human-driven voices as OverrideSource — `reconciled` is a decision
+ *  provenance, not a speaker, so it can't author a comment. */
+export const CommentAuthor = {
+  Operator: DecisionSource.Operator,
+  Supervisor: DecisionSource.Supervisor,
+} as const;
+export type CommentAuthor = ValueOf<typeof CommentAuthor>;
+
 /**
  * A task's lifecycle. `Pending`/`Dispatched`/`Merged` are the happy path;
  * `Cancelled` is the won't-do terminal state — the task is closed without being

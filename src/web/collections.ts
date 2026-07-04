@@ -9,6 +9,7 @@ import type {
   Repo,
   Session,
   Task,
+  TaskComment,
 } from "../server/schema.ts";
 import type { SessionLink } from "./active.ts";
 import { wsUrl } from "./server.ts";
@@ -93,6 +94,7 @@ export const sessionTasksCollection = syncedCollection<SessionLink & { id: numbe
   "session_tasks",
   "id",
 );
+export const taskCommentsCollection = syncedCollection<TaskComment>("task_comments", "id");
 export const notesCollection = syncedCollection<Note>("notes", "id");
 export const reposCollection = syncedCollection<Repo>("repos", "id");
 export const pullRequestsCollection = syncedCollection<CloudPr>("pull_requests", "number");

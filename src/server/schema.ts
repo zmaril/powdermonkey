@@ -2,6 +2,7 @@ import { bigint, boolean, integer, jsonb, pgTable, text, timestamp } from "drizz
 import {
   type AgentState,
   type CheckRollupState,
+  CommentAuthor,
   type DecisionSource,
   type MergeableState,
   PhaseStatus,
@@ -137,6 +138,22 @@ export const sessionTasks = pgTable("session_tasks", {
     .notNull()
     .references(() => tasks.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// A task's diary: one-line comments muttered onto a task — by the operator (the
+// card's composer) or the supervisor agent (via the API). Capture stays
+// zero-ceremony (one line, auto-timestamped), but a line is an ordinary row after
+// that: it can be edited in place (fix the typo) and archived (soft delete, like
+// every other entity), carrying the shared timestamps.
+export const taskComments = pgTable("task_comments", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  taskId: integer("task_id")
+    .notNull()
+    .references(() => tasks.id),
+  // Who wrote the line — operator or supervisor (see CommentAuthor).
+  author: text("author").$type<CommentAuthor>().notNull().default(CommentAuthor.Operator),
+  body: text("body").notNull(),
+  ...timestamps,
 });
 
 // The repo registry: a flat, global list of the GitHub repos the operator drives.
@@ -293,6 +310,7 @@ export type Task = typeof tasks.$inferSelect;
 export type Phase = typeof phases.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type SessionTask = typeof sessionTasks.$inferSelect;
+export type TaskComment = typeof taskComments.$inferSelect;
 export type Repo = typeof repos.$inferSelect;
 export type Note = typeof notes.$inferSelect;
 export type PullRequestRow = typeof pullRequests.$inferSelect;
