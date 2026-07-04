@@ -182,7 +182,7 @@ test("ingestFollowups is idempotent — re-reading the same comments creates not
   expect(await ingestFollowups(pr)).toBe(0);
 });
 
-test("ingestFollowups skips a comment with no id (can't dedup it safely)", async () => {
+test("ingestFollowups skips a comment with no id and no note key (can't dedup it safely)", async () => {
   const before = (await listProposals()).length;
   const created = await ingestFollowups(
     cloudPr({
@@ -193,4 +193,59 @@ test("ingestFollowups skips a comment with no id (can't dedup it safely)", async
   );
   expect(created).toBe(0);
   expect((await listProposals()).length).toBe(before);
+});
+
+test("ingestFollowups creates from a PM-Note follow-up (noteKey), stamping the key", async () => {
+  const created = await ingestFollowups(
+    cloudPr({
+      number: 20,
+      taskId: taskInB,
+      followups: [
+        {
+          commentId: null,
+          noteKey: "sha20#0",
+          title: "Note follow-up",
+          body: "ctx",
+          updatedAt: null,
+        },
+      ],
+    }),
+  );
+  expect(created).toBe(1);
+  const p = (await listProposals()).find((x) => x.sourceNoteKey === "sha20#0");
+  expect(p).toMatchObject({ sourcePr: 20, sourceTaskId: taskInB, status: "pending" });
+  expect(p?.title).toBe("Follow-up: Note follow-up");
+  // A note follow-up doesn't carry a comment id.
+  expect(p?.sourceCommentId).toBeNull();
+});
+
+test("ingestFollowups is idempotent by note key — re-reading the same commit creates nothing", async () => {
+  const pr = cloudPr({
+    number: 20,
+    taskId: taskInB,
+    followups: [
+      {
+        commentId: null,
+        noteKey: "sha20#0",
+        title: "Note follow-up",
+        body: "ctx",
+        updatedAt: null,
+      },
+    ],
+  });
+  expect(await ingestFollowups(pr)).toBe(0);
+});
+
+test("ingestFollowups keys per-follow-up within a commit — two notes on one sha both land", async () => {
+  const created = await ingestFollowups(
+    cloudPr({
+      number: 21,
+      taskId: taskInB,
+      followups: [
+        { commentId: null, noteKey: "sha21#0", title: "first", body: "", updatedAt: null },
+        { commentId: null, noteKey: "sha21#1", title: "second", body: "", updatedAt: null },
+      ],
+    }),
+  );
+  expect(created).toBe(2);
 });

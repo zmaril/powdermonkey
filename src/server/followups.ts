@@ -24,8 +24,12 @@ export type FollowupInput = {
   sourceTaskId?: number | null;
   /** The cloud PR the follow-up was slurped from (provenance), if any. */
   sourcePr?: number | null;
-  /** The GitHub comment databaseId a cloud follow-up came from — the ingest dedup key. */
+  /** The GitHub comment databaseId a legacy `<!-- pm:followup -->` comment came from —
+   *  that channel's ingest dedup key. */
   sourceCommentId?: number | null;
+  /** The PM-Note dedup key (`<commitSha>#<index>`) a note-carried follow-up came from —
+   *  the primary channel's ingest key. */
+  sourceNoteKey?: string | null;
 };
 
 export type FollowupResult = { ok: true; proposal: Proposal } | { ok: false; error: string };
@@ -120,6 +124,7 @@ export async function proposeFollowup(input: FollowupInput): Promise<FollowupRes
       sourceTaskId: input.sourceTaskId ?? null,
       sourcePr: input.sourcePr ?? null,
       sourceCommentId: input.sourceCommentId ?? null,
+      sourceNoteKey: input.sourceNoteKey ?? null,
       updatedAt: new Date(),
     })
     .where(eq(proposals.id, proposal.id))
@@ -127,28 +132,36 @@ export async function proposeFollowup(input: FollowupInput): Promise<FollowupRes
   return { ok: true, proposal: stamped ?? proposal };
 }
 
-/** Slurp a cloud PR's `<!-- pm:followup -->` comments into proposals — the channel
- *  for workers that can't reach the API. Idempotent by GitHub comment id: a comment
- *  already turned into a proposal (matched on `sourceCommentId`, archived rows
- *  included) is skipped, so re-reading it every tick — or replaying it on a restart
- *  catch-up — never duplicates, and a follow-up the operator already rejected stays
- *  gone. A comment with no id is skipped rather than risk an un-dedupable duplicate.
- *  Returns how many proposals were created. */
+/** Slurp a cloud PR's follow-ups into proposals — the channel for workers that can't
+ *  reach the API. A follow-up rides one of two channels: the primary is a `followups`
+ *  entry in a commit's PM-Note (keyed by `sourceNoteKey` = `<sha>#<idx>`); the legacy
+ *  one is a `<!-- pm:followup -->` PR comment (keyed by `sourceCommentId`). Idempotent
+ *  by whichever key it carries — a follow-up already turned into a proposal (archived
+ *  rows included) is skipped, so re-reading a commit/comment every tick, or replaying
+ *  it on a restart catch-up, never duplicates, and a follow-up the operator already
+ *  rejected stays gone. A follow-up with neither key is skipped rather than risk an
+ *  un-dedupable duplicate. Returns how many proposals were created. */
 export async function ingestFollowups(pr: CloudPr): Promise<number> {
   let created = 0;
   for (const f of pr.followups ?? []) {
-    if (f.commentId == null) continue;
-    const existing = await db
-      .select({ id: proposals.id })
-      .from(proposals)
-      .where(eq(proposals.sourceCommentId, f.commentId));
+    // Dedup on the key for this follow-up's channel — note key first (the primary
+    // channel), then the legacy comment id. Neither → can't dedup, so skip it.
+    const dedup =
+      f.noteKey != null
+        ? eq(proposals.sourceNoteKey, f.noteKey)
+        : f.commentId != null
+          ? eq(proposals.sourceCommentId, f.commentId)
+          : null;
+    if (dedup == null) continue;
+    const existing = await db.select({ id: proposals.id }).from(proposals).where(dedup);
     if (existing.length > 0) continue;
     const r = await proposeFollowup({
       title: f.title,
       body: f.body,
       sourceTaskId: pr.taskId,
       sourcePr: pr.number,
-      sourceCommentId: f.commentId,
+      sourceCommentId: f.commentId ?? null,
+      sourceNoteKey: f.noteKey ?? null,
     });
     if (r.ok) created++;
   }

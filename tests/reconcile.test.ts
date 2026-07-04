@@ -20,6 +20,7 @@ const { startLocalSession } = await import("../src/server/worktree.ts");
 const { linkSessionTasks } = await import("../src/server/session-tasks.ts");
 
 import { git as runGit } from "./git-helper.ts";
+
 const git = (...args: string[]) => runGit(repoDir, ...args);
 
 beforeAll(async () => {
@@ -78,6 +79,51 @@ test("trailers on main mark phases done and complete tasks", async () => {
   for (const p of endpointPhases) {
     expect((await phaseRepo.get(p.id))?.status).toBe("done");
   }
+});
+
+test("PM-Note trailers on main mark phases done and complete tasks", async () => {
+  await loadPlan(
+    parsePlan({
+      goals: [
+        {
+          title: "Notes",
+          milestones: [
+            {
+              title: "m",
+              tasks: [
+                { title: "note-phases", phases: [{ name: "na" }, { name: "nb" }] },
+                { title: "note-task", phases: [{ name: "nc" }] },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+
+  const tasks = await taskRepo.list();
+  const notePhases = tasks.find((t) => t.title === "note-phases");
+  const noteTask = tasks.find((t) => t.title === "note-task");
+  if (!notePhases || !noteTask) throw new Error("seed failed");
+
+  const phases = await phaseRepo.list();
+  const [a, b] = phases
+    .filter((p) => p.taskId === notePhases.id)
+    .sort((x, y) => x.position - y.position);
+
+  // One commit finishes phase `na` via a PM-Note; another finishes the whole note-task
+  // with the `task` shortcut. Structured JSON payload, not the legacy single trailers.
+  await git("commit", "--allow-empty", "-m", `do na\n\nPM-Note: {"v":1,"phases":[${a.id}]}`);
+  await git("commit", "--allow-empty", "-m", `done\n\nPM-Note: {"v":1,"task":${noteTask.id}}`);
+
+  const result = await reconcile();
+  expect(result.phaseTrailers).toContain(a.id);
+  expect(result.taskTrailers).toContain(noteTask.id);
+
+  // phase na done, nb still todo; the note-task's shortcut merged it and closed its phase.
+  expect((await phaseRepo.get(a.id))?.status).toBe("done");
+  expect((await phaseRepo.get(b.id))?.status).toBe("todo");
+  expect((await taskRepo.get(noteTask.id))?.status).toBe("merged");
 });
 
 test("reconcile is idempotent", async () => {

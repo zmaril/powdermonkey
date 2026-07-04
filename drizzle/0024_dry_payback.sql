@@ -1,0 +1,1 @@
+ALTER TABLE "proposals" ADD COLUMN "source_note_key" text;

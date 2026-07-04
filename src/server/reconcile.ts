@@ -9,18 +9,23 @@ import {
 } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { commitBodies } from "./git.ts";
+import { parsePmNotes } from "./pm-note.ts";
 import { phases, sessions, sessionTasks, tasks } from "./schema.ts";
 import { landSession } from "./worktree.ts";
 
 // Progress is driven by what lands on `main`, never by a session self-reporting.
-// A commit carries trailers naming the work it completed:
+// A commit carries a structured PM-Note naming the work it completed:
 //
-//   PM-Phase: <id>     one or more phases finished (repeatable / comma-separated)
-//   PM-Task:  <id>     shortcut: the whole task finished (all its phases)
+//   PM-Note: {"v":1,"phases":[<id>,…],"task":<id>}
+//     phases  one or more phases finished
+//     task    shortcut: the whole task finished (all its phases)
 //
-// Reconciliation scans every commit reachable from main, marks those phases done,
-// and rolls a task to `merged` once all its phases are done. It is idempotent:
-// re-marking a done phase is a no-op, so it is safe to run on a poll loop.
+// The single-purpose trailers `PM-Phase: <id>` / `PM-Task: <id>` are still read as a
+// LEGACY fallback during cutover (a commit predating PM-Note, or a worker that hasn't
+// switched yet). Reconciliation scans every commit reachable from main, unions the ids
+// from both sources, marks those phases done, and rolls a task to `merged` once all its
+// phases are done. It is idempotent: re-marking a done phase is a no-op, so it is safe
+// to run on a poll loop.
 
 const MAIN_BRANCH = process.env.PM_MAIN_BRANCH ?? "main";
 
@@ -104,8 +109,15 @@ async function archiveMergedTaskSessions(): Promise<number> {
 
 export async function reconcile(): Promise<ReconcileResult> {
   const log = await commitBodies(MAIN_BRANCH);
+  // Primary: structured PM-Note payloads. Legacy fallback: the single-purpose
+  // PM-Phase / PM-Task trailers. Union both into one phase/task id set — a commit may
+  // carry either (or, mid-cutover, both), and reconciliation only cares about the ids.
   const phaseTrailers = scanTrailers(log, "PM-Phase");
   const taskTrailers = scanTrailers(log, "PM-Task");
+  for (const note of parsePmNotes(log)) {
+    for (const id of note.phases) phaseTrailers.add(id);
+    if (note.task != null) taskTrailers.add(note.task);
+  }
 
   // A PM-Task trailer means "all of this task's phases are done" — fold its phases
   // into the phase set so they get marked too.

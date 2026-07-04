@@ -300,6 +300,12 @@ export const proposals = pgTable("proposals", {
   // followup-ingest write overflows ("value … is out of range for type integer").
   // `mode: "number"` keeps the TS type a plain number (ids stay well under 2^53).
   sourceCommentId: bigint("source_comment_id", { mode: "number" }),
+  // The ingest idempotency key for a follow-up carried in a commit's PM-Note (the
+  // primary channel): `<commitSha>#<index>`. The note-channel twin of
+  // `sourceCommentId` — a note follow-up already turned into a proposal is never
+  // re-ingested even though the watcher re-reads the commit each tick. Null for a
+  // plan-edit proposal or a legacy comment-sourced follow-up.
+  sourceNoteKey: text("source_note_key"),
   ...timestamps,
 });
 

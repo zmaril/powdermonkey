@@ -126,7 +126,7 @@ export function parsePmNotes(text: string): PmNote[] {
  *  inverse of `parsePmNotes` for a single note — used by the worker brief's example
  *  and by tests. Empty/absent fields are omitted to keep the payload tight; `v` is
  *  always stamped. Pure. */
-export function formatPmNote(note: Partial<Pick<PmNote, "phases" | "task" | "followups">>): string {
+export function formatPmNote(note: Partial<Omit<PmNote, "v">>): string {
   const payload: Record<string, unknown> = { v: PM_NOTE_VERSION };
   const phases = normPhases(note.phases);
   if (phases.length) payload.phases = phases;

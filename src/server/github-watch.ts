@@ -12,6 +12,7 @@ import {
 import { ingestFollowups } from "./followups.ts";
 import { askClaude, gh, resolveRepo } from "./gh.ts";
 import { pullMain } from "./git.ts";
+import { parsePmNotes } from "./pm-note.ts";
 import {
   clearRebaseAsked,
   isRebaseAsked,
@@ -31,9 +32,9 @@ import { getAutoRebase } from "./settings.ts";
 // Division of truth:
 //   • GitHub PR state is the lifecycle *clock* (dispatched → PR open → merged)
 //     and the source of `task.prUrl`.
-//   • Commit trailers on `main` stay the *truth* for phase/task completion — a
-//     merge event just pulls main and wakes reconcile so it runs promptly instead
-//     of on a blind 15s timer.
+//   • PM-Note trailers on `main` (with legacy PM-Phase / PM-Task as a fallback) stay
+//     the *truth* for phase/task completion — a merge event just pulls main and wakes
+//     reconcile so it runs promptly instead of on a blind 15s timer.
 //
 // "Realtime" is efficient polling: GitHub offers no client push for repo events
 // short of webhooks (which need a public endpoint — PowderMonkey is localhost).
@@ -52,7 +53,7 @@ const GQL = `query($owner:String!,$name:String!){
       nodes{
         number title url state isDraft merged mergeable updatedAt headRefName
         checks: commits(last:1){nodes{commit{statusCheckRollup{state}}}}
-        history: commits(first:100){nodes{commit{messageBody}}}
+        history: commits(first:100){nodes{commit{oid messageBody}}}
         comments(last:30){nodes{databaseId url body updatedAt}}
       }
     }
@@ -91,9 +92,13 @@ export async function fetchCloudPrs(): Promise<CloudPr[] | null> {
   const nodes = data?.data?.repository?.pullRequests?.nodes ?? [];
   const prs: CloudPr[] = [];
   for (const n of nodes) {
-    const commitText = (n.history?.nodes ?? [])
-      .map((c: { commit?: { messageBody?: string } }) => c.commit?.messageBody ?? "")
-      .join("\n");
+    const commits: { oid: string | null; body: string }[] = (n.history?.nodes ?? []).map(
+      (c: { commit?: { oid?: string; messageBody?: string } }) => ({
+        oid: c.commit?.oid ?? null,
+        body: c.commit?.messageBody ?? "",
+      }),
+    );
+    const commitText = commits.map((c) => c.body).join("\n");
     const taskId = await resolveTaskId(n.headRefName ?? "", commitText);
     if (taskId == null) continue; // can't tie this PR to a task — skip it
     const lastAgent = lastAgentComment(n.comments?.nodes ?? []);
@@ -110,7 +115,12 @@ export async function fetchCloudPrs(): Promise<CloudPr[] | null> {
       headRefName: n.headRefName,
       updatedAt: n.updatedAt,
       agent: statusFromComments(n.comments?.nodes ?? []),
-      followups: followupsFromComments(n.comments?.nodes ?? []),
+      // Follow-ups from both channels: PM-Note in the PR's commits (primary), then the
+      // legacy `<!-- pm:followup -->` comments. Each carries its own dedup key.
+      followups: [
+        ...followupsFromCommits(commits),
+        ...followupsFromComments(n.comments?.nodes ?? []),
+      ],
       lastComment: lastAgent?.body ?? null,
       lastCommentAt: lastAgent?.updatedAt ?? null,
       lastCommentUrl: lastAgent?.url ?? null,
@@ -259,7 +269,8 @@ export function parseFollowupComment(raw: string): { title: string; body: string
 }
 
 /** Collect every follow-up comment on a PR (append-only, so all of them, not just the
- *  latest). Carries each comment's databaseId through as the ingest dedup key. */
+ *  latest). Carries each comment's databaseId through as the ingest dedup key. The
+ *  LEGACY channel — kept working during cutover; `followupsFromCommits` is primary. */
 function followupsFromComments(
   comments: { databaseId?: number; body?: string; updatedAt?: string }[],
 ): FollowupComment[] {
@@ -267,7 +278,41 @@ function followupsFromComments(
   for (const c of comments) {
     const parsed = parseFollowupComment(c.body ?? "");
     if (parsed)
-      out.push({ commentId: c.databaseId ?? null, ...parsed, updatedAt: c.updatedAt ?? null });
+      out.push({
+        commentId: c.databaseId ?? null,
+        noteKey: null,
+        ...parsed,
+        updatedAt: c.updatedAt ?? null,
+      });
+  }
+  return out;
+}
+
+/** Collect follow-ups carried in the PR's commits' PM-Notes — the primary channel. A
+ *  worker adds `followups` to a commit's PM-Note; each becomes one pending proposal.
+ *  Keyed by `<commitSha>#<index>` (index within that commit's parsed follow-ups) so the
+ *  ingest dedups it exactly once even though the watcher re-reads the commit every
+ *  tick. A commit with no sha is skipped — there'd be no stable key. Pure — exported
+ *  for tests. */
+export function followupsFromCommits(
+  commits: { oid: string | null; body: string }[],
+): FollowupComment[] {
+  const out: FollowupComment[] = [];
+  for (const c of commits) {
+    if (!c.oid) continue;
+    let idx = 0;
+    for (const note of parsePmNotes(c.body)) {
+      for (const f of note.followups) {
+        out.push({
+          commentId: null,
+          noteKey: `${c.oid}#${idx}`,
+          title: f.title,
+          body: f.body ?? "",
+          updatedAt: null,
+        });
+        idx++;
+      }
+    }
   }
   return out;
 }
@@ -300,15 +345,19 @@ async function taskIdForPhaseIds(ids: number[]): Promise<number | null> {
 }
 
 /** Map a PR to its task. The branch name (`pm/task-<id>-…`) is the happy path, but
- *  cloud workers don't always follow it (e.g. a default `claude/…` branch). When
- *  the branch carries no id, fall back to the commit trailers, which always do:
- *  a `PM-Task:` names the task directly; a `PM-Phase:` resolves through the DB. */
+ *  cloud workers don't always follow it (e.g. a default `claude/…` branch). When the
+ *  branch carries no id, fall back to what the commits carry: a task id (a PM-Note
+ *  `task`, or a legacy `PM-Task:`) names it directly; a phase id (a PM-Note `phases`,
+ *  or a legacy `PM-Phase:`) resolves through the DB. */
 async function resolveTaskId(headRefName: string, commitText: string): Promise<number | null> {
   const m = BRANCH_RE.exec(headRefName);
   if (m) return Number(m[1]);
   const { taskIds, phaseIds } = parseTrailerIds(commitText);
-  if (taskIds.length > 0) return taskIds[0];
-  return taskIdForPhaseIds(phaseIds);
+  const notes = parsePmNotes(commitText);
+  const noteTaskIds = notes.map((n) => n.task).filter((t): t is number => t != null);
+  const allTaskIds = [...taskIds, ...noteTaskIds];
+  if (allTaskIds.length > 0) return allTaskIds[0];
+  return taskIdForPhaseIds([...phaseIds, ...notes.flatMap((n) => n.phases)]);
 }
 
 /** Signature of the fields whose change we care about — drives "did this PR
@@ -318,9 +367,10 @@ async function resolveTaskId(headRefName: string, commitText: string): Promise<n
  *  status persist (the upsert runs on changed PRs) and reach the UI — without
  *  reacting to unrelated PR churn. */
 function sig(pr: CloudPr): string {
-  // The follow-up comment ids are folded in so a freshly-posted `<!-- pm:followup -->`
-  // comment counts as a change — that's what wakes the ingest subscriber to slurp it.
-  const followups = pr.followups.map((f) => f.commentId ?? "?").join("+");
+  // The follow-up dedup keys are folded in so a freshly-appeared follow-up — a PM-Note
+  // in a new commit (noteKey) or a `<!-- pm:followup -->` comment (commentId) — counts
+  // as a change, waking the ingest subscriber to slurp it.
+  const followups = pr.followups.map((f) => f.noteKey ?? f.commentId ?? "?").join("+");
   return `${pr.state}|${pr.merged}|${pr.isDraft}|${pr.checks}|${pr.mergeable}|${pr.url}|${pr.agent?.updatedAt ?? ""}|${followups}`;
 }
 
@@ -384,7 +434,8 @@ export function rebaseAction(
 
 const REBASE_MESSAGE =
   "This PR has merge conflicts with `main`. Please rebase onto the latest `main`, " +
-  "resolve the conflicts, and push — keeping the PM-Phase / PM-Task trailers intact.";
+  "resolve the conflicts, and push — keeping the PM-Note (and any legacy PM-Phase / " +
+  "PM-Task) trailers intact.";
 
 // The auto-rebase toggle is a persisted operator setting (see settings.ts) —
 // `getAutoRebase()` reads it off an in-memory cache, so this hot path stays sync.

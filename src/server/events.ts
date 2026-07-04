@@ -41,9 +41,14 @@ export type AgentStatus = {
  *  becomes a proposal exactly once even though the watcher re-reads it each tick.
  *  Append-only: a PR can carry several (unlike the single newest-wins status comment). */
 export type FollowupComment = {
-  /** GitHub's IssueComment databaseId — the dedup key. Null only if GitHub omitted it
-   *  (then it's skipped, since we can't safely dedup an id-less comment). */
+  /** GitHub's IssueComment databaseId — the dedup key for the LEGACY `<!-- pm:followup -->`
+   *  comment channel. Null when this follow-up came from a PM-Note (use `noteKey`) or when
+   *  GitHub omitted the id (then it's skipped, since we can't safely dedup it). */
   commentId: number | null;
+  /** The dedup key for a follow-up carried in a commit's PM-Note: `<commitSha>#<index>`
+   *  (index within that commit's notes). The primary channel now; null for a legacy
+   *  comment-sourced follow-up (use `commentId`) or when the commit sha was unavailable. */
+  noteKey?: string | null;
   title: string;
   body: string;
   updatedAt: string | null;

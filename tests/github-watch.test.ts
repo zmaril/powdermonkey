@@ -12,6 +12,7 @@ const {
   parseStatusComment,
   statusFromComments,
   parseFollowupComment,
+  followupsFromCommits,
   rebaseAction,
 } = await import("../src/server/github-watch.ts");
 type CloudPr = import("../src/server/events.ts").CloudPr;
@@ -219,6 +220,35 @@ test("a new follow-up comment changes the sig so it emits pr.updated (→ gets i
       number: 1,
       taskId: 10,
       followups: [{ commentId: 555, title: "do a thing", body: "", updatedAt: "t1" }],
+    }),
+  ];
+  expect(diffCloudPrs(prev, next).map((e) => e.type)).toEqual(["pr.updated"]);
+});
+
+test("followupsFromCommits pulls PM-Note follow-ups, keyed by <sha>#<index>", () => {
+  const commits = [
+    {
+      oid: "abc123",
+      body: 'do a\n\nPM-Note: {"v":1,"phases":[41],"followups":[{"title":"one","body":"ctx"},{"title":"two"}]}',
+    },
+    { oid: "def456", body: 'do b\n\nPM-Note: {"v":1,"phases":[42]}' }, // no followups
+    { oid: null, body: 'PM-Note: {"v":1,"followups":[{"title":"dropped"}]}' }, // no sha → skipped
+  ];
+  expect(followupsFromCommits(commits)).toEqual([
+    { commentId: null, noteKey: "abc123#0", title: "one", body: "ctx", updatedAt: null },
+    { commentId: null, noteKey: "abc123#1", title: "two", body: "", updatedAt: null },
+  ]);
+});
+
+test("a new PM-Note follow-up (noteKey) changes the sig so it emits pr.updated", () => {
+  const prev = index([pr({ number: 1, taskId: 10 })]);
+  const next = [
+    pr({
+      number: 1,
+      taskId: 10,
+      followups: [
+        { commentId: null, noteKey: "sha#0", title: "note follow-up", body: "", updatedAt: null },
+      ],
     }),
   ];
   expect(diffCloudPrs(prev, next).map((e) => e.type)).toEqual(["pr.updated"]);
