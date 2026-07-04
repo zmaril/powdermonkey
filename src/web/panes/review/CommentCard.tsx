@@ -1,6 +1,7 @@
 import { Anchor, Box, Group, Text } from "@mantine/core";
 import { IconExternalLink } from "@tabler/icons-react";
 import type { ReviewComment } from "../../../server/pr-review.ts";
+import { openExternal } from "../../open-external.ts";
 
 export function CommentCard({ comment }: { comment: ReviewComment }) {
   return (
@@ -21,6 +22,10 @@ export function CommentCard({ comment }: { comment: ReviewComment }) {
           <Anchor
             href={comment.url}
             target="_blank"
+            onClick={(e) => {
+              e.preventDefault();
+              openExternal(comment.url);
+            }}
             c="dimmed"
             style={{ display: "inline-flex", lineHeight: 1 }}
           >
