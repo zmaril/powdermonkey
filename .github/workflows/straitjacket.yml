@@ -18,8 +18,8 @@ jobs:
       security-events: write
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: zmaril/straitjacket@v0.2.0
+      - uses: actions/checkout@v7
+      - uses: zmaril/straitjacket@v0.2.1
         with:
           # Report-only while adopting: findings show in the log (and as code-scanning
           # annotations) but don't fail the job. Flip off once the count is worked down.

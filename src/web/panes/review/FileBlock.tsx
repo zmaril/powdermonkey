@@ -9,6 +9,19 @@ import { FilePatch } from "./FilePatch.tsx";
 import { estimateHeight } from "./helpers.ts";
 import { LazyMount } from "./LazyMount.tsx";
 
+/** The diff body's fold. Starts folded for a generated file, and re-syncs to
+ *  `viewed || generated` whenever those change (marking viewed folds; un-viewing
+ *  unfolds — except generated, which stays folded by default). A manual caret toggle
+ *  in between wins until the next viewed change. Returns `[collapsed, setCollapsed]`
+ *  so the caret can flip the fold directly without touching `viewed`. */
+export function useFileCollapse(isViewed: boolean, generated: boolean) {
+  const [collapsed, setCollapsed] = useState(generated);
+  useEffect(() => {
+    setCollapsed(isViewed || generated);
+  }, [isViewed, generated]);
+  return [collapsed, setCollapsed] as const;
+}
+
 /** One file in the diff list: our header (caret · name · status · +/- · Viewed) over
  *  the PatchDiff. Two independent ways to collapse the diff body: the caret (a pure
  *  UI fold that leaves "viewed" untouched) and the Viewed checkbox (GitHub's mechanic
@@ -20,17 +33,9 @@ import { LazyMount } from "./LazyMount.tsx";
 export function FileBlock({ file }: { file: ReviewFile }) {
   const { review, viewed, toggleViewed } = useReviewCtx();
   const isViewed = viewed.has(file.filename);
-  // The diff body's fold. Driven by the caret directly and by Viewed via the effect
-  // below; the caret never writes back to `viewed`, keeping the two states separate.
-  // A generated file starts folded.
-  const [collapsed, setCollapsed] = useState(file.generated);
-  // Marking a file viewed folds it; un-viewing unfolds it — except a generated file,
-  // which falls back to its folded-by-default. (Fires on mount too, once the async
-  // viewed state arrives.) A manual caret toggle in between wins until the next viewed
-  // change, since this only fires when isViewed (or the generated flag) does.
-  useEffect(() => {
-    setCollapsed(isViewed || file.generated);
-  }, [isViewed, file.generated]);
+  // The diff body's fold — driven by the caret directly and by Viewed (see the hook);
+  // the caret never writes back to `viewed`, keeping the two states separate.
+  const [collapsed, setCollapsed] = useFileCollapse(isViewed, file.generated);
   // Full-file contents for context expansion, fetched on demand (see #2). null =
   // patch-only (light). Switching on pulls the blob and re-renders via MultiFileDiff.
   const [contents, setContents] = useState<{ oldText: string; newText: string } | null>(null);

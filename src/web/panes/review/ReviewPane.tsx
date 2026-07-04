@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PrReview, ReviewEvent } from "../../../server/pr-review.ts";
 import { api } from "../../client.ts";
 import { useActiveTheme } from "../../store.ts";
+import { useRunEffect } from "../../use-run-effect.ts";
 import { ReviewCtx, type ReviewCtxValue } from "./context.ts";
 import { DescriptionPanel } from "./DescriptionPanel.tsx";
 import { FilesPanel } from "./FilesPanel.tsx";
@@ -45,6 +46,22 @@ function buildReviewLayout(event: DockviewReadyEvent) {
   api.getPanel("desc")?.api.setSize({ width: Math.round(w / 3) });
 }
 
+/** Load the persisted "viewed files" set from localStorage once the PR key is known. */
+function useLoadPersistedViewed(
+  viewedKey: string | null,
+  setViewed: (s: Set<string>) => void,
+): void {
+  useEffect(() => {
+    if (!viewedKey) return;
+    try {
+      const raw = localStorage.getItem(viewedKey);
+      setViewed(new Set(raw ? (JSON.parse(raw) as string[]) : []));
+    } catch {
+      setViewed(new Set());
+    }
+  }, [viewedKey, setViewed]);
+}
+
 export function ReviewPane({ number, onClose }: { number: number; onClose?: () => void }) {
   const [review, setReview] = useState<PrReview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -78,15 +95,7 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
     fileEls.current.get(path)?.scrollIntoView({ block: "start", behavior: "smooth" });
 
   // Load persisted viewed state once the PR (and its head sha) is known.
-  useEffect(() => {
-    if (!viewedKey) return;
-    try {
-      const raw = localStorage.getItem(viewedKey);
-      setViewed(new Set(raw ? (JSON.parse(raw) as string[]) : []));
-    } catch {
-      setViewed(new Set());
-    }
-  }, [viewedKey]);
+  useLoadPersistedViewed(viewedKey, setViewed);
 
   const toggleViewed = (path: string) =>
     setViewed((prev) => {
@@ -110,9 +119,7 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
     setLoading(false);
   }, [number]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useRunEffect(load);
 
   // Index drafts by line anchor so each line can show its pending comments.
   const draftByKey = useMemo(() => {

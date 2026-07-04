@@ -1,6 +1,6 @@
-import { useEffect } from "react";
 import { ReviewPane } from "../panes/review";
 import { useStore } from "../store.ts";
+import { useEscToClose } from "./use-esc-to-close.ts";
 
 // Reviewing a PR is a focused, take-over activity, not another tab competing for the
 // split — so the Review pane renders as a full-window overlay above everything (top
@@ -9,16 +9,7 @@ import { useStore } from "../store.ts";
 export function ReviewOverlay() {
   const review = useStore((s) => s.review);
   const closeReview = useStore((s) => s.closeReview);
-  useEffect(() => {
-    if (!review) return;
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      const typing = t instanceof HTMLTextAreaElement || t instanceof HTMLInputElement;
-      if (e.key === "Escape" && !typing) closeReview();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [review, closeReview]);
+  useEscToClose(review, closeReview);
   if (!review) return null;
   return (
     <div
