@@ -1,11 +1,10 @@
 import { ActionIcon, Stack, Tooltip, UnstyledButton } from "@mantine/core";
 import { IconPlus, IconX } from "@tabler/icons-react";
 import { useLiveQuery } from "@tanstack/react-db";
-import type { Repo } from "../../server/schema.ts";
 import { reposCollection } from "../collections.ts";
-import { repoSwatch } from "../repo-color.ts";
-import { useActiveTheme, useStore } from "../store.ts";
+import { useStore } from "../store.ts";
 import { type PmWindow, windowLabel } from "../windows.ts";
+import { RailGlyph } from "./RailGlyph.tsx";
 
 // The window rail (docs/windows.md): a Slack-style switcher, always open on the left
 // edge — one entry per window, click to swap the whole dock (layout + repo scope) to
@@ -14,44 +13,6 @@ import { type PmWindow, windowLabel } from "../windows.ts";
 // `+` opens a fresh unscoped window (scope it from the tab strip); the active entry
 // carries the close ✕ — you close the window you're looking at, Firefox-style, and
 // closing the last one just hands you a fresh empty view (the list is never empty).
-
-/** The rail glyph: up to three overlapping repo-color dots, or a hollow ring when
- *  the window is unscoped. */
-function RailGlyph({ win, byId }: { win: PmWindow; byId: Map<number, Repo> }) {
-  const theme = useActiveTheme();
-  const repos = win.repoIds.map((id) => byId.get(id)).filter((r): r is Repo => r != null);
-  if (repos.length === 0) {
-    return (
-      <span
-        aria-hidden
-        style={{
-          width: 12,
-          height: 12,
-          borderRadius: "50%",
-          border: "2px solid var(--pm-dim-text)",
-          display: "block",
-        }}
-      />
-    );
-  }
-  return (
-    <span aria-hidden style={{ display: "flex", alignItems: "center" }}>
-      {repos.slice(0, 3).map((r, i) => (
-        <span
-          key={r.id}
-          style={{
-            width: 11,
-            height: 11,
-            borderRadius: "50%",
-            background: repoSwatch(r, theme),
-            border: "1.5px solid var(--pm-tab-strip)",
-            marginLeft: i === 0 ? 0 : -4,
-          }}
-        />
-      ))}
-    </span>
-  );
-}
 
 export function WindowRail() {
   const windows = useStore((s) => s.windows);
