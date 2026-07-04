@@ -3,15 +3,17 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// The task's diary: append-only comments on a task. Appends are auto-timestamped
-// and read back oldest-first; a line can be deleted (hard DELETE, scoped to its
-// task) but never edited — there is no update function and no PATCH route, and
-// this suite pins that surface. Runs against a throwaway PGlite store, like the
-// other DB-touching suites.
+// The task's diary: one-line comments on a task. Capture is zero-ceremony (append,
+// auto-timestamped, read back oldest-first) and a line stays an ordinary row after
+// that: it can be edited in place (PATCH) and archived (soft delete, hidden from the
+// list). Every mutation is scoped to the comment's task. Runs against a throwaway
+// PGlite store, like the other DB-touching suites.
 process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
 const { ready } = await import("../src/server/db.ts");
 const { loadPlan } = await import("../src/server/plan.ts");
-const { appendComment, deleteComment, listComments } = await import("../src/server/comments.ts");
+const { appendComment, archiveComment, listComments, updateComment } = await import(
+  "../src/server/comments.ts"
+);
 const { CommentAuthor } = await import("../src/shared/types.ts");
 const { app } = await import("../src/server/app.ts");
 
@@ -48,7 +50,11 @@ test("the supervisor can speak too", async () => {
 test("list reads the diary oldest-first", async () => {
   await appendComment(taskId, "a later line");
   const rows = await listComments(taskId);
-  expect(rows.map((r) => r.body)).toEqual(["first mutter", "operator was unsure here", "a later line"]);
+  expect(rows.map((r) => r.body)).toEqual([
+    "first mutter",
+    "operator was unsure here",
+    "a later line",
+  ]);
   const times = rows.map((r) => r.createdAt.getTime());
   expect([...times].sort((a, b) => a - b)).toEqual(times);
 });
@@ -57,19 +63,31 @@ test("append to a task that doesn't exist is a clean null (404 at the route)", a
   expect(await appendComment(999_999, "into the void")).toBeNull();
 });
 
-test("delete takes a line back outright, scoped to its task", async () => {
-  const row = await appendComment(taskId, "on second thought");
+test("edit fixes a line in place, scoped to its task", async () => {
+  const row = await appendComment(taskId, "a typoo");
   if (!row) throw new Error("append failed");
-  // A wrong-task id can't cross diaries.
-  expect(await deleteComment(taskId + 1, row.id)).toBeNull();
-  const gone = await deleteComment(taskId, row.id);
-  expect(gone?.id).toBe(row.id);
-  expect((await listComments(taskId)).some((c) => c.id === row.id)).toBe(false);
-  // Deleting again finds nothing.
-  expect(await deleteComment(taskId, row.id)).toBeNull();
+  // A wrong-task id can't edit across diaries.
+  expect(await updateComment(taskId + 1, row.id, "nope")).toBeNull();
+  const edited = await updateComment(taskId, row.id, "a typo, fixed");
+  expect(edited?.body).toBe("a typo, fixed");
+  // The edit stamps updated_at; created_at (and so the diary's order) is untouched.
+  expect(edited && edited.updatedAt.getTime() >= edited.createdAt.getTime()).toBe(true);
+  expect(edited?.createdAt.getTime()).toBe(row.createdAt.getTime());
+  await archiveComment(taskId, row.id);
 });
 
-test("routes: append + list + delete exist; there is NO edit route", async () => {
+test("archive hides a line from the list without destroying the row", async () => {
+  const row = await appendComment(taskId, "on second thought");
+  if (!row) throw new Error("append failed");
+  // A wrong-task id can't archive across diaries.
+  expect(await archiveComment(taskId + 1, row.id)).toBeNull();
+  const gone = await archiveComment(taskId, row.id);
+  expect(gone?.id).toBe(row.id);
+  expect(gone?.archivedAt).toBeInstanceOf(Date);
+  expect((await listComments(taskId)).some((c) => c.id === row.id)).toBe(false);
+});
+
+test("routes: append + list + edit + archive", async () => {
   // NB: a real-looking host matters — Elysia's router mis-resolves a bare
   // single-label host like `http://pm` into the SPA fallback.
   const base = "http://localhost";
@@ -88,20 +106,26 @@ test("routes: append + list + delete exist; there is NO edit route", async () =>
   const rows = (await listed.json()) as Array<{ id: number }>;
   expect(rows.some((r) => r.id === created.id)).toBe(true);
 
-  // Append-only by design: no PATCH on a comment — the route simply doesn't exist.
+  // PATCH edits the line in place.
   const patched = await app.handle(
     new Request(`${base}/tasks/${taskId}/comments/${created.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ body: "rewritten" }),
+      body: JSON.stringify({ body: "via the API, reworded" }),
     }),
   );
-  expect(patched.status).toBe(404);
+  expect(patched.status).toBe(200);
+  expect(((await patched.json()) as { body: string }).body).toBe("via the API, reworded");
 
+  // DELETE archives (soft) — the line leaves the list.
   const deleted = await app.handle(
     new Request(`${base}/tasks/${taskId}/comments/${created.id}`, { method: "DELETE" }),
   );
   expect(deleted.status).toBe(200);
+  const after = (await (
+    await app.handle(new Request(`${base}/tasks/${taskId}/comments`))
+  ).json()) as Array<{ id: number }>;
+  expect(after.some((r) => r.id === created.id)).toBe(false);
 
   // Appending to a missing task 404s.
   const missing = await app.handle(

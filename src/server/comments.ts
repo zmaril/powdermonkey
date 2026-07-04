@@ -1,21 +1,21 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import type { CommentAuthor } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { type TaskComment, taskComments, tasks } from "./schema.ts";
 
-// A task's diary: append, read, and delete-a-line — deliberately NO update. A
-// comment is a timestamped one-liner muttered onto a task; once spoken it can be
-// taken back (deleted outright) but never rewritten. The API surface here is the
-// enforcement seam: no function edits a row, and the table itself carries no
-// updated_at to edit with (see schema.ts).
+// A task's diary: one-line comments on a task. Capture is zero-ceremony (append a
+// line, auto-timestamped), and after that a line is an ordinary row — edit it in
+// place (fix the typo), archive it (soft delete, like every other entity). Every
+// mutation is scoped to the comment's task so a stray id can't cross diaries.
 
-/** A task's comments, oldest first — the diary reads top-to-bottom. Ties on the
- *  timestamp (same-instant inserts) fall back to insertion order via the id. */
+/** A task's live (non-archived) comments, oldest first — the diary reads
+ *  top-to-bottom. Ties on the timestamp (same-instant inserts) fall back to
+ *  insertion order via the id. */
 export async function listComments(taskId: number): Promise<TaskComment[]> {
   return db
     .select()
     .from(taskComments)
-    .where(eq(taskComments.taskId, taskId))
+    .where(and(eq(taskComments.taskId, taskId), isNull(taskComments.archivedAt)))
     .orderBy(asc(taskComments.createdAt), asc(taskComments.id));
 }
 
@@ -36,15 +36,30 @@ export async function appendComment(
   return row;
 }
 
-/** Delete one line from a task's diary — a hard DELETE, not an archive (the table
- *  has no archived_at). Scoped to the task so a stray id can't cross diaries.
- *  Returns the removed row, or null when it wasn't there. */
-export async function deleteComment(
+/** Edit one line's body in place (typo fix, better wording). `updated_at` records
+ *  the edit. Returns the updated row, or null when the comment isn't on this task. */
+export async function updateComment(
+  taskId: number,
+  commentId: number,
+  body: string,
+): Promise<TaskComment | null> {
+  const [row] = await db
+    .update(taskComments)
+    .set({ body, updatedAt: new Date() })
+    .where(and(eq(taskComments.id, commentId), eq(taskComments.taskId, taskId)))
+    .returning();
+  return row ?? null;
+}
+
+/** Archive one line — the same soft delete as every other entity (sets archived_at,
+ *  drops out of the list). Returns the archived row, or null when it wasn't there. */
+export async function archiveComment(
   taskId: number,
   commentId: number,
 ): Promise<TaskComment | null> {
   const [row] = await db
-    .delete(taskComments)
+    .update(taskComments)
+    .set({ archivedAt: new Date(), updatedAt: new Date() })
     .where(and(eq(taskComments.id, commentId), eq(taskComments.taskId, taskId)))
     .returning();
   return row ?? null;

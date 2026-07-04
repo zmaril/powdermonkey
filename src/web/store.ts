@@ -132,11 +132,12 @@ export type State = {
       repoId?: number | null;
     },
   ) => Promise<void>;
-  // The task's diary (append-only): append a line, or take one back. No edit —
-  // there is no route for it. Append returns the created row so the composer can
-  // reconcile its optimistic echo against the synced insert; null on failure.
+  // The task's diary: append a line, edit one in place, or archive it (the same
+  // soft delete as everything else). Append returns the created row so the composer
+  // can reconcile its optimistic echo against the synced insert; null on failure.
   appendComment: (taskId: number, body: string) => Promise<TaskComment | null>;
-  deleteComment: (taskId: number, commentId: number) => Promise<void>;
+  updateComment: (taskId: number, commentId: number, body: string) => Promise<void>;
+  archiveComment: (taskId: number, commentId: number) => Promise<void>;
   createPhase: (taskId: number, name: string, position?: number) => Promise<void>;
   updatePhase: (phaseId: number, fields: { name?: string }) => Promise<void>;
   deletePhase: (phaseId: number) => Promise<void>;
@@ -361,7 +362,11 @@ export const useStore = create<State>()(
         }
         return data && "id" in data ? data : null;
       },
-      deleteComment: async (taskId, commentId) => {
+      updateComment: async (taskId, commentId, body) => {
+        const { error } = await api.tasks({ id: taskId }).comments({ commentId }).patch({ body });
+        if (error) set({ error: errMsg(error) });
+      },
+      archiveComment: async (taskId, commentId) => {
         const { error } = await api.tasks({ id: taskId }).comments({ commentId }).delete();
         if (error) set({ error: errMsg(error) });
       },

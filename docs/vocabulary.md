@@ -84,13 +84,14 @@ in the task's description. Discovery-first tasks (bugs, spikes) legitimately sta
 none and gain phases as the work is understood.
 
 ### Task comment
-An append-only one-liner muttered onto a Task — the task's **diary**. Typed straight into
-the card (Enter appends, auto-timestamped), never edited: a line can be taken back
-(deleted) but not rewritten. Two voices, recorded in `author`: the **operator** (the card's
-composer) and the **supervisor** (via the API, rendered with the robot glyph). Comments are
-capture, not documentation — no title, no fields, no formatting — and they never affect
-progress. The supervisor reads a task's diary as intent/mood context ("operator was unsure
-here") before authoring proposals about it.
+A one-liner muttered onto a Task — the task's **diary**. Typed straight into the card
+(Enter appends, auto-timestamped); after capture a line is an ordinary row — click it to
+edit in place (fix the typo), × to archive it (the soft delete every entity uses). Two
+voices, recorded in `author`: the **operator** (the card's composer) and the
+**supervisor** (via the API, rendered with the robot glyph). Comments are capture, not
+documentation — no title, no fields, no formatting — and they never affect progress. The
+supervisor reads a task's diary as intent/mood context ("operator was unsure here")
+before authoring proposals about it.
 
 ### Repo
 A **GitHub git repo** (`owner/repo`, a default branch), in a **flat global list** you

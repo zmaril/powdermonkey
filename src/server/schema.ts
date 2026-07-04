@@ -140,11 +140,11 @@ export const sessionTasks = pgTable("session_tasks", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-// A task's diary: append-only one-line comments muttered onto a task — by the
-// operator (the card's composer) or the supervisor agent (via the API). Deliberately
-// minimal: task_id, who spoke, the line, when. There is NO updated_at (a line is
-// never edited) and NO archived_at (deleting your own line is a hard DELETE, not an
-// archive) — the schema itself enforces "a diary, not a doc".
+// A task's diary: one-line comments muttered onto a task — by the operator (the
+// card's composer) or the supervisor agent (via the API). Capture stays
+// zero-ceremony (one line, auto-timestamped), but a line is an ordinary row after
+// that: it can be edited in place (fix the typo) and archived (soft delete, like
+// every other entity), carrying the shared timestamps.
 export const taskComments = pgTable("task_comments", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   taskId: integer("task_id")
@@ -153,7 +153,7 @@ export const taskComments = pgTable("task_comments", {
   // Who wrote the line — operator or supervisor (see CommentAuthor).
   author: text("author").$type<CommentAuthor>().notNull().default(CommentAuthor.Operator),
   body: text("body").notNull(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  ...timestamps,
 });
 
 // The repo registry: a flat, global list of the GitHub repos the operator drives.

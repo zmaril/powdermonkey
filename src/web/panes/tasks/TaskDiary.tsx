@@ -1,10 +1,11 @@
-import { Group, Stack, Text, TextInput, Tooltip, UnstyledButton } from "@mantine/core";
+import { Box, Group, Stack, Text, TextInput, Tooltip, UnstyledButton } from "@mantine/core";
 import { IconRobot } from "@tabler/icons-react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TaskComment } from "../../../server/schema.ts";
 import { CommentAuthor } from "../../../shared/types.ts";
 import { taskCommentsCollection } from "../../collections.ts";
+import { EditableText } from "../../plan-ui";
 import { useStore } from "../../store.ts";
 import { exactTime, timeAgo } from "../../time.ts";
 
@@ -12,9 +13,9 @@ import { exactTime, timeAgo } from "../../time.ts";
 // under the phase list, with a zero-ceremony one-line composer below — type + Enter
 // appends, auto-timestamped, no modal / title / fields. Relative stamps ("2d ago")
 // with the exact moment on hover; a long diary collapses to its newest lines behind
-// an "earlier" toggle. Lines are never edited — the only affordance is taking one
-// back (×). Deliberately no formatting and no required fields: muttering, not
-// documenting.
+// an "earlier" toggle. A line stays an ordinary row after capture: click its text to
+// edit in place, × archives it (the soft delete everything else uses). Deliberately
+// no formatting and no required fields: muttering, not documenting.
 
 /** Above this many lines the diary collapses to the newest TAIL. */
 const COLLAPSE_ABOVE = 4;
@@ -24,17 +25,31 @@ const TAIL = 3;
 const byTime = (a: TaskComment, b: TaskComment) =>
   new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id - b.id;
 
-/** One task's comments, chronological, live off the synced collection. */
+/** One task's live (non-archived) comments, chronological, off the synced
+ *  collection. The collection streams every row including archived ones — the
+ *  filter here is what makes × take effect instantly. */
 export function useTaskComments(taskId: number): TaskComment[] {
   const all = useLiveQuery(() => taskCommentsCollection);
   return useMemo(
-    () => (all.data ?? []).filter((c) => c.taskId === taskId).sort(byTime),
+    () => (all.data ?? []).filter((c) => c.taskId === taskId && c.archivedAt == null).sort(byTime),
     [all.data, taskId],
   );
 }
 
-/** One diary line: (supervisor glyph ·) body · relative stamp · take-back ×. */
-function DiaryLine({ comment, onDelete }: { comment: TaskComment; onDelete: () => void }) {
+/** True when a line has been edited since it was written (worth a subtle mark). */
+const wasEdited = (c: TaskComment) =>
+  new Date(c.updatedAt).getTime() - new Date(c.createdAt).getTime() > 1000;
+
+/** One diary line: (supervisor glyph ·) click-to-edit body · relative stamp · archive ×. */
+function DiaryLine({
+  comment,
+  onEdit,
+  onArchive,
+}: {
+  comment: TaskComment;
+  onEdit: (body: string) => void;
+  onArchive: () => void;
+}) {
   const supervisor = comment.author === CommentAuthor.Supervisor;
   return (
     <Group gap="tight" wrap="nowrap" align="baseline">
@@ -45,15 +60,22 @@ function DiaryLine({ comment, onDelete }: { comment: TaskComment; onDelete: () =
           </Text>
         </Tooltip>
       )}
-      <Text size="xs" style={{ wordBreak: "break-word", flex: 1, minWidth: 0 }}>
-        {comment.body}
-      </Text>
+      <Box style={{ flex: 1, minWidth: 0 }}>
+        <EditableText value={comment.body} size="xs" wrap onSave={onEdit} />
+      </Box>
+      {wasEdited(comment) && (
+        <Tooltip label={`edited ${exactTime(comment.updatedAt)}`} withArrow openDelay={300}>
+          <Text size="xs" c="dimmed" style={{ flexShrink: 0, opacity: 0.6, cursor: "default" }}>
+            edited
+          </Text>
+        </Tooltip>
+      )}
       <Tooltip label={exactTime(comment.createdAt)} withArrow openDelay={300}>
         <Text size="xs" c="dimmed" style={{ flexShrink: 0, cursor: "default" }}>
           {timeAgo(comment.createdAt)}
         </Text>
       </Tooltip>
-      <UnstyledButton onClick={onDelete} title="take this line back">
+      <UnstyledButton onClick={onArchive} title="archive this line">
         <Text size="xs" c="dimmed" style={{ opacity: 0.5 }}>
           ×
         </Text>
@@ -73,7 +95,7 @@ let pendingSeq = 0;
  *  echoes from the composer) always show, dimmed, at the bottom. */
 function DiaryTimeline({ taskId, pending }: { taskId: number; pending: PendingLine[] }) {
   const comments = useTaskComments(taskId);
-  const { deleteComment } = useStore();
+  const { updateComment, archiveComment } = useStore();
   const [expanded, setExpanded] = useState(false);
   if (comments.length === 0 && pending.length === 0) return null;
 
@@ -91,7 +113,12 @@ function DiaryTimeline({ taskId, pending }: { taskId: number; pending: PendingLi
         </UnstyledButton>
       )}
       {shown.map((c) => (
-        <DiaryLine key={c.id} comment={c} onDelete={() => deleteComment(taskId, c.id)} />
+        <DiaryLine
+          key={c.id}
+          comment={c}
+          onEdit={(body) => updateComment(taskId, c.id, body)}
+          onArchive={() => archiveComment(taskId, c.id)}
+        />
       ))}
       {pending.map((p) => (
         <Group key={`pending-${p.key}`} gap="tight" wrap="nowrap" align="baseline">
