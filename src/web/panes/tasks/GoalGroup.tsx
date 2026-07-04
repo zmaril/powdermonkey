@@ -103,14 +103,7 @@ export function GoalGroup({
           strategy={verticalListSortingStrategy}
         >
           {milestones.map(({ m, tasks }) => (
-            <MilestoneGroup
-              key={m.id}
-              milestone={m}
-              tasks={tasks}
-              idx={idx}
-              ghosts={ghosts}
-              edits={edits}
-            />
+            <MilestoneGroup key={m.id} milestone={m} tasks={tasks} ghosts={ghosts} edits={edits} />
           ))}
         </SortableContext>
       )}

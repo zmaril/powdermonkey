@@ -1,10 +1,11 @@
 import { Button, Card, Group, Text } from "@mantine/core";
 import type { ReactNode } from "react";
 import { useState } from "react";
-import type { Phase, Task } from "../../../server/schema.ts";
+import type { Task } from "../../../server/schema.ts";
 import { ProposalOp } from "../../../shared/types.ts";
-import type { EntityEdit, Ghost } from "../../ghosts.ts";
+import { type Ghost, taskProposalProps } from "../../ghosts.ts";
 import { IdTag, KindBadge, PhaseList, RepoBadge, StarToggle, useRepo } from "../../plan-ui";
+import { useBoardData } from "./board-data-context.ts";
 import { CardEditor } from "./CardEditor.tsx";
 import { SELECTED_SHADOW } from "./constants.ts";
 import { GhostCardBody } from "./GhostCardBody.tsx";
@@ -22,20 +23,12 @@ import { isTerminal } from "./task-status.ts";
  *  task instead (see GhostCardBody). */
 export function BacklogCard({
   task,
-  phases = [],
   ghost,
-  edits = [],
-  phaseGhosts = [],
-  phaseEdits = [],
   onEditingChange,
   handle,
 }: {
   task?: Task;
-  phases?: Phase[];
   ghost?: Ghost;
-  edits?: EntityEdit[];
-  phaseGhosts?: Ghost[];
-  phaseEdits?: EntityEdit[];
   /** Told when this card enters/leaves edit mode, so the list can suspend its animation
    *  (the card<->editor swap shouldn't morph for 300ms — editing should feel instant). */
   onEditingChange?: (editing: boolean) => void;
@@ -51,6 +44,9 @@ export function BacklogCard({
   // Multi-select state comes from context (provided at the TasksPane root), so the
   // goal/milestone/sortable layers don't thread it down.
   const selection = useSelection();
+  // The board-wide maps this card's proposal data is derived from (see BoardDataContext),
+  // read from context so the layers above don't thread it down.
+  const { idx, ghosts, edits } = useBoardData();
   const setEdit = (on: boolean) => {
     onEditingChange?.(on);
     setEditing(on);
@@ -59,9 +55,11 @@ export function BacklogCard({
   if (ghost) return <GhostCardBody ghost={ghost} />;
 
   if (!task) return null;
+  // This task's phases + the pending edits on it, derived from the board maps.
+  const { phases, edits: taskEdits = [] } = taskProposalProps(task, idx, ghosts, edits);
   if (editing) return <CardEditor task={task} phases={phases} onDone={() => setEdit(false)} />;
   const checked = selection.selected.has(task.id);
-  const archiveProposed = edits.some((e) => e.op === ProposalOp.Archive);
+  const archiveProposed = taskEdits.some((e) => e.op === ProposalOp.Archive);
   // Terminal / archived → show the outcome cluster (badge + reopen + links) instead of
   // the launch actions; the old Archive pane, folded into the card.
   const terminal = isTerminal(task);
@@ -140,13 +138,7 @@ export function BacklogCard({
           {terminal ? <TaskOutcome task={task} /> : <TaskActions ids={[task.id]} />}
         </Group>
       )}
-      <TaskProposalStrips
-        edits={edits}
-        phaseGhosts={phaseGhosts}
-        phaseEdits={phaseEdits}
-        phases={phases}
-        showConflict
-      />
+      <TaskProposalStrips task={task} showConflict />
     </Card>
   );
 }

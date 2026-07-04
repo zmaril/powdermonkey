@@ -1,8 +1,7 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { Phase, Task } from "../../../server/schema.ts";
+import type { Task } from "../../../server/schema.ts";
 import { VocabKind } from "../../../shared/types.ts";
-import type { EntityEdit, Ghost } from "../../ghosts.ts";
 import { BacklogCard } from "./BacklogCard.tsx";
 import { DragHandle } from "./DragHandle.tsx";
 import { tId } from "./reorder.ts";
@@ -13,17 +12,9 @@ import { tId } from "./reorder.ts";
  *  the placeholder gap tracks the drag. */
 export function SortableCard({
   task,
-  phases,
-  edits,
-  phaseGhosts,
-  phaseEdits,
   onEditingChange,
 }: {
   task: Task;
-  phases: Phase[];
-  edits?: EntityEdit[];
-  phaseGhosts?: Ghost[];
-  phaseEdits?: EntityEdit[];
   onEditingChange?: (editing: boolean) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -41,10 +32,6 @@ export function SortableCard({
     >
       <BacklogCard
         task={task}
-        phases={phases}
-        edits={edits}
-        phaseGhosts={phaseGhosts}
-        phaseEdits={phaseEdits}
         onEditingChange={onEditingChange}
         handle={<DragHandle {...attributes} {...listeners} />}
       />

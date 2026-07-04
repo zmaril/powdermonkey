@@ -1,8 +1,9 @@
 import { Group, Text } from "@mantine/core";
 import { IconAlertTriangle } from "@tabler/icons-react";
-import type { Phase } from "../../../server/schema.ts";
+import type { Phase, Task } from "../../../server/schema.ts";
 import { Decision, ProposalOp } from "../../../shared/types.ts";
-import { type EntityEdit, editLabel, type Ghost } from "../../ghosts.ts";
+import { type EntityEdit, editLabel, taskProposalProps } from "../../ghosts.ts";
+import { useBoardData } from "./board-data-context.ts";
 import { ProposedStrip } from "./ProposedStrip.tsx";
 import { hintFor } from "./strip-helpers.ts";
 import { useDecide } from "./useDecide.ts";
@@ -20,18 +21,22 @@ function phaseEditLabel(e: EntityEdit, phases: Phase[]): string {
  *  surfaces a decide() conflict inline (the card wants it; the dense row doesn't). Owns
  *  one useDecide() for the whole group. */
 export function TaskProposalStrips({
-  edits,
-  phaseGhosts,
-  phaseEdits,
-  phases,
+  task,
   showConflict = false,
 }: {
-  edits: EntityEdit[];
-  phaseGhosts: Ghost[];
-  phaseEdits: EntityEdit[];
-  phases: Phase[];
+  task: Task;
   showConflict?: boolean;
 }) {
+  // The task's proposal render data (its phases, edits on the task, proposed new phases, and
+  // edits on its phases) is derived from the board-wide maps in context, so the card/row
+  // conduits above don't thread it down.
+  const { idx, ghosts, edits } = useBoardData();
+  const {
+    phases,
+    edits: taskEdits = [],
+    phaseGhosts = [],
+    phaseEdits,
+  } = taskProposalProps(task, idx, ghosts, edits);
   const { busy, conflict, decide } = useDecide();
   const strip = (key: string, label: string, hint: string, proposalId: number, ix: number) => (
     <ProposedStrip
@@ -45,7 +50,7 @@ export function TaskProposalStrips({
   );
   return (
     <>
-      {edits.map((e) =>
+      {taskEdits.map((e) =>
         strip(
           `p${e.proposalId}-${e.changeIndex}`,
           editLabel(e),

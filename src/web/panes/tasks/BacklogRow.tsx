@@ -1,9 +1,10 @@
 import { Box, Group, Text } from "@mantine/core";
 import type { Task } from "../../../server/schema.ts";
 import { ProposalOp } from "../../../shared/types.ts";
-import type { EntityEdit, Ghost } from "../../ghosts.ts";
+import { type Ghost, taskProposalProps } from "../../ghosts.ts";
 import type { Indexes } from "../../plan-data.ts";
 import { IdTag, KindBadge, ProgressPill, RepoBadge, StarToggle, useRepo } from "../../plan-ui";
+import { useBoardData } from "./board-data-context.ts";
 import { GHOST_BORDER_COLOR, SELECTED_SHADOW } from "./constants.ts";
 import { GhostStrip } from "./GhostStrip.tsx";
 import { useHighlighted } from "./new-task.ts";
@@ -25,17 +26,11 @@ export function BacklogRow({
   idx,
   context,
   ghost,
-  edits = [],
-  phaseGhosts = [],
-  phaseEdits = [],
 }: {
   task?: Task;
   idx: Indexes;
   context?: string;
   ghost?: Ghost;
-  edits?: EntityEdit[];
-  phaseGhosts?: Ghost[];
-  phaseEdits?: EntityEdit[];
 }) {
   // Glows while this is a freshly-added task you haven't seen yet (-1 never matches, for the
   // ghost render path below). Hook stays above the early returns.
@@ -44,6 +39,8 @@ export function BacklogRow({
   const repo = useRepo(task?.repoId);
   // Multi-select state comes from context (provided at the TasksPane root).
   const selection = useSelection();
+  // The board-wide maps this row's phases + proposal edits derive from (see BoardDataContext).
+  const { ghosts, edits } = useBoardData();
 
   if (ghost) {
     return (
@@ -57,9 +54,10 @@ export function BacklogRow({
   }
 
   if (!task) return null;
-  const phases = idx.phasesByTask.get(task.id) ?? [];
+  // This row's phases + the pending edits on the task, derived from the board maps.
+  const { phases, edits: taskEdits = [] } = taskProposalProps(task, idx, ghosts, edits);
   const checked = selection.selected.has(task.id);
-  const archiveProposed = edits.some((e) => e.op === ProposalOp.Archive);
+  const archiveProposed = taskEdits.some((e) => e.op === ProposalOp.Archive);
   // A finished / won't-do / archived task shows its outcome (badge + reopen + links)
   // in place of the launch actions — the old Archive row, folded in.
   const terminal = isTerminal(task);
@@ -112,12 +110,7 @@ export function BacklogRow({
         {!selection.active &&
           (terminal ? <TaskOutcome task={task} /> : <TaskActions ids={[task.id]} />)}
       </Group>
-      <TaskProposalStrips
-        edits={edits}
-        phaseGhosts={phaseGhosts}
-        phaseEdits={phaseEdits}
-        phases={phases}
-      />
+      <TaskProposalStrips task={task} showConflict={false} />
     </Box>
   );
 }
