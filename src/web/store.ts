@@ -8,6 +8,15 @@ import { api } from "./client.ts";
 import { DEFAULT_MOTION } from "./motion.ts";
 import type { PmKind } from "./pm-ids.ts";
 import { DEFAULT_THEME, type EditorTheme, getTheme } from "./themes.ts";
+import {
+  closeWindow,
+  fromLegacyLayout,
+  newWindow,
+  type PmWindow,
+  resolveActive,
+  type ScratchCursor,
+  updateWindow,
+} from "./windows.ts";
 
 // UI + action store. All *plan/session data* now lives in TanStack DB collections
 // (collections.ts), synced live from PGlite — so this store no longer holds or
@@ -22,6 +31,20 @@ export type StartInfo = {
   worktreePath: string;
   prompt: string;
   trailers: string[];
+};
+
+// The slice `partialize` writes to localStorage — the device's windows plus the
+// appearance/toggle state that should rehydrate synchronously. `migrate` returns
+// this shape too (it's what a v0 blob is upgraded into).
+type PersistedUi = {
+  windows: PmWindow[];
+  activeWindowId: string;
+  autoRebase: boolean;
+  lastBrowserUrl: string;
+  theme: string;
+  density: string;
+  fontScale: string;
+  motion: string;
 };
 
 export type State = {
@@ -84,12 +107,26 @@ export type State = {
   // The PR currently under review, shown as a full-window takeover overlay (not a
   // dockview panel — review is a focused activity). null = no overlay.
   review: { number: number; title: string } | null;
-  // The serialized dockview layout (api.toJSON()). Persisted so a reload — notably
-  // the disconnect→refresh recovery — restores your panes; null means "lay out the
-  // default". This is the single source of truth for the dock; layout-changing
-  // buttons set it here and App reflects it onto the dockview api.
-  layout: SerializedDockview | null;
+  // The device's Windows (windows.ts, docs/windows.md): Firefox-style saved views,
+  // each a set of repo tabs + a dockview layout + a cursor into Scratch. Persisted
+  // per-device, so a reload — notably the disconnect→refresh recovery — restores
+  // every window; the active one is what the dock shows. Never empty. This is the
+  // single source of truth for the dock; layout-changing buttons write the active
+  // window's layout here and App reflects it onto the dockview api.
+  windows: PmWindow[];
+  activeWindowId: string;
+  // Write the *active* window's dock layout (api.toJSON()); null = "lay out the
+  // default on next show".
   setLayout: (layout: SerializedDockview | null) => void;
+  // Window surgery. Create switches to the new window; close never leaves the list
+  // empty (the last window is replaced by a fresh unscoped one) and hands focus to
+  // a neighbour when the active one goes.
+  createWindow: (repoIds?: number[]) => string;
+  switchWindow: (id: string) => void;
+  removeWindow: (id: string) => void;
+  renameWindow: (id: string, name: string | null) => void;
+  setWindowRepos: (id: string, repoIds: number[]) => void;
+  setScratchCursor: (id: string, cursor: ScratchCursor | null) => void;
   openTerminal: (cwd?: string) => void;
   openSessionTerminal: (sessionId: number, title: string) => void;
   openBrowser: (url?: string) => void;
@@ -266,8 +303,35 @@ export const useStore = create<State>()(
           return { tabActivity: rest };
         }),
       review: null,
-      layout: null,
-      setLayout: (layout) => set({ layout }),
+      ...(() => {
+        // The pre-rehydrate default: one fresh unscoped window. persist overwrites
+        // this the moment a device has saved state.
+        const w = newWindow();
+        return { windows: [w], activeWindowId: w.id };
+      })(),
+      setLayout: (layout) =>
+        set((s) => {
+          const active = resolveActive(s.windows, s.activeWindowId);
+          if (!active) return {};
+          return { windows: updateWindow(s.windows, active.id, { layout }) };
+        }),
+      createWindow: (repoIds = []) => {
+        const w = newWindow(repoIds);
+        set((s) => ({ windows: [...s.windows, w], activeWindowId: w.id }));
+        return w.id;
+      },
+      switchWindow: (id) =>
+        set((s) => (s.windows.some((w) => w.id === id) ? { activeWindowId: id } : {})),
+      removeWindow: (id) =>
+        set((s) => {
+          const next = closeWindow(s.windows, id, s.activeWindowId);
+          return { windows: next.windows, activeWindowId: next.activeId };
+        }),
+      renameWindow: (id, name) => set((s) => ({ windows: updateWindow(s.windows, id, { name }) })),
+      setWindowRepos: (id, repoIds) =>
+        set((s) => ({ windows: updateWindow(s.windows, id, { repoIds }) })),
+      setScratchCursor: (id, cursor) =>
+        set((s) => ({ windows: updateWindow(s.windows, id, { scratchCursor: cursor }) })),
       openTerminal: (cwd = "") =>
         set((s) => ({
           shellReq: {
@@ -501,14 +565,40 @@ export const useStore = create<State>()(
       setError: (error) => set({ error }),
     }),
     {
-      // Persist only the dock layout — collections re-sync, and actions / transient
-      // request signals must never be rehydrated from storage.
+      // Persist only device-scoped UI state — collections re-sync, and actions /
+      // transient request signals must never be rehydrated from storage.
       name: "pm-ui",
-      // Persist the dock layout and the auto-rebase toggle so they rehydrate
-      // synchronously on load — the toggle renders in its last position instead of
-      // flipping from the default once the server value arrives.
+      // v1: the single dock `layout` became the window list (windows.ts). The
+      // migration folds a v0 device's layout into "window 1" so it comes up
+      // exactly as it was, now inside a window. v2: scratch content went global
+      // (the server note) — a window keeps only a CURSOR into it, so the v1
+      // per-window `scratch` body is dropped and `scratchCursor` starts null.
+      // The casts are honest: only the migration's own output claims the v2 shape.
+      version: 2,
+      migrate: (persisted, version) => {
+        let s = (persisted ?? {}) as Record<string, unknown> & {
+          layout?: SerializedDockview | null;
+          windows?: (PmWindow & { scratch?: string })[];
+        };
+        if (version === 0) {
+          const w = fromLegacyLayout(s.layout ?? null);
+          const { layout: _legacy, ...rest } = s;
+          s = { ...rest, windows: [w], activeWindowId: w.id };
+        }
+        if (version <= 1) {
+          s.windows = (s.windows ?? []).map(({ scratch: _dropped, ...w }) => ({
+            ...w,
+            scratchCursor: w.scratchCursor ?? null,
+          }));
+        }
+        return s as PersistedUi;
+      },
+      // The windows (layouts, repo tabs, scratch cursors) plus the toggles that
+      // should render in their last position synchronously on load — the auto-rebase
+      // toggle would otherwise flip from the default once the server value arrives.
       partialize: (s) => ({
-        layout: s.layout,
+        windows: s.windows,
+        activeWindowId: s.activeWindowId,
         autoRebase: s.autoRebase,
         lastBrowserUrl: s.lastBrowserUrl,
         theme: s.theme,
@@ -526,4 +616,12 @@ export const useStore = create<State>()(
 // which this same selection already drives.
 export function useActiveTheme(): EditorTheme {
   return getTheme(useStore((s) => s.theme));
+}
+
+// The window the dock is currently showing — never null in practice (the list is
+// never empty and a stale active id falls back to the first window).
+export function useActiveWindow(): PmWindow | null {
+  const windows = useStore((s) => s.windows);
+  const activeId = useStore((s) => s.activeWindowId);
+  return resolveActive(windows, activeId);
 }

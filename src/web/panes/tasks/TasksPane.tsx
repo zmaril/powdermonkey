@@ -5,6 +5,7 @@ import type { DockviewPanelApi } from "dockview-react";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePaneScroll } from "../../pane-scroll.ts";
 import { useFullData, useProposalEdits, useProposalGhosts } from "../../plan-data.ts";
+import { useActiveWindow } from "../../store.ts";
 import { FilterBar } from "../FilterBar.tsx";
 import {
   ANY,
@@ -15,6 +16,7 @@ import {
   scopeValue,
   TaskBucket,
   type TaskFilter,
+  taskInScope,
 } from "../filters.ts";
 import { useWindow } from "../use-window.ts";
 import { BoardDataProvider } from "./board-data-context.ts";
@@ -175,18 +177,27 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
   const set = (patch: Partial<TaskFilter>) => setFilter((f) => ({ ...f, ...patch }));
   const isDefault = JSON.stringify(filter) === JSON.stringify(DEFAULT_TASK_FILTER);
 
+  // The active window's ambient repo scope, applied UNDER the FilterBar: an unscoped
+  // window ([]) sees every task; a scoped one only what's on its repo tabs.
+  const scope = useActiveWindow()?.repoIds ?? [];
   // Every task, sliced by the filter, in plan order.
   const allTasks = [...idx.tasksByMilestone.values()].flat();
   // Every live task id — the surface new-task detection diffs against, so a task created by
   // a worker or an accepted proposal counts as new just like one you added, whatever filter
   // is active.
   const allIds = new Set(allTasks.map((t) => t.id));
-  const visibleTasks = allTasks.filter((t) => matchTask(t, idx, activeIds, filter));
+  const visibleTasks = allTasks.filter(
+    (t) => taskInScope(t, scope) && matchTask(t, idx, activeIds, filter),
+  );
   const visible = new Set(visibleTasks.map((t) => t.id));
   const goals = [...idx.goals].sort((a, b) => a.id - b.id);
   // The flat view can run long (every task, any status), so window it; the grouped view
   // is already chunked by goal/milestone headers. The full set stays live underneath.
-  const win = useWindow(visibleTasks.length, `${view}:${JSON.stringify(filter)}`, scroll.ref);
+  const win = useWindow(
+    visibleTasks.length,
+    `${view}:${JSON.stringify(filter)}:${scope.join(",")}`,
+    scroll.ref,
+  );
   const shownTasks = visibleTasks.slice(0, win.limit);
 
   // The task ids whose cards actually render right now — grouped shows every visible task,

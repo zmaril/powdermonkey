@@ -12,6 +12,9 @@ import { TasksPanel } from "./TasksPanel.tsx";
 // it. The list panes (Sessions/Tasks) and Browser take their panel api/params through
 // a thin wrapper; the prop-less panes render directly. The old Archive pane is gone —
 // done/archived is a status filter on Sessions and Tasks now, not its own tab.
+// Scratch is ONE global pane — the durable server-side note the supervisor reads
+// as @notes — shown in every window; each window only remembers its own cursor
+// into it (windows.ts ScratchCursor).
 export const dockComponents = {
   shell: ShellPanel,
   sessions: SessionsPanel,

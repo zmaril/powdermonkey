@@ -10,7 +10,7 @@ import { SessionKind } from "../../../shared/types.ts";
 import { usePaneScroll } from "../../pane-scroll.ts";
 import { useFullData } from "../../plan-data.ts";
 import { KIND_ICON } from "../../plan-ui";
-import { useStore } from "../../store.ts";
+import { useActiveWindow, useStore } from "../../store.ts";
 import { FilterBar } from "../FilterBar.tsx";
 import {
   ANY,
@@ -21,6 +21,7 @@ import {
   type SessionFilter,
   scopeOptions,
   scopeValue,
+  sessionInScope,
 } from "../filters.ts";
 import { useWindow } from "../use-window.ts";
 import { WorkerCard } from "./WorkerCard.tsx";
@@ -67,13 +68,18 @@ export function SessionsPane({ api }: { api?: DockviewPanelApi }) {
   const set = (patch: Partial<SessionFilter>) => setFilter((f) => ({ ...f, ...patch }));
   const isDefault = JSON.stringify(filter) === JSON.stringify(DEFAULT_SESSION_FILTER);
 
-  const ordered = orderSessions(sessions);
+  // The active window's ambient repo scope, applied UNDER the FilterBar. A session
+  // reaches it through its tasks; the header counts describe the scoped list too.
+  const scope = useActiveWindow()?.repoIds ?? [];
+  const ordered = orderSessions(sessions).filter((s) =>
+    sessionInScope(idx.tasksBySession.get(s.id) ?? [], scope),
+  );
   const visible = ordered.filter((s) =>
     matchSession(s, idx.tasksBySession.get(s.id) ?? [], idx, filter),
   );
   // Window the (potentially long) history so the DOM stays small; the full list is still
   // live underneath. The filter signature resets the window to the first page.
-  const win = useWindow(visible.length, JSON.stringify(filter), scroll.ref);
+  const win = useWindow(visible.length, `${JSON.stringify(filter)}:${scope.join(",")}`, scroll.ref);
   const shown = visible.slice(0, win.limit);
   const live = ordered.filter((s) => s.archivedAt == null);
   const cloudCount = live.filter((s) => s.kind === SessionKind.Remote).length;
