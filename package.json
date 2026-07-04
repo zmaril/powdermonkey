@@ -25,6 +25,8 @@
     "build:compile": "bun run build:web && rm -rf dist && mkdir -p dist && bun build --compile bin/powdermonkey.ts --outfile dist/powdermonkey && cp -r public drizzle dist/ && cp node_modules/@electric-sql/pglite/dist/pglite.wasm node_modules/@electric-sql/pglite/dist/pglite.data node_modules/@electric-sql/pglite/dist/initdb.wasm dist/",
     "storybook": "storybook dev -p 6006 --no-open",
     "build:storybook": "storybook build",
+    "visual": "LOST_PIXEL_DISABLE_TELEMETRY=1 lost-pixel",
+    "visual:update": "LOST_PIXEL_DISABLE_TELEMETRY=1 lost-pixel update",
     "db:generate": "drizzle-kit generate",
     "typecheck": "tsc --noEmit",
     "check": "biome check --error-on-warnings src && bun run scripts/lint-strings.ts && bun run scripts/lint-dock-theme.ts && bun run scripts/lint-spacing.ts",
@@ -75,6 +77,7 @@
     "@vitejs/plugin-react": "^6.0.3",
     "drizzle-kit": "^0.31.10",
     "happy-dom": "^20.10.6",
+    "lost-pixel": "3.22.0",
     "playwright-core": "^1.61.1",
     "storybook": "^10.4.6",
     "vite": "^8.1.3"
