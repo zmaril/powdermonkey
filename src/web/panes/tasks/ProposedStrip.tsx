@@ -25,10 +25,12 @@ export function ProposedStrip({
       mt="cozy"
       style={{ borderTop: `1px dashed ${GHOST_BORDER_COLOR}`, paddingTop: 8 }}
     >
+      {/* Wrap (don't truncate): a proposed change must be fully legible before you accept
+          it — a one-line ellipsis hid everything past the title (kind / description). */}
       <Text
         size="xs"
-        truncate
-        style={{ flex: 1, minWidth: 0, color: PROPOSED_TEXT_COLOR }}
+        lineClamp={3}
+        style={{ flex: 1, minWidth: 0, color: PROPOSED_TEXT_COLOR, overflowWrap: "anywhere" }}
         title={hint}
       >
         {label}
