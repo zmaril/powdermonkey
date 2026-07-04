@@ -5,8 +5,7 @@ import { Button, Group, Stack, Title } from "@mantine/core";
 import { useState } from "react";
 import type { Milestone, Task } from "../../../server/schema.ts";
 import { ProposalOp, VocabKind } from "../../../shared/types.ts";
-import { type EntityEdit, entityKey, type GroupedGhosts, taskProposalProps } from "../../ghosts.ts";
-import type { Indexes } from "../../plan-data.ts";
+import { type EntityEdit, entityKey, type GroupedGhosts } from "../../ghosts.ts";
 import { IdTag } from "../../plan-ui";
 import { useStore } from "../../store.ts";
 import { BacklogCard } from "./BacklogCard.tsx";
@@ -28,13 +27,11 @@ import { SortableCard } from "./SortableCard.tsx";
 export function MilestoneGroup({
   milestone,
   tasks,
-  idx,
   ghosts,
   edits,
 }: {
   milestone: Milestone;
   tasks: Task[];
-  idx: Indexes;
   ghosts: GroupedGhosts;
   edits: Map<string, EntityEdit[]>;
 }) {
@@ -98,7 +95,7 @@ export function MilestoneGroup({
               }}
             >
               {tasks.map((t) => (
-                <SortableCard key={t.id} task={t} {...taskProposalProps(t, idx, ghosts, edits)} />
+                <SortableCard key={t.id} task={t} />
               ))}
             </Stack>
           </SortableContext>
