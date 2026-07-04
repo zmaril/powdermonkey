@@ -1,4 +1,4 @@
-import { Button, Card, Group, Text } from "@mantine/core";
+import { Badge, Button, Card, Group, Text } from "@mantine/core";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import type { Task } from "../../../server/schema.ts";
@@ -117,6 +117,12 @@ export function BacklogCard({
               task.title
             )}
           </Text>
+          {/* A pending move shows the card at its new spot; this marks WHY it jumped. */}
+          {preview.reordered && !struck && (
+            <Badge color="teal" variant="light" style={{ flexShrink: 0 }}>
+              ↕ moved
+            </Badge>
+          )}
         </Group>
         <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
           {/* Icon-only on the card: the color ring + glyph identify the repo without the

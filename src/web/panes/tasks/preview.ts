@@ -4,8 +4,8 @@
 // per-field diff (what changed, from what) and the change handles that drive accept/reject.
 
 import type { Phase, Task } from "../../../server/schema.ts";
-import { PhaseStatus, ProposalOp, type TaskKind } from "../../../shared/types.ts";
-import type { EntityEdit, Ghost } from "../../ghosts.ts";
+import { PhaseStatus, ProposalOp, type TaskKind, VocabKind } from "../../../shared/types.ts";
+import { type EntityEdit, entityKey, type Ghost } from "../../ghosts.ts";
 
 /** A pending change's decide() handle + which op it is — everything the accept/reject
  *  control on the preview needs to apply or drop exactly this change. */
@@ -170,4 +170,32 @@ export function previewPhases(
     rows.splice(Math.min(at, rows.length), 0, row);
   }
   return rows;
+}
+
+/** The milestone's cards in the order they WILL sit: a task with a pending within-milestone
+ *  reorder is lifted to its proposed position, so a move previews at its new spot (the card
+ *  itself carries the accept/reject + a "moved" marker). Cross-milestone moves are left in
+ *  their source list for now — repositioning across milestones needs the whole board. */
+export function previewTaskOrder(
+  tasks: Task[],
+  milestoneId: number,
+  edits: Map<string, EntityEdit[]>,
+): Task[] {
+  const moves: { id: number; position: number }[] = [];
+  for (const t of tasks) {
+    const r = (edits.get(entityKey(VocabKind.Task, t.id)) ?? []).find(
+      (e) => e.op === ProposalOp.Reorder,
+    );
+    if (r?.position != null && (r.parentId == null || r.parentId === milestoneId)) {
+      moves.push({ id: t.id, position: r.position });
+    }
+  }
+  if (moves.length === 0) return tasks;
+  const movedIds = new Set(moves.map((m) => m.id));
+  const result = tasks.filter((t) => !movedIds.has(t.id));
+  for (const m of moves.sort((a, b) => a.position - b.position)) {
+    const t = tasks.find((x) => x.id === m.id);
+    if (t) result.splice(Math.min(m.position, result.length), 0, t);
+  }
+  return result;
 }
