@@ -7,9 +7,9 @@ import { type EntityEdit, entityKey, type GroupedGhosts } from "../../ghosts.ts"
 import type { Indexes } from "../../plan-data.ts";
 import { IdTag } from "../../plan-ui";
 import { Caret } from "./Caret.tsx";
+import { EditStrips } from "./EditStrips.tsx";
 import { GhostHeader } from "./GhostHeader.tsx";
 import { MilestoneGroup } from "./MilestoneGroup.tsx";
-import { EditStrips } from "./proposal-strips.tsx";
 import { mId, type Reorder } from "./reorder.ts";
 import type { Selection } from "./types.ts";
 

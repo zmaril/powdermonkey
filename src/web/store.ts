@@ -24,7 +24,7 @@ export type StartInfo = {
   trailers: string[];
 };
 
-type State = {
+export type State = {
   // The selected code-editor theme (a key into themes.ts THEMES). Drives the whole
   // app — the Mantine palette, the dockview chrome, the terminal — and is read
   // app-wide (useActiveTheme / the `--pm-*` CSS vars). Persisted so it sticks.

@@ -4,11 +4,8 @@ import type { Phase } from "../../../server/schema.ts";
 import { Decision, ProposalOp } from "../../../shared/types.ts";
 import { type EntityEdit, editLabel, type Ghost } from "../../ghosts.ts";
 import { ProposedStrip } from "./ProposedStrip.tsx";
+import { hintFor } from "./strip-helpers.ts";
 import { useDecide } from "./useDecide.ts";
-
-// The "Proposed: …" review strips, in the three shapes they take. Each owns a single
-// useDecide() (one busy/conflict lifecycle per group of strips), so the callers don't
-// repeat the accept/reject wiring — the strip layout and the decide plumbing live here.
 
 /** How a proposed edit on one of a task's phases reads — with the phase's own name. */
 function phaseEditLabel(e: EntityEdit, phases: Phase[]): string {
@@ -18,45 +15,10 @@ function phaseEditLabel(e: EntityEdit, phases: Phase[]): string {
   return editLabel(e);
 }
 
-const hintFor = (proposalId: number, proposalTitle: string) =>
-  `From proposal P${proposalId}: ${proposalTitle}`;
-
-/** Edits on a node itself (rename / delete) — the strips on a goal or milestone header. */
-export function EditStrips({ edits }: { edits: EntityEdit[] }) {
-  const { busy, decide } = useDecide();
-  return (
-    <>
-      {edits.map((e) => (
-        <ProposedStrip
-          key={`p${e.proposalId}-${e.changeIndex}`}
-          label={editLabel(e)}
-          hint={hintFor(e.proposalId, e.proposalTitle)}
-          busy={busy}
-          onAccept={() => decide(e.proposalId, e.changeIndex, Decision.Accept)}
-          onReject={() => decide(e.proposalId, e.changeIndex, Decision.Reject)}
-        />
-      ))}
-    </>
-  );
-}
-
-/** The single accept/reject strip under a ghost (proposed new) node. */
-export function GhostStrip({ ghost, label }: { ghost: Ghost; label: string }) {
-  const { busy, decide } = useDecide();
-  return (
-    <ProposedStrip
-      label={label}
-      hint={hintFor(ghost.proposalId, ghost.proposalTitle)}
-      busy={busy}
-      onAccept={() => decide(ghost.proposalId, ghost.changeIndex, Decision.Accept)}
-      onReject={() => decide(ghost.proposalId, ghost.changeIndex, Decision.Reject)}
-    />
-  );
-}
-
 /** Every pending change on a task and its phases, as a run of strips: edits on the task
  *  (rename / delete), proposed new phases, and edits on existing phases. `showConflict`
- *  surfaces a decide() conflict inline (the card wants it; the dense row doesn't). */
+ *  surfaces a decide() conflict inline (the card wants it; the dense row doesn't). Owns
+ *  one useDecide() for the whole group. */
 export function TaskProposalStrips({
   edits,
   phaseGhosts,

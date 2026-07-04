@@ -9,9 +9,9 @@ import { CardEditor } from "./CardEditor.tsx";
 import { SELECTED_SHADOW } from "./constants.ts";
 import { GhostCardBody } from "./GhostCardBody.tsx";
 import { useHighlighted } from "./new-task.ts";
-import { TaskProposalStrips } from "./proposal-strips.tsx";
 import { TaskActions } from "./TaskActions.tsx";
 import { TaskOutcome } from "./TaskOutcome.tsx";
+import { TaskProposalStrips } from "./TaskProposalStrips.tsx";
 import { isTerminal } from "./task-status.ts";
 import type { Selection } from "./types.ts";
 
