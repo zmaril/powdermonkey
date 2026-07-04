@@ -1,0 +1,6 @@
+# straitjacket — https://straitjacket.dev
+# Gate the application source. tests/ and scripts/ carry their own boilerplate
+# duplication (test setup, lint helpers) and CLAUDE.md/docs are prose — not the
+# LLM-slop surface this gate is meant to hold, so the scan is scoped to src/.
+paths:
+  - src

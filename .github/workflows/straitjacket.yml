@@ -19,8 +19,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
-      - uses: zmaril/straitjacket@v0.2.1
-        with:
-          # Report-only while adopting: findings show in the log (and as code-scanning
-          # annotations) but don't fail the job. Flip off once the count is worked down.
-          no-fail: "true"
+      # Gating now — the adoption is done and the count is 0 (the one coincidental
+      # FilterBar duplication carries a file-scoped allow marker). straitjacket fails the
+      # job on any finding, so new slop can't land. SARIF still uploads to code scanning
+      # by default. Needs v0.2.2 (allow-file now suppresses duplication findings).
+      - uses: zmaril/straitjacket@v0.2.2
