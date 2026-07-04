@@ -1,6 +1,6 @@
 ---
 name: powdermonkey
-description: Drive PowderMonkey from the supervisor shell (author & load plans, inspect/edit the vocabulary via the API, start/land sessions, reconcile) or execute a task in a worktree (commit finished phases with PM-Phase trailers). Use whenever working with PowderMonkey, a Goal/Milestone/Task/Phase, or PM-Phase / PM-Task trailers.
+description: Drive PowderMonkey from the supervisor shell (author & load plans, inspect/edit the vocabulary via the API, start/land sessions, reconcile) or execute a task in a worktree (commit finished phases with a PM-Note trailer). Use whenever working with PowderMonkey, a Goal/Milestone/Task/Phase, or PM-Note / PM-Phase / PM-Task trailers.
 ---
 
 # PowderMonkey
@@ -111,18 +111,23 @@ You can speak in the diary too — **always with `"author": "supervisor"`** so y
 
 You've been started on one **Task**, on branch `pm/task-<id>`. It has ordered **Phases**, each with a numeric id (in your prompt; or `GET $PM_URL/tasks/<id>` + `/phases` filtered by `task_id`).
 
-**The one rule: progress is read off `main` from commit trailers.** When you finish a phase, the commit that completes it must carry a trailer in its message body:
+**The one rule: progress is read off `main` from a PM-Note trailer.** When you finish a phase, the commit that completes it must carry a **PM-Note** — one JSON object on its own line in the commit message body:
 
 ```
 implement the dispatcher
 
-PM-Phase: 41
+PM-Note: {"v":1,"phases":[41]}
 ```
 
-- `PM-Phase: <id>` — one phase done. **Repeatable** (several lines per commit; a task can span many commits/PRs).
-- `PM-Task: <id>` — shortcut: the whole task is done (marks all its phases). Only when one commit truly finishes everything.
+- `phases: [<id>, …]` — the phase ids this commit finished. A task can span many commits/PRs, so add a note to **each** commit that completes a phase (list every id that commit finished).
+- `task: <id>` — shortcut: the whole task is done (marks all its phases). Only when one commit truly finishes everything.
+- `followups: [{ "title": "…", "body": "…" }]` — hand back an out-of-scope find (see below).
 
-Commit small and often — each landed `PM-Phase:` ticks a box on the operator's tree. The operator merges `pm/task-<id>` into `main`; once your trailered commits are reachable from `main`, reconcile marks the phases done. Stay scoped to your task — other worktrees may run in parallel.
+One note per commit carries all of the above together, e.g. `PM-Note: {"v":1,"phases":[42],"followups":[{"title":"dedup the date helpers"}]}`.
+
+Commit small and often — each landed PM-Note ticks a box on the operator's tree. The operator merges `pm/task-<id>` into `main`; once your noted commits are reachable from `main`, reconcile marks the phases done. Stay scoped to your task — other worktrees may run in parallel.
+
+> **Why a commit-message trailer and not a real git note?** A `refs/notes/*` note can't be pushed from a cloud session (the Claude Code git proxy 403s any non-branch ref) and doesn't survive a squash merge (the new SHA orphans it). A message trailer rides the ordinary branch push and is concatenated into a squash commit, so it survives both. See `docs/git-notes-spike.md`. The old `PM-Phase: <id>` / `PM-Task: <id>` single-purpose trailers still work as a **legacy fallback** during cutover, but prefer `PM-Note:`.
 
 ### Hand a follow-up back instead of doing it or dropping it
 
@@ -142,15 +147,15 @@ curl -s -X POST "$PM_URL/followups" -H 'content-type: application/json' -d '{
 
 `title` is all that's required; `body` (context) and `sourceTaskId` (the task you were on — it picks which milestone the proposed task hangs under) make the proposal sharper. That's it — keep working.
 
-**Cloud session** — you can't reach `$PM_URL`, so leave a marked comment on your PR and the supervisor's github-watch loop slurps it into the same queue. Mark it with `<!-- pm:followup -->`, one comment per follow-up (these are append-only — *not* the sticky status comment, don't overwrite that):
+**Cloud session** — you can't reach `$PM_URL`, so hand the follow-up back **in your commit's PM-Note**: add a `followups` entry to the note on any commit you push, and the supervisor's github-watch loop slurps it into the same queue.
 
 ```
-<!-- pm:followup -->
-title: Dedup the date helpers in src/web
-body: Spotted two copies of formatRelative while working this task — worth one shared util.
+some commit that finished a phase
+
+PM-Note: {"v":1,"phases":[41],"followups":[{"title":"Dedup the date helpers in src/web","body":"Two copies of formatRelative — worth one shared util."}]}
 ```
 
-`title:` is the one-liner; everything after it is the optional `body`. The watcher ties the follow-up back to your PR/task automatically and ingests each comment exactly once — so post a new marked comment per follow-up and otherwise leave it alone. Don't put follow-ups in commit trailers; trailers are only for `PM-Phase:` / `PM-Task:` completion.
+`title` is the one-liner; `body` is optional context. A note can carry several `followups`, and a follow-up can ride the same note that marks a phase done — you don't need a dedicated commit for it. The watcher ties the follow-up back to your PR/task automatically and ingests each one exactly once (keyed by commit), so it's safe to re-push. (The legacy `<!-- pm:followup -->` PR comment still works during cutover, but prefer the note.)
 
 ### Status comment (cloud sessions): keep the operator looking over your shoulder
 

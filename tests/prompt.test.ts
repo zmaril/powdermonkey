@@ -43,7 +43,7 @@ beforeAll(async () => {
 
 afterAll(() => app.stop());
 
-test("GET /tasks/:id/prompt returns the prompt + phase trailers", async () => {
+test("GET /tasks/:id/prompt returns the prompt + phase PM-Note trailers", async () => {
   const [task] = await taskRepo.list();
   const res = await fetch(`${base}/tasks/${task.id}/prompt`);
   expect(res.status).toBe(200);
@@ -53,11 +53,11 @@ test("GET /tasks/:id/prompt returns the prompt + phase trailers", async () => {
   // The task's description rides along, framing the phases below it.
   expect(body.prompt).toContain("the thing is load-bearing; don't break the old callers");
   expect(body.prompt).toContain("write tests");
-  expect(body.prompt).toContain("PM-Phase:");
-  // one trailer per phase, each naming its phase
+  expect(body.prompt).toContain("PM-Note:");
+  // one PM-Note trailer per phase, each naming its phase
   expect(body.trailers).toHaveLength(2);
-  expect(body.trailers[0]).toMatch(/^PM-Phase: \d+ {3}# write tests$/);
-  expect(body.trailers[1]).toMatch(/^PM-Phase: \d+ {3}# implement$/);
+  expect(body.trailers[0]).toMatch(/^PM-Note: \{"v":1,"phases":\[\d+\]\} {3}# write tests$/);
+  expect(body.trailers[1]).toMatch(/^PM-Note: \{"v":1,"phases":\[\d+\]\} {3}# implement$/);
 });
 
 test("GET /tasks/:id/prompt 404s for an unknown task", async () => {

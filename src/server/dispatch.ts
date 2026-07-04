@@ -5,6 +5,7 @@ import { CommentAuthor, SessionKind, SessionState, TaskStatus } from "../shared/
 import { listComments } from "./comments.ts";
 import { db } from "./db.ts";
 import { pullMain } from "./git.ts";
+import { formatPmNote } from "./pm-note.ts";
 import { repoDirForTask, supervisorRepoDir } from "./repo-cache.ts";
 import {
   type Phase,
@@ -52,12 +53,19 @@ function diaryLines(comments: TaskComment[]): string[] {
   ];
 }
 
-/** One task's section of the combined brief: its title, phase checklist, the
- *  operator's diary (when it has any), and the PM-Phase trailers that stamp each
- *  finished phase. */
+/** One ready-to-paste PM-Note trailer marking a single phase done, tagged with the
+ *  phase name as a `#` comment. The worker copies it onto the commit that finishes
+ *  that phase (or merges several phases' ids into one note per commit). */
+function phaseNoteLine(p: Phase): string {
+  return `${formatPmNote({ phases: [p.id] })}   # ${p.name}`;
+}
+
+/** One task's section of the combined brief: its title, phase checklist (with ids),
+ *  the operator's diary (when it has any), and one PM-Note trailer per phase that
+ *  stamps it done. */
 function taskSection(task: Task, taskPhases: Phase[], comments: TaskComment[]): string {
-  const phaseLines = taskPhases.map((p) => `- ${p.name}`).join("\n");
-  const trailers = taskPhases.map((p) => `PM-Phase: ${p.id}   # ${p.name}`);
+  const phaseLines = taskPhases.map((p) => `- ${p.name}   (phase ${p.id})`).join("\n");
+  const noteLines = taskPhases.map(phaseNoteLine);
   // The description carries the task's narrative — why it exists, what's known,
   // where it was seen. Hand it to the worker verbatim (right under the title, so
   // it frames the phases that follow) whenever the operator wrote one. Null/blank
@@ -71,30 +79,29 @@ function taskSection(task: Task, taskPhases: Phase[], comments: TaskComment[]): 
     phaseLines,
     ...diaryLines(comments),
     "",
-    "Phase trailers — add each to the commit that completes that phase:",
-    ...trailers,
+    "PM-Note trailers — add the matching one to the commit that completes each phase",
+    "(finishing several phases in one commit? merge their ids into one note):",
+    ...noteLines,
   ].join("\n");
 }
 
-/** Build the full worker prompt + per-phase trailer lines for one or more tasks.
+/** Build the full worker prompt + per-phase PM-Note lines for one or more tasks.
  *  Shared by start-local and dispatch so a worker — local or remote — gets
- *  identical instructions and the same PM-Phase trailers to stamp finished phases
- *  with; reconciliation reads those trailers back once the branch lands on main.
+ *  identical instructions and the same PM-Note trailers to stamp finished phases
+ *  with; reconciliation reads those notes back once the branch lands on main.
  *
  *  Several tasks can be handed to a single worker: each gets its own titled
- *  section with its own phases + trailers, and the worker stamps whichever phase
- *  it just finished. `trailers` is the flat list across every task (the union of
- *  all phases), in task-then-phase order. We don't dictate a branch name — the
- *  PR<->task link comes from the PM-Phase trailers, not the branch. */
+ *  section with its own phases + notes, and the worker stamps whichever phase it
+ *  just finished. `trailers` is the flat list of per-phase PM-Note lines across
+ *  every task (the union of all phases), in task-then-phase order. We don't dictate
+ *  a branch name — the PR<->task link comes from the PM-Note ids, not the branch. */
 export function buildTaskPrompt(
   briefs: TaskBrief[],
   comment?: string,
 ): { prompt: string; trailers: string[] } {
   if (briefs.length === 0) return { prompt: "", trailers: [] };
 
-  const trailers = briefs.flatMap(({ phases: ps }) =>
-    ps.map((p) => `PM-Phase: ${p.id}   # ${p.name}`),
-  );
+  const trailers = briefs.flatMap(({ phases: ps }) => ps.map(phaseNoteLine));
   const multi = briefs.length > 1;
 
   const sections = briefs.map(({ task, phases: ps, comments }) => taskSection(task, ps, comments));
@@ -102,7 +109,7 @@ export function buildTaskPrompt(
   const header = multi
     ? [
         `You have ${briefs.length} tasks to complete in this single session. Work through`,
-        "them in order; each task below lists its own phases and PM-Phase trailers.",
+        "them in order; each task below lists its own phases and PM-Note trailers.",
         "",
       ]
     : [];
@@ -114,14 +121,24 @@ export function buildTaskPrompt(
     // We don't dictate the branch name. The cloud workspace puts the worker on its
     // own harness branch (e.g. `claude/…`) and they stay on it; a local worker is
     // already on its worktree branch. Either way the PR<->task link comes from the
-    // PM-Phase trailers above — the same trailers reconciliation reads — not the
-    // branch name. (The workspace handles push/PR auth via the Claude GitHub App;
-    // see README.) So just: do the work and open a PR.
+    // PM-Note ids above — the same notes reconciliation reads — not the branch name.
+    // (The workspace handles push/PR auth via the Claude GitHub App; see README.)
+    // So just: do the work and open a PR.
     "Work on whatever branch the workspace puts you on, and open a PR against main when done.",
     "",
-    "Follow the `powdermonkey` skill. As you finish each phase, add its trailer to",
-    "the commit that completes it (this is how progress — and this PR — is tied back",
-    "to the task, so don't skip them; they're read off the commits once they land on main).",
+    "Follow the `powdermonkey` skill. Signal progress with a PM-Note trailer — one JSON",
+    "object on the commit that finishes the work, on its own line in the commit message",
+    "(this is how progress and this PR are tied back to the task; it's read off the",
+    "commits once they land on main, so don't skip it):",
+    "",
+    '    PM-Note: {"v":1,"phases":[<id>, …]}      the phase ids this commit finished',
+    "",
+    "  · Commit small and often; a task can span many commits/PRs, so add a note to each",
+    "    commit that completes a phase (list every phase id that commit finished).",
+    '  · Whole task done in one go: {"v":1,"task":<task-id>} marks all its phases at once.',
+    "  · Spotted an out-of-scope find? Hand it back in the note instead of doing it:",
+    '    {"v":1,"phases":[<id>],"followups":[{"title":"…","body":"…"}]} — the operator',
+    "    triages it into the plan. (Local worktree? POST $PM_URL/followups instead.)",
     "",
     "Ask any questions you have, at any time — if something's ambiguous or you hit a",
     "decision worth the operator's call, post your question on the PR thread rather than",
