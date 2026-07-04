@@ -4,11 +4,13 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { type RefObject, useEffect, useRef } from "react";
 import { fontScaleOption } from "./appearance.ts";
+import { GithubRefLinkProvider } from "./github-links.ts";
 import { openExternal } from "./open-external.ts";
 import { PmIdDecorator } from "./pm-id-decorate.ts";
 import { PmIdLinkProvider } from "./pm-id-links.ts";
 import { apiUrl, wsUrl } from "./server.ts";
 import { useActiveTheme, useStore } from "./store.ts";
+import { useTerminalRepoSlug } from "./terminal-repo.ts";
 import { MONO } from "./theme.ts";
 import type { EditorTheme } from "./themes.ts";
 
@@ -58,6 +60,13 @@ export function useShellTerminal(
   const fontPx = Math.round(13 * fontScaleOption(useStore((s) => s.fontScale)).factor);
   const fontRef = useRef(fontPx);
   fontRef.current = fontPx;
+  // The terminal's repo context (owner/name), for resolving a bare #123 in the GitHub-ref
+  // links below. Read through a ref so the provider always sees the latest slug — it may
+  // arrive after the socket effect runs (collections sync in) — without re-running that
+  // effect. Undefined for a supervisor/cwd shell with no session-pinned repo.
+  const repoSlug = useTerminalRepoSlug(session);
+  const repoSlugRef = useRef(repoSlug);
+  repoSlugRef.current = repoSlug;
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const decoRef = useRef<PmIdDecorator | null>(null);
@@ -96,6 +105,15 @@ export function useShellTerminal(
       new PmIdLinkProvider(term, (kind, id) => {
         useStore.getState().revealEntity(kind, id);
       }),
+    );
+    // The GitHub-ref counterpart, over the same PTY output: an issue/PR ref (#n, owner/repo#n,
+    // or GH-n) → the github.com page. A bare ref resolves against this terminal's repo
+    // (repoSlugRef, read live so a late-synced slug still lands). Clicking hands off through
+    // openExternal — a new tab in the browser, the OS default browser in the desktop shell —
+    // exactly like the URL links above. Registered on every terminal, so a ref links whoever
+    // printed it.
+    const ghLinkProvider = term.registerLinkProvider(
+      new GithubRefLinkProvider(term, (url) => openExternal(url), () => repoSlugRef.current),
     );
     term.open(el);
     fit.fit();
@@ -204,6 +222,7 @@ export function useShellTerminal(
       decorator.dispose();
       decoRef.current = null;
       linkProvider.dispose();
+      ghLinkProvider.dispose();
       ro.disconnect();
       el.removeEventListener("dragover", onDragOver);
       el.removeEventListener("drop", onDrop);
