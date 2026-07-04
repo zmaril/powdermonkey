@@ -1,6 +1,5 @@
 import type { Task } from "../../../server/schema.ts";
-import { VocabKind } from "../../../shared/types.ts";
-import { type EntityEdit, entityKey, type GroupedGhosts } from "../../ghosts.ts";
+import { type EntityEdit, type GroupedGhosts, taskProposalProps } from "../../ghosts.ts";
 import { type Indexes, starFirst } from "../../plan-data.ts";
 import { useListAnimation } from "../../use-list-animation.ts";
 import { BacklogRow } from "./BacklogRow.tsx";
@@ -30,7 +29,11 @@ export function FlatView({
         const m = idx.milestoneById.get(t.milestoneId);
         const g = m ? idx.goalById.get(m.goalId) : undefined;
         const context = [g?.title, m?.title].filter(Boolean).join(" › ");
-        const taskPhases = idx.phasesByTask.get(t.id) ?? [];
+        const {
+          edits: taskEdits,
+          phaseGhosts,
+          phaseEdits,
+        } = taskProposalProps(t, idx, ghosts, edits);
         return (
           <BacklogRow
             key={t.id}
@@ -38,11 +41,9 @@ export function FlatView({
             idx={idx}
             context={context}
             selection={selection}
-            edits={edits.get(entityKey(VocabKind.Task, t.id))}
-            phaseGhosts={ghosts.phasesByTask.get(t.id)}
-            phaseEdits={taskPhases.flatMap(
-              (p) => edits.get(entityKey(VocabKind.Phase, p.id)) ?? [],
-            )}
+            edits={taskEdits}
+            phaseGhosts={phaseGhosts}
+            phaseEdits={phaseEdits}
           />
         );
       })}

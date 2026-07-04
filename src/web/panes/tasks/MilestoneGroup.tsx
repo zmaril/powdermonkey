@@ -4,8 +4,8 @@ import { CSS } from "@dnd-kit/utilities";
 import { Button, Group, Stack, Title } from "@mantine/core";
 import { useState } from "react";
 import type { Milestone, Task } from "../../../server/schema.ts";
-import { Decision, ProposalOp, VocabKind } from "../../../shared/types.ts";
-import { type EntityEdit, editLabel, entityKey, type GroupedGhosts } from "../../ghosts.ts";
+import { ProposalOp, VocabKind } from "../../../shared/types.ts";
+import { type EntityEdit, entityKey, type GroupedGhosts, taskProposalProps } from "../../ghosts.ts";
 import type { Indexes } from "../../plan-data.ts";
 import { IdTag } from "../../plan-ui";
 import { useStore } from "../../store.ts";
@@ -14,11 +14,10 @@ import { CardEditor } from "./CardEditor.tsx";
 import { Caret } from "./Caret.tsx";
 import { DragHandle } from "./DragHandle.tsx";
 import { useReveal } from "./new-task.ts";
-import { ProposedStrip } from "./ProposedStrip.tsx";
+import { EditStrips } from "./proposal-strips.tsx";
 import { cId, mId, tId } from "./reorder.ts";
 import { SortableCard } from "./SortableCard.tsx";
 import type { Selection } from "./types.ts";
-import { useDecide } from "./useDecide.ts";
 
 /** A milestone and its backlog cards. The header drag-handle reorders the milestone within
  *  its goal; each card drags to reorder within the milestone or move to another. Pending
@@ -46,7 +45,6 @@ export function MilestoneGroup({
   const [adding, setAdding] = useState(false);
   const { createTaskWithPhases } = useStore();
   const requestReveal = useReveal((s) => s.requestReveal);
-  const { busy, decide } = useDecide();
   // The milestone is itself sortable within its goal's SortableContext (see GoalGroup).
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: mId(milestone.id),
@@ -86,16 +84,7 @@ export function MilestoneGroup({
           {milestone.title}
         </Title>
       </Group>
-      {milestoneEdits.map((e) => (
-        <ProposedStrip
-          key={`p${e.proposalId}-${e.changeIndex}`}
-          label={editLabel(e)}
-          hint={`From proposal P${e.proposalId}: ${e.proposalTitle}`}
-          busy={busy}
-          onAccept={() => decide(e.proposalId, e.changeIndex, Decision.Accept)}
-          onReject={() => decide(e.proposalId, e.changeIndex, Decision.Reject)}
-        />
-      ))}
+      <EditStrips edits={milestoneEdits} />
       {!collapsed && (
         <Stack gap="xs">
           <SortableContext
@@ -111,22 +100,14 @@ export function MilestoneGroup({
                 outline: isOver ? "1px dashed var(--pm-accent)" : undefined,
               }}
             >
-              {tasks.map((t) => {
-                const taskPhases = idx.phasesByTask.get(t.id) ?? [];
-                return (
-                  <SortableCard
-                    key={t.id}
-                    task={t}
-                    phases={taskPhases}
-                    selection={selection}
-                    edits={edits.get(entityKey(VocabKind.Task, t.id))}
-                    phaseGhosts={ghosts.phasesByTask.get(t.id)}
-                    phaseEdits={taskPhases.flatMap(
-                      (p) => edits.get(entityKey(VocabKind.Phase, p.id)) ?? [],
-                    )}
-                  />
-                );
-              })}
+              {tasks.map((t) => (
+                <SortableCard
+                  key={t.id}
+                  task={t}
+                  selection={selection}
+                  {...taskProposalProps(t, idx, ghosts, edits)}
+                />
+              ))}
             </Stack>
           </SortableContext>
           {taskGhosts.map((g) => (

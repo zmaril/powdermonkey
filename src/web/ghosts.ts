@@ -1,5 +1,6 @@
-import type { Proposal } from "../server/schema.ts";
+import type { Phase, Proposal, Task } from "../server/schema.ts";
 import { type ProposalChange, ProposalOp, ProposalStatus, VocabKind } from "../shared/types.ts";
+import type { Indexes } from "./plan-data.ts";
 
 // Projections from pending proposals onto the plan tree, so every proposed change can be
 // reviewed IN PLACE: a create renders as a "ghost" under the parent it'd land in, an
@@ -191,4 +192,27 @@ export function proposalEditsByEntity(proposals: Proposal[]): Map<string, Entity
     });
   }
   return out;
+}
+
+/** Gather a task's pending-proposal render props in one place: its phases, edits on the
+ *  task itself, proposed new phases, and edits on its existing phases — the bundle both
+ *  the grouped card and the flat row feed to their task view. */
+export function taskProposalProps(
+  t: Task,
+  idx: Indexes,
+  ghosts: GroupedGhosts,
+  edits: Map<string, EntityEdit[]>,
+): {
+  phases: Phase[];
+  edits: EntityEdit[] | undefined;
+  phaseGhosts: Ghost[] | undefined;
+  phaseEdits: EntityEdit[];
+} {
+  const phases = idx.phasesByTask.get(t.id) ?? [];
+  return {
+    phases,
+    edits: edits.get(entityKey(VocabKind.Task, t.id)),
+    phaseGhosts: ghosts.phasesByTask.get(t.id),
+    phaseEdits: phases.flatMap((p) => edits.get(entityKey(VocabKind.Phase, p.id)) ?? []),
+  };
 }

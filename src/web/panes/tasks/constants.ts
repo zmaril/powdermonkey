@@ -15,3 +15,7 @@ export const GHOST_BORDER_COLOR =
   "light-dark(var(--mantine-color-teal-7), var(--mantine-color-teal-5))";
 export const PROPOSED_TEXT_COLOR =
   "light-dark(var(--mantine-color-teal-8), var(--mantine-color-teal-3))";
+
+// The dashed teal edge on a ghost (proposed) card — the goal/milestone/task-ghost
+// blocks all share it, so it lives with the color it's built from.
+export const GHOST_BORDER = `1px dashed ${GHOST_BORDER_COLOR}`;

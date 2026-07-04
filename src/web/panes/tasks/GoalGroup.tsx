@@ -2,17 +2,16 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { Group, Stack, Text, Title } from "@mantine/core";
 import { useState } from "react";
 import type { Goal, Milestone, Task } from "../../../server/schema.ts";
-import { Decision, ProposalOp, VocabKind } from "../../../shared/types.ts";
-import { type EntityEdit, editLabel, entityKey, type GroupedGhosts } from "../../ghosts.ts";
+import { ProposalOp, VocabKind } from "../../../shared/types.ts";
+import { type EntityEdit, entityKey, type GroupedGhosts } from "../../ghosts.ts";
 import type { Indexes } from "../../plan-data.ts";
 import { IdTag } from "../../plan-ui";
 import { Caret } from "./Caret.tsx";
 import { GhostHeader } from "./GhostHeader.tsx";
 import { MilestoneGroup } from "./MilestoneGroup.tsx";
-import { ProposedStrip } from "./ProposedStrip.tsx";
+import { EditStrips } from "./proposal-strips.tsx";
 import { mId, type Reorder } from "./reorder.ts";
 import type { Selection } from "./types.ts";
-import { useDecide } from "./useDecide.ts";
 
 /** A goal and its milestones. A caret collapses the whole goal. Edits on the goal itself
  *  (rename / delete) show as strips on its header; proposed new milestones render as ghost
@@ -36,7 +35,6 @@ export function GoalGroup({
   reorder: Reorder;
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  const { busy, decide } = useDecide();
   const goalEdits = edits.get(entityKey(VocabKind.Goal, goal.id)) ?? [];
   const goalArchive = goalEdits.some((e) => e.op === ProposalOp.Archive);
   const ghostMilestones = ghosts.milestonesByGoal.get(goal.id) ?? [];
@@ -99,16 +97,7 @@ export function GoalGroup({
             {goal.objective}
           </Text>
         )}
-        {goalEdits.map((e) => (
-          <ProposedStrip
-            key={`p${e.proposalId}-${e.changeIndex}`}
-            label={editLabel(e)}
-            hint={`From proposal P${e.proposalId}: ${e.proposalTitle}`}
-            busy={busy}
-            onAccept={() => decide(e.proposalId, e.changeIndex, Decision.Accept)}
-            onReject={() => decide(e.proposalId, e.changeIndex, Decision.Reject)}
-          />
-        ))}
+        <EditStrips edits={goalEdits} />
       </div>
 
       {!collapsed && (
