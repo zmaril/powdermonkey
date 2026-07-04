@@ -8,3 +8,11 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+  # Rust/Tauri desktop shell. Watches src-tauri so Dependabot bumps `tauri` as new
+  # releases land — including whenever it migrates its GTK stack to gtk-rs 0.20,
+  # which is what closes the transitive `glib` advisory (GHSA-wrw7-89jp-8q8g) that
+  # can't be fixed until then.
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "weekly"
