@@ -1,28 +1,19 @@
 import { Button, Card, Group, Text } from "@mantine/core";
-import { IconAlertTriangle } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import type { Phase, Task } from "../../../server/schema.ts";
-import { Decision, ProposalOp, TaskStatus } from "../../../shared/types.ts";
-import { type EntityEdit, editLabel, type Ghost } from "../../ghosts.ts";
+import { ProposalOp } from "../../../shared/types.ts";
+import type { EntityEdit, Ghost } from "../../ghosts.ts";
 import { IdTag, KindBadge, PhaseList, RepoBadge, StarToggle, useRepo } from "../../plan-ui";
 import { CardEditor } from "./CardEditor.tsx";
 import { SELECTED_SHADOW } from "./constants.ts";
 import { GhostCardBody } from "./GhostCardBody.tsx";
 import { useHighlighted } from "./new-task.ts";
-import { ProposedStrip } from "./ProposedStrip.tsx";
+import { TaskProposalStrips } from "./proposal-strips.tsx";
 import { TaskActions } from "./TaskActions.tsx";
 import { TaskOutcome } from "./TaskOutcome.tsx";
+import { isTerminal } from "./task-status.ts";
 import type { Selection } from "./types.ts";
-import { useDecide } from "./useDecide.ts";
-
-/** How a proposed edit on one of a task's phases reads — with the phase's own name. */
-function phaseEditLabel(e: EntityEdit, phases: Phase[]): string {
-  const name = phases.find((p) => p.id === e.id)?.name ?? "this phase"; // lint-allow-string: display fallback, not the VocabKind
-  if (e.op === ProposalOp.Archive) return `Proposed: delete phase "${name}"`;
-  if (e.op === ProposalOp.Update) return `Proposed: rename phase → "${e.newTitle ?? ""}"`;
-  return editLabel(e);
-}
 
 /** One backlog card. A real task: star + id + title with an Edit button top-right (the
  *  one way to edit — it opens the whole card as a craft block), its phases, and the
@@ -53,7 +44,6 @@ export function BacklogCard({
   /** Drag handle (⠿) rendered at the head of the card, when the card is sortable. */
   handle?: ReactNode;
 }) {
-  const { busy, conflict, decide } = useDecide();
   const [editing, setEditing] = useState(false);
   // Glows while this is a freshly-added task you haven't seen on screen yet (-1 never
   // matches, for the ghost / no-task render paths below). Hook stays above the early returns.
@@ -73,20 +63,7 @@ export function BacklogCard({
   const archiveProposed = edits.some((e) => e.op === ProposalOp.Archive);
   // Terminal / archived → show the outcome cluster (badge + reopen + links) instead of
   // the launch actions; the old Archive pane, folded into the card.
-  const terminal =
-    task.status === TaskStatus.Merged ||
-    task.status === TaskStatus.Cancelled ||
-    task.archivedAt != null;
-  const proposed = (key: string, label: string, hint: string, proposalId: number, ix: number) => (
-    <ProposedStrip
-      key={key}
-      label={label}
-      hint={hint}
-      busy={busy}
-      onAccept={() => decide(proposalId, ix, Decision.Accept)}
-      onReject={() => decide(proposalId, ix, Decision.Reject)}
-    />
-  );
+  const terminal = isTerminal(task);
   return (
     <Card
       withBorder
@@ -160,48 +137,13 @@ export function BacklogCard({
           {terminal ? <TaskOutcome task={task} /> : <TaskActions ids={[task.id]} />}
         </Group>
       )}
-      {edits.map((e) =>
-        proposed(
-          `p${e.proposalId}-${e.changeIndex}`,
-          editLabel(e),
-          `From proposal P${e.proposalId}: ${e.proposalTitle}`,
-          e.proposalId,
-          e.changeIndex,
-        ),
-      )}
-      {phaseGhosts.map((g) =>
-        proposed(
-          `p${g.proposalId}-${g.changeIndex}`,
-          `Proposed: add phase "${g.title}"`,
-          `From proposal P${g.proposalId}: ${g.proposalTitle}`,
-          g.proposalId,
-          g.changeIndex,
-        ),
-      )}
-      {phaseEdits.map((e) =>
-        proposed(
-          `p${e.proposalId}-${e.changeIndex}`,
-          phaseEditLabel(e, phases),
-          `From proposal P${e.proposalId}: ${e.proposalTitle}`,
-          e.proposalId,
-          e.changeIndex,
-        ),
-      )}
-      {conflict && (
-        <Group
-          mt="snug"
-          gap="tight"
-          wrap="nowrap"
-          // Scheme-aware so the warning reads on a light card too (orange.4 is a pale
-          // tint that washes out on white); darker orange on light, the tint on dark.
-          style={{
-            color: "light-dark(var(--mantine-color-orange-8), var(--mantine-color-orange-4))",
-          }}
-        >
-          <IconAlertTriangle size={14} style={{ flexShrink: 0 }} />
-          <Text size="xs">{conflict}</Text>
-        </Group>
-      )}
+      <TaskProposalStrips
+        edits={edits}
+        phaseGhosts={phaseGhosts}
+        phaseEdits={phaseEdits}
+        phases={phases}
+        showConflict
+      />
     </Card>
   );
 }
