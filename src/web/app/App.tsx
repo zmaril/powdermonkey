@@ -11,7 +11,7 @@ import { useRevealEntity } from "../reveal.ts";
 import { useActiveTheme, useStore } from "../store.ts";
 import { ActivityTab, useTabActivity } from "../TabActivity.tsx";
 import { useRunEffect } from "../use-run-effect.ts";
-import { isDesktop, openNewWindow } from "../window-bridge.ts";
+import { closeCurrentWindow, isDesktop, openNewWindow } from "../window-bridge.ts";
 import { mergeExternalWindows, type PmWindow, resolveActive } from "../windows.ts";
 import { DisconnectBanner } from "./DisconnectBanner.tsx";
 import { buildDefaultLayout, dockComponents, PANE_TITLES } from "./layout.ts";
@@ -129,17 +129,24 @@ export function useCrossTabWindows(): void {
   }, []);
 }
 
-/** Window keyboard shortcuts. `Cmd/Ctrl-N` opens a real new window. It's a desktop
- *  feature: browsers reserve `Cmd-N` (opens a fresh browser window, which our handler
- *  never sees) — the "New window" button in the top bar is the browser affordance. */
+/** Window keyboard shortcuts. `Cmd/Ctrl-N` opens a real new window; `Cmd/Ctrl-W`
+ *  closes this one. Both are desktop features: browsers reserve these chords (Cmd-N
+ *  opens a fresh browser window, Cmd-W closes the tab — neither reaches our handler),
+ *  and that native behavior is already the right thing there. The top-bar "New window"
+ *  button is the browser affordance for opening. */
 export function useWindowKeybindings(): void {
   useEffect(() => {
+    if (!isDesktop()) return;
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod || e.altKey || e.shiftKey) return;
-      if (e.key.toLowerCase() === "n" && isDesktop()) {
+      const key = e.key.toLowerCase();
+      if (key === "n") {
         e.preventDefault();
         openNewWindow();
+      } else if (key === "w") {
+        e.preventDefault();
+        closeCurrentWindow();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -238,7 +245,7 @@ export function App() {
   // native windows, so our own writes never clobber theirs (and vice versa).
   useCrossTabWindows();
 
-  // Cmd/Ctrl-N → open a real new window.
+  // Cmd/Ctrl-N → open a real new window; Cmd/Ctrl-W → close this one (desktop).
   useWindowKeybindings();
 
   // Tear the layout subscription down with the component.

@@ -73,24 +73,13 @@ export function updateWindow(
   return list.map((w) => (w.id === id ? { ...w, ...patch } : w));
 }
 
-/** Close a window. The list is never left empty — closing the last window replaces
- *  it with a fresh unscoped one (there is always a view to stand in). When the
- *  closed window was active, focus moves to its right-hand neighbour (else the new
- *  last); closing a background window leaves the active one alone. */
-export function closeWindow(
-  list: PmWindow[],
-  id: string,
-  activeId: string,
-): { windows: PmWindow[]; activeId: string } {
-  const idx = list.findIndex((w) => w.id === id);
-  if (idx === -1) return { windows: list, activeId };
-  const rest = list.filter((w) => w.id !== id);
-  if (rest.length === 0) {
-    const fresh = newWindow();
-    return { windows: [fresh], activeId: fresh.id };
-  }
-  const nextActive = id === activeId ? rest[Math.min(idx, rest.length - 1)].id : activeId;
-  return { windows: rest, activeId: nextActive };
+/** Drop a window from the registry. Real windows are Firefox-style disposable: a
+ *  closed window is gone — no synthetic replacement, no focus handoff (there's no
+ *  in-app active window to hand to; the OS window itself is closing). Closing the last
+ *  window empties the registry; the app quits (Tauri) / the tab closes (browser), and
+ *  the next launch mints a fresh window (planBoot). Unknown ids are a no-op. */
+export function dropWindow(list: PmWindow[], id: string): PmWindow[] {
+  return list.filter((w) => w.id !== id);
 }
 
 /** The active window, tolerating a stale id (persisted device state can drift —

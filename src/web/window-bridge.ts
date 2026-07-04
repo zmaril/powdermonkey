@@ -1,5 +1,5 @@
 import { useStore } from "./store.ts";
-import { planBoot, windowWithId } from "./windows.ts";
+import { type PmWindow, planBoot, windowWithId } from "./windows.ts";
 
 // The platform layer for real native windows (docs/windows.md). Each PM window is a
 // real OS window: on the desktop a Tauri v2 WebviewWindow, in the browser a separate
@@ -68,11 +68,28 @@ export async function openNewWindow(): Promise<void> {
   await spawnWindow(id);
 }
 
+/** Close THIS window: on the desktop, ask Tauri to close the OS window (which fires
+ *  onCloseRequested → the registry cleanup registered in initDesktopWindow, so a
+ *  closed window isn't reopened next launch); in the browser, drop it from the registry
+ *  and close the tab. Wired to `Cmd/Ctrl-W` (desktop) and the native close button. */
+export async function closeCurrentWindow(): Promise<void> {
+  if (isDesktop()) {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().close();
+  } else {
+    useStore.getState().removeWindow(useStore.getState().activeWindowId);
+    // Only script-opened windows can be closed by script; the primary tab won't, and
+    // that's fine — its native Cmd-W closes it, and browser session-restore reopens it.
+    window.close();
+  }
+}
+
 /** Bind THIS webview to its PM window, synchronously, before React mounts (so the dock
  *  restores the right layout on its first `onReady`). If the URL carries `#w=<id>`,
- *  that window is this webview's; otherwise this is the primary boot webview, which
- *  adopts the first registered window (or mints one). Either way we stamp the hash so
- *  the reconnect→reload recovery comes back on the same window.
+ *  that window is this webview's; otherwise this is the *primary* boot webview, which
+ *  adopts the first registered window (or mints one) and — on the desktop — reopens the
+ *  rest of the set. Either way we stamp the hash so the reconnect→reload recovery comes
+ *  back on the same window.
  *
  *  The store's `windows` registry has already rehydrated from localStorage at this
  *  point (zustand `persist` is synchronous for localStorage), so the lookup sees the
@@ -80,9 +97,30 @@ export async function openNewWindow(): Promise<void> {
 export function bootWindow(): void {
   const s = useStore.getState();
   const hashId = hashWindowId();
-  const win = hashId
-    ? (s.windows.find((w) => w.id === hashId) ?? windowWithId(hashId))
-    : planBoot(s.windows).adopt;
+  // A hash means this webview was told which window it is (spawned / reopened /
+  // bookmarked) — show that one, and nothing to fan out. No hash means the primary
+  // boot webview — adopt the first registered window (or mint one) and reopen the rest.
+  const { win, spawn } = hashId
+    ? { win: s.windows.find((w) => w.id === hashId) ?? windowWithId(hashId), spawn: [] }
+    : ((p) => ({ win: p.adopt, spawn: p.spawn }))(planBoot(s.windows));
   s.adoptWindow(win);
   history.replaceState(null, "", windowUrl(win.id));
+  // The desktop side (register the close→cleanup hook, and fan the rest of the set
+  // back out on a primary relaunch) is async; fire and forget after the sync bind.
+  if (isDesktop()) void initDesktopWindow(spawn);
+}
+
+/** Desktop-only window wiring, run once per webview after bootWindow's sync bind:
+ *  1. Drop this window from the registry when it's genuinely closed (the native close
+ *     button OR Cmd/Ctrl-W). Tauri's onCloseRequested fires on close, not on reload,
+ *     so a reload keeps the window and a real close disposes it — Firefox-style.
+ *  2. On the primary boot webview (no `#w=` hash), reopen the rest of the registry as
+ *     their own OS windows, so relaunch restores the whole set you had open. A window
+ *     spawned here boots WITH a hash, so it never fans out again — no recursion. */
+async function initDesktopWindow(spawn: PmWindow[]): Promise<void> {
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  await getCurrentWindow().onCloseRequested(() => {
+    useStore.getState().removeWindow(useStore.getState().activeWindowId);
+  });
+  for (const w of spawn) await spawnWindow(w.id);
 }
