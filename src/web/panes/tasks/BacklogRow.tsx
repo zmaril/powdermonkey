@@ -5,10 +5,11 @@ import type { EntityEdit, Ghost } from "../../ghosts.ts";
 import type { Indexes } from "../../plan-data.ts";
 import { IdTag, KindBadge, ProgressPill, RepoBadge, StarToggle, useRepo } from "../../plan-ui";
 import { GHOST_BORDER_COLOR, SELECTED_SHADOW } from "./constants.ts";
+import { GhostStrip } from "./GhostStrip.tsx";
 import { useHighlighted } from "./new-task.ts";
-import { GhostStrip, TaskProposalStrips } from "./proposal-strips.tsx";
 import { TaskActions } from "./TaskActions.tsx";
 import { TaskOutcome } from "./TaskOutcome.tsx";
+import { TaskProposalStrips } from "./TaskProposalStrips.tsx";
 import { isTerminal } from "./task-status.ts";
 import type { Selection } from "./types.ts";
 

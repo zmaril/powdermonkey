@@ -2,7 +2,7 @@ import { Card, Text } from "@mantine/core";
 import type { ReactNode } from "react";
 import type { Ghost } from "../../ghosts.ts";
 import { GHOST_BORDER } from "./constants.ts";
-import { GhostStrip } from "./proposal-strips.tsx";
+import { GhostStrip } from "./GhostStrip.tsx";
 
 /** A proposed new node, rendered as a dashed-teal card: its title, optional body (a
  *  ghost task shows its phase list; a ghost goal/milestone header shows nothing), then
