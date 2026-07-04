@@ -129,13 +129,13 @@ export function useNewTaskReveal(
     seenRef.current = new Set(all);
     if (fresh.length === 0) return;
     setHighlighted((prev) => {
-      let next = prev;
+      let next: Set<number> | null = null;
       for (const id of fresh)
-        if (!next.has(id)) {
-          if (next === prev) next = new Set(prev);
+        if (!prev.has(id)) {
+          next ??= new Set(prev);
           next.add(id);
         }
-      return next;
+      return next ?? prev;
     });
   }, [idsKey]);
 
@@ -146,13 +146,13 @@ export function useNewTaskReveal(
   useEffect(() => {
     if (queue.length === 0) return;
     setHighlighted((prev) => {
-      let next = prev;
+      let next: Set<number> | null = null;
       for (const id of queue)
-        if (!next.has(id)) {
-          if (next === prev) next = new Set(prev);
+        if (!prev.has(id)) {
+          next ??= new Set(prev);
           next.add(id);
         }
-      return next;
+      return next ?? prev;
     });
     for (const id of queue) if (revealCard(id)) consumeReveal(id);
   }, [queue, idsKey, revealCard, consumeReveal]);
@@ -162,13 +162,13 @@ export function useNewTaskReveal(
   // biome-ignore lint/correctness/useExhaustiveDependencies: present is read via a ref; idsKey changing is exactly when the rendered set changed.
   useEffect(() => {
     setHighlighted((prev) => {
-      let next = prev;
+      let next: Set<number> | null = null;
       for (const id of prev)
         if (!presentRef.current.has(id)) {
-          if (next === prev) next = new Set(prev);
+          next ??= new Set(prev);
           next.delete(id);
         }
-      return next;
+      return next ?? prev;
     });
   }, [idsKey]);
 

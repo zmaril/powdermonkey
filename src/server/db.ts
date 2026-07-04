@@ -3,7 +3,7 @@ import { PGlite, type PGliteOptions } from "@electric-sql/pglite";
 import { live, type PGliteWithLive } from "@electric-sql/pglite/live";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
-import { IS_COMPILED, MIGRATIONS_DIR, PG_DATA, PG_WASM } from "./paths.ts";
+import { INITDB_WASM, IS_COMPILED, MIGRATIONS_DIR, PG_DATA, PG_WASM } from "./paths.ts";
 import * as schema from "./schema.ts";
 import { acquireWriterLock } from "./writer-lock.ts";
 
@@ -29,7 +29,8 @@ acquireWriterLock(DATA_DIR);
 // module's `db` export stays eager.
 const pgliteOpts: PGliteOptions = IS_COMPILED
   ? {
-      wasmModule: new WebAssembly.Module(readFileSync(PG_WASM)),
+      pgliteWasmModule: new WebAssembly.Module(readFileSync(PG_WASM)),
+      initdbWasmModule: new WebAssembly.Module(readFileSync(INITDB_WASM)),
       fsBundle: new Blob([readFileSync(PG_DATA)]),
     }
   : {};

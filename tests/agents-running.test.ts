@@ -31,8 +31,8 @@ test("counts every live session, whatever its inner state", () => {
 test("excludes archived sessions — landed or stopped is not running", () => {
   const sessions = [
     session(1, { state: "running" }),
-    session(2, { state: "idle", archivedAt: "2026-07-01T00:00:00Z" }), // landed
-    session(3, { state: "stopped", archivedAt: "2026-07-01T00:00:00Z" }), // aborted
+    session(2, { state: "idle", archivedAt: new Date("2026-07-01T00:00:00Z") }), // landed
+    session(3, { state: "stopped", archivedAt: new Date("2026-07-01T00:00:00Z") }), // aborted
   ];
   expect(countRunningAgents(sessions)).toBe(1);
 });

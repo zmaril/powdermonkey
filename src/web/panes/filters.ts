@@ -16,7 +16,7 @@ import type { Indexes } from "../plan-data.ts";
 type ValueOf<T> = T[keyof T];
 
 /** "all" — the wildcard a status/env filter uses to mean "don't filter on this axis". */
-export const ANY = "all";
+export const ANY = "all" as const;
 export type Any = typeof ANY;
 
 // ── Goal / milestone scope ───────────────────────────────────────────────────────
