@@ -101,7 +101,9 @@ export function BacklogCard({
           </Text>
         </Group>
         <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
-          {repo && <RepoBadge repo={repo} />}
+          {/* Icon-only on the card: the color ring + glyph identify the repo without the
+              name text crowding the title row (name shows on hover, and in full elsewhere). */}
+          {repo && <RepoBadge repo={repo} showName={false} />}
           <Button
             size="compact-xs"
             variant="default"
