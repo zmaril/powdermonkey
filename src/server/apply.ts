@@ -5,7 +5,7 @@ import {
   type ProposalChange,
   ProposalOp,
   ProposalStatus,
-  type VocabKind,
+  VocabKind,
 } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { getProposal, PARENT_COLUMN, repoFor } from "./proposals.ts";
@@ -85,16 +85,17 @@ async function applyChange(
     }
     // Position: honor an explicit one, else APPEND to the end of the siblings (max + 1)
     // so an accepted ghost — which renders at the bottom of its list — stays put instead
-    // of taking the position-0 column default and jumping to the top on accept.
+    // of taking the position-0 column default and jumping to the top on accept. Goals are
+    // unordered (no position column), so they skip this.
     if (change.position != null) {
       values.position = change.position;
-    } else {
-      // biome-ignore lint/suspicious/noExplicitAny: dynamic column lookup by parent-key name.
-      const parentColumn: any = parentCol ? (table as any)[parentCol] : null;
+    } else if (change.kind !== VocabKind.Goal) {
+      // biome-ignore lint/suspicious/noExplicitAny: dynamic position/parent column access across the table union.
+      const t: any = table;
       const parentVal = parentCol ? (values[parentCol] as number | undefined) : undefined;
-      const where = parentColumn && parentVal != null ? eq(parentColumn, parentVal) : undefined;
+      const where = parentCol && parentVal != null ? eq(t[parentCol], parentVal) : undefined;
       const [agg] = await tx
-        .select({ max: max(table.position) })
+        .select({ max: max(t.position) })
         .from(table)
         .where(where);
       values.position = (agg?.max ?? -1) + 1;
