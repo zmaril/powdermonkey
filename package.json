@@ -38,7 +38,7 @@
     "@fontsource-variable/fira-code": "^5.2.7",
     "@formkit/auto-animate": "^0.9.0",
     "@mantine/core": "^7.15.0",
-    "@mantine/hooks": "^7.15.0",
+    "@mantine/hooks": "^9.4.1",
     "@pierre/diffs": "^1.2.12",
     "@pierre/trees": "^1.0.0-beta.5",
     "@sinclair/typebox": "0.34.49",
