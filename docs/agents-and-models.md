@@ -2,7 +2,7 @@
 
 Today PowderMonkey is hardwired to one agent — `claude --remote` — in the dispatch path
 (`PM_DISPATCH_CMD`). This is the design for making the agent **pluggable**: many agents, running
-local / host / cloud, many models, **configured and selectable, mixed and matched per task**. Builds on
+local / server / cloud, many models, **configured and selectable, mixed and matched per task**. Builds on
 `vocabulary.md` (Task, Repo, Session) and `supervisor-copilot.md` (actions as typed data).
 
 ## The model
@@ -16,15 +16,15 @@ Task ─ targets ─→ Repo                       (where — existing)
 
 Runtime = Agent  ×  Location  ×  ModelChoice
           claude    local        └ Model  ×  Version  ×  Effort
-          codex     host           opus       4.8         high
+          codex     server         opus       4.8         high
           pi        cloud          sonnet     5           medium
 ```
 
 - **Agent** — the coding tool: `claude`, `codex` (OpenAI Codex CLI), `pi` (Pi.dev). Extensible.
 - **Location** — where the agent actually runs: `local` (your laptop — the client machine, your
-  install + your git auth), `host` (the supervisor's own machine — its install, its worktrees,
+  install + your git auth), `server` (the supervisor's own machine — its install, its worktrees,
   its auth), or `cloud` (an isolated sandbox the provider runs, opening a PR via its GitHub App).
-  See *Local, host, cloud* below — `local` and `host` are the same box when you self-host.
+  See *Local, server, cloud* below — `local` and `server` are the same box when you self-host.
 - **ModelChoice** — not one flat id but three nested picks: **Model** (the family — `opus`,
   `sonnet`, `gpt-5-codex`), **Version** (the dated release under it — `opus 4.8`, `sonnet 5`),
   and **Reasoning effort** (`low | medium | high | xhigh | max`, where the agent/model exposes
@@ -80,7 +80,7 @@ interface ModelChoice { model: string; version?: string; effort?: Effort }
 
 interface Agent {
   id: "claude" | "codex" | "pi"          // extensible
-  locations: ("local" | "host" | "cloud")[] // which it supports (local = laptop runner, TBD)
+  locations: ("local" | "server" | "cloud")[] // which it supports (local = laptop runner, TBD)
   models(): ModelDef[]                     // families + versions + efforts; static or queried
   command(ctx): string                     // template: {prompt_file} {cwd} {model} {version} {effort}
   tty: boolean                             // needs a PTY? (claude --remote does)
@@ -108,18 +108,18 @@ every other agent is another entry. One registry; add an agent = add a row.
 | Runtime | Loc | Isolation | PR / push auth | Needs installed |
 |---------|-----|-----------|----------------|-----------------|
 | `claude` cloud | cloud | fresh sandbox | Claude GitHub App | — (have) |
-| `claude` host | host | supervisor worktree | supervisor git/gh | `claude` on the host (have) |
+| `claude` server | server | supervisor worktree | supervisor git/gh | `claude` on the server (have) |
 | `codex` cloud | cloud | fresh sandbox | provider GitHub App (TBD) | — |
-| `codex` host | host | supervisor worktree | supervisor git/gh | `codex` on the host |
-| `pi` host | host | supervisor worktree | supervisor git/gh | Pi.dev on the host |
+| `codex` server | server | supervisor worktree | supervisor git/gh | `codex` on the server |
+| `pi` server | server | supervisor worktree | supervisor git/gh | Pi.dev on the server |
 | `*` local | local | laptop worktree | your laptop git/gh | agent on your laptop **+ a runner (TBD)** |
 
-Every non-cloud agent here runs on the **host** — the supervisor's machine, against the repo's
-cache clone, using the host's install and auth. Pi.dev is host-only by nature (no cloud sandbox).
-The `local` row is the one that isn't built yet: running the agent on **your laptop** while the
-supervisor is remote needs a laptop-side runner (see *Local, host, cloud*).
+Every non-cloud agent here runs on the **server** — the supervisor's machine, against the repo's
+cache clone, using the server's install and auth. Pi.dev is server-only by nature (no cloud
+sandbox). The `local` row is the one that isn't built yet: running the agent on **your laptop**
+while the supervisor is remote needs a laptop-side runner (see *Local, server, cloud*).
 
-## Local, host, cloud
+## Local, server, cloud
 
 Agent and model vary within it, but **where the agent runs is the load-bearing axis** — auth,
 isolation, cost, and speed all split on it. Three values:
@@ -127,31 +127,32 @@ isolation, cost, and speed all split on it. Three values:
 - **Cloud** (`claude --remote`, `codex` cloud): an isolated sandbox clones the repo, does the
   work, opens a PR via the *provider's* GitHub App — no local auth, no local install. Bounded
   by that provider's cloud concurrency/budget cap. Returns a `View:` URL captured on the session.
-- **Host**: runs on the **supervisor's own machine**, in a worktree cut from the repo's cache
-  clone (see `vocabulary.md`), using the host's install and the host's git/PR auth, bounded by
-  that machine. This is exactly what the code calls a "local" session today — it lives next to
+- **Server**: runs on the **supervisor's own machine**, in a worktree cut from the repo's cache
+  clone (see `vocabulary.md`), using the server's install and the server's git/PR auth, bounded
+  by that machine. This is exactly what the code calls a "local" session today — it lives next to
   the supervisor (`worktree.ts`, `session-pty.ts`), because the supervisor is the only thing
   that spawns and owns the agent process.
 - **Local**: runs on **your laptop** — the client machine you're viewing from — with *your*
-  install and *your* git auth. Only meaningfully distinct from `host` when the supervisor is
+  install and *your* git auth. Only meaningfully distinct from `server` when the supervisor is
   **remote**, and it isn't built yet: the supervisor spawns agents on its own tmux socket and
   filesystem, so putting one on the laptop needs a laptop-side **runner** that the supervisor
   dispatches to and relays the PTY from. That's the one genuinely new subsystem here.
 
-### host and local are the same box when you self-host
+### server and local are the same box when you self-host
 
-`local` (laptop) and `host` (supervisor machine) are distinct *roles* that **coincide on one
+`local` (laptop) and `server` (supervisor machine) are distinct *roles* that **coincide on one
 machine when you run the supervisor on your laptop** — the today-default. So, pragmatically:
 
 | Where the supervisor runs | Available locations | Why |
 |---------------------------|---------------------|-----|
-| **On your laptop** (default) | `local` + `cloud` | host *is* your laptop, so the on-machine run is just "local" — no runner needed |
-| **On a remote server** | `host` + `cloud` | the on-machine run is the server (`host`); true `local` (laptop) awaits the runner |
+| **On your laptop** (default) | `local` + `cloud` | the server *is* your laptop, so the on-machine run is just "local" — no runner needed |
+| **On a remote server** | `server` + `cloud` | the on-machine run is the `server`; true `local` (laptop) awaits the runner |
 
-In other words: today's "local" session is `host` in the general model, and it earns the name
-`local` only when the host happens to be your laptop. Nothing new ships to get `host` + `cloud`
-working remotely — that's the current code with the supervisor moved to a server. The laptop
-runner is the only piece deferred, and it's what unlocks `local` while the server is elsewhere.
+In other words: today's "local" session is `server` in the general model, and it earns the name
+`local` only when the server happens to be your laptop. Nothing new ships to get `server` +
+`cloud` working remotely — that's the current code with the supervisor moved to a server. The
+laptop runner is the only piece deferred, and it's what unlocks `local` while the server is
+elsewhere.
 
 ## Selection & configuration
 
@@ -179,9 +180,9 @@ side by side. Normalizing cost across providers into one number is a spike, not 
   location, and cwd (the repo cache clone) → spawn (PTY when `tty`) → `capture()` the handle
   (cloud URL or local branch).
 - `sessions` gain `agent` + `model` + `version` + `effort`, and today's `kind: local | remote`
-  becomes a `location: local | host | cloud` axis (the old `remote` is `cloud`; the old `local`
-  is `host`). The fully-resolved choice is recorded on the run, not just the family, so a session
-  is reproducible and the status bar can group by exact model.
+  becomes a `location: local | server | cloud` axis (the old `remote` is `cloud`; the old `local`
+  is `server`). The fully-resolved choice is recorded on the run, not just the family, so a
+  session is reproducible and the status bar can group by exact model.
 - **Reconciliation is unchanged** — trailers off `main`, agent-agnostic.
 
 ## Decisions (and why)
@@ -194,11 +195,11 @@ side by side. Normalizing cost across providers into one number is a spike, not 
    catalog.
 3. **Progress stays agent-agnostic.** Trailers off `main` are the neutral contract every backend
    meets; it's what turns "support another agent" into a config change.
-4. **Location is the primary axis (`local | host | cloud`); model is a sub-selection.** Auth,
+4. **Location is the primary axis (`local | server | cloud`); model is a sub-selection.** Auth,
    isolation, cost, and speed all split on location — so the abstraction is built around it, with
-   agent and model varying inside. `local` and `host` are the same box when you self-host, so the
-   default deployment sees `local + cloud` and a remote server sees `host + cloud`; the laptop
-   runner that makes `local` distinct from `host` is deferred (see open questions).
+   agent and model varying inside. `local` and `server` are the same box when you self-host, so
+   the default deployment sees `local + cloud` and a remote server sees `server + cloud`; the
+   laptop runner that makes `local` distinct from `server` is deferred (see open questions).
 5. **Model is three nested picks, not one string.** Model → version → effort cascade, with
    version and effort optional and defaulted. Keeps the picker one visible choice in the common
    case, lets a default cascade at any level, and pins a version so a plan is reproducible.
