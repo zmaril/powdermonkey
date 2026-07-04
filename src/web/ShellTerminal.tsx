@@ -4,6 +4,7 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { type RefObject, useEffect, useRef } from "react";
 import { fontScaleOption } from "./appearance.ts";
+import { openExternal } from "./open-external.ts";
 import { PmIdDecorator } from "./pm-id-decorate.ts";
 import { PmIdLinkProvider } from "./pm-id-links.ts";
 import { apiUrl, wsUrl } from "./server.ts";
@@ -79,12 +80,12 @@ export function useShellTerminal(
     const fit = new FitAddon();
     fitRef.current = fit;
     term.loadAddon(fit);
-    // Detect URLs in the output and render them as clickable links. Clicking
-    // opens the URL in a new tab; noopener/noreferrer keeps the opened page
-    // from reaching back into this one.
+    // Detect URLs in the output and render them as clickable links. openExternal
+    // opens a new tab in the browser and hands off to the OS default browser in
+    // the desktop shell; either way the opened page can't reach back into this one.
     term.loadAddon(
       new WebLinksAddon((_ev, uri) => {
-        window.open(uri, "_blank", "noopener,noreferrer");
+        openExternal(uri);
       }),
     );
     // The PM-id counterpart to the URL links above: scan the same PTY output for
