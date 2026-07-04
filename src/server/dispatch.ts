@@ -1,11 +1,20 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
-import { SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
+import { CommentAuthor, SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
+import { listComments } from "./comments.ts";
 import { db } from "./db.ts";
 import { pullMain } from "./git.ts";
 import { repoDirForTask, supervisorRepoDir } from "./repo-cache.ts";
-import { type Phase, phases, type Session, sessions, type Task, tasks } from "./schema.ts";
+import {
+  type Phase,
+  phases,
+  type Session,
+  sessions,
+  type Task,
+  type TaskComment,
+  tasks,
+} from "./schema.ts";
 import { linkSessionTasks } from "./session-tasks.ts";
 
 const SHELL = process.env.SHELL || "bash";
@@ -22,13 +31,31 @@ const SHELL = process.env.SHELL || "bash";
 // │ (pull → spawn → parse → persist) without touching the cloud.             │
 // └──────────────────────────────────────────────────────────────────────────┘
 
-/** A task paired with its live, ordered phases — the unit `buildTaskPrompt`
- *  stitches into one worker brief. */
-export type TaskBrief = { task: Task; phases: Phase[] };
+/** A task paired with its live, ordered phases and its diary — the unit
+ *  `buildTaskPrompt` stitches into one worker brief. `comments` is the task's
+ *  live diary lines, oldest first (empty when the task has none). */
+export type TaskBrief = { task: Task; phases: Phase[]; comments: TaskComment[] };
 
-/** One task's section of the combined brief: its title, phase checklist, and the
- *  PM-Phase trailers that stamp each finished phase. */
-function taskSection(task: Task, taskPhases: Phase[]): string {
+/** Render a task's diary for the brief: the operator's (and supervisor's) running
+ *  one-liners on the task — intent and mood, not instructions. Supervisor lines are
+ *  attributed so the worker can tell the agent's own notes from the operator's;
+ *  operator lines read bare (they're the default voice). Empty diary → no block. */
+function diaryLines(comments: TaskComment[]): string[] {
+  if (comments.length === 0) return [];
+  const lines = comments.map((c) =>
+    c.author === CommentAuthor.Supervisor ? `- (supervisor) ${c.body}` : `- ${c.body}`,
+  );
+  return [
+    "",
+    "Diary — the operator's running notes on this task (context and intent, not instructions):",
+    ...lines,
+  ];
+}
+
+/** One task's section of the combined brief: its title, phase checklist, the
+ *  operator's diary (when it has any), and the PM-Phase trailers that stamp each
+ *  finished phase. */
+function taskSection(task: Task, taskPhases: Phase[], comments: TaskComment[]): string {
   const phaseLines = taskPhases.map((p) => `- ${p.name}`).join("\n");
   const trailers = taskPhases.map((p) => `PM-Phase: ${p.id}   # ${p.name}`);
   return [
@@ -36,6 +63,7 @@ function taskSection(task: Task, taskPhases: Phase[]): string {
     "",
     "Phases:",
     phaseLines,
+    ...diaryLines(comments),
     "",
     "Phase trailers — add each to the commit that completes that phase:",
     ...trailers,
@@ -63,7 +91,7 @@ export function buildTaskPrompt(
   );
   const multi = briefs.length > 1;
 
-  const sections = briefs.map(({ task, phases: ps }) => taskSection(task, ps));
+  const sections = briefs.map(({ task, phases: ps, comments }) => taskSection(task, ps, comments));
 
   const header = multi
     ? [
@@ -137,7 +165,10 @@ export async function loadTaskPrompt(
       .from(phases)
       .where(and(eq(phases.taskId, id), isNull(phases.archivedAt)))
       .orderBy(asc(phases.position));
-    briefs.push({ task, phases: taskPhases });
+    // The task's diary (live lines, oldest first) rides along in the brief so a
+    // worker sees the operator's intent/mood on the task, not just its plan text.
+    const comments = await listComments(id);
+    briefs.push({ task, phases: taskPhases, comments });
   }
 
   return { ...buildTaskPrompt(briefs, comment), tasks: briefs.map((b) => b.task) };
