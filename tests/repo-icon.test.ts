@@ -26,7 +26,7 @@ const HTML = new TextEncoder().encode("<!doctype html><title>404</title>");
 
 /** A fake fetcher serving a canned byte body per URL; anything else 404s. Records
  *  the URLs asked for, so tests can pin candidate order and short-circuits. */
-function fakeFetch(routes: Record<string, Uint8Array>) {
+function fakeFetch(routes: Record<string, Uint8Array<ArrayBuffer>>) {
   const asked: string[] = [];
   const impl = async (url: string): Promise<Response> => {
     asked.push(url);

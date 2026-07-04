@@ -1,5 +1,5 @@
 // straitjacket-allow-file:color  the blessed palette source of truth — every editor palette's hex values live here by design
-import type { MantineColorsTuple } from "@mantine/core";
+import type { MantineColorShade, MantineColorsTuple } from "@mantine/core";
 import {
   themeAbyss,
   themeCatppuccinMocha,
@@ -48,7 +48,7 @@ export type EditorTheme = {
   // primary buttons pop.
   accent: MantineColorsTuple;
   // Index into `accent` used as the primary (buttons, switches, active-tab rule).
-  primaryShade: number;
+  primaryShade: MantineColorShade;
   // xterm terminal background — matched to the theme so the shell is seamless.
   terminalBg: string;
   // ::selection highlight (accent at low alpha).
