@@ -9,7 +9,7 @@ import {
 } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { commitBodies } from "./git.ts";
-import { phases, sessionTasks, sessions, tasks } from "./schema.ts";
+import { phases, sessions, sessionTasks, tasks } from "./schema.ts";
 import { landSession } from "./worktree.ts";
 
 // Progress is driven by what lands on `main`, never by a session self-reporting.

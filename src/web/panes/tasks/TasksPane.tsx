@@ -1,6 +1,6 @@
-import { DndContext, DragOverlay, closestCorners } from "@dnd-kit/core";
-import { Box, Card, Group, SegmentedControl, Stack, Text } from "@mantine/core";
+import { closestCorners, DndContext, DragOverlay } from "@dnd-kit/core";
 import type { ComboboxData } from "@mantine/core";
+import { Box, Card, Group, SegmentedControl, Stack, Text } from "@mantine/core";
 import type { DockviewPanelApi } from "dockview-react";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePaneScroll } from "../../pane-scroll.ts";
@@ -9,21 +9,21 @@ import { FilterBar } from "../FilterBar.tsx";
 import {
   ANY,
   DEFAULT_TASK_FILTER,
-  TaskBucket,
-  type TaskFilter,
   matchTask,
   parseScope,
   scopeOptions,
   scopeValue,
+  TaskBucket,
+  type TaskFilter,
 } from "../filters.ts";
 import { useWindow } from "../use-window.ts";
 import { FlatView } from "./FlatView.tsx";
 import { GoalGroup } from "./GoalGroup.tsx";
+import { HighlightProvider, useNewTaskReveal } from "./new-task.ts";
+import { useBacklogReorder } from "./reorder.ts";
 import { ScrollIndicator } from "./ScrollIndicator.tsx";
 import { SelectionBar } from "./SelectionBar.tsx";
 import { StartPanel } from "./StartPanel.tsx";
-import { HighlightProvider, useNewTaskReveal } from "./new-task.ts";
-import { useBacklogReorder } from "./reorder.ts";
 import type { Selection, View } from "./types.ts";
 
 // The task lifecycle buckets the operator filters on (default Backlog). Done/archived

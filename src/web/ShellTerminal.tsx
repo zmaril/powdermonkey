@@ -15,6 +15,7 @@ import { MONO } from "./theme.ts";
 function accentHex(t: EditorTheme): string {
   return t.accent[t.primaryShade];
 }
+
 import type { EditorTheme } from "./themes.ts";
 
 // The xterm theme for an editor palette. Crucially sets `foreground` (the palette's

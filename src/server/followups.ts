@@ -3,7 +3,7 @@ import { ProposalOp, TaskKind, VocabKind } from "../shared/types.ts";
 import { db } from "./db.ts";
 import type { CloudPr } from "./events.ts";
 import { createProposal } from "./proposals.ts";
-import { type Proposal, milestones, proposals, tasks } from "./schema.ts";
+import { milestones, type Proposal, proposals, tasks } from "./schema.ts";
 
 // Follow-ups: the capture half of "a worker hands an out-of-scope find back to the
 // operator". The *triage* half is the existing proposal-review flow (proposals.ts):

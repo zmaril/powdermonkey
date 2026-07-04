@@ -15,7 +15,7 @@
 // The functions here are also what the UI reads to show the operator the exact
 // command to run (it can't open a terminal for them — only point at one).
 
-import { SOCKET, TMUX_BIN, hasSession, shq, tmux } from "./tmux.ts";
+import { hasSession, SOCKET, shq, TMUX_BIN, tmux } from "./tmux.ts";
 
 // The server pane's name (kept in step with supervise.ts via the same env var).
 // Attaching here lands on the supervisor console — logs, crashes, restart backoff.

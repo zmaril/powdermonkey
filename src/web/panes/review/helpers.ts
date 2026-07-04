@@ -1,6 +1,6 @@
 import type { GitStatus } from "@pierre/trees";
 import type { ReviewComment } from "../../../server/pr-review.ts";
-import type { ASide, AnnMeta, LineAnchor, Side } from "./types.ts";
+import type { AnnMeta, ASide, LineAnchor, Side } from "./types.ts";
 
 // Pure helpers + constants shared across the review pane's components.
 

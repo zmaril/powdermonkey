@@ -1,5 +1,5 @@
 import type { IBufferLine, ILink, ILinkProvider, Terminal } from "@xterm/xterm";
-import { type PmKind, findPmIds } from "./pm-ids.ts";
+import { findPmIds, type PmKind } from "./pm-ids.ts";
 
 // The PM-id link provider for the terminal — the counterpart to the WebLinksAddon
 // that already linkifies URLs in the same PTY stream. xterm asks a provider for the

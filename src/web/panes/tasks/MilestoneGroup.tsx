@@ -5,7 +5,7 @@ import { Button, Group, Stack, Title } from "@mantine/core";
 import { useState } from "react";
 import type { Milestone, Task } from "../../../server/schema.ts";
 import { Decision, ProposalOp, VocabKind } from "../../../shared/types.ts";
-import { type EntityEdit, type GroupedGhosts, editLabel, entityKey } from "../../ghosts.ts";
+import { type EntityEdit, editLabel, entityKey, type GroupedGhosts } from "../../ghosts.ts";
 import type { Indexes } from "../../plan-data.ts";
 import { IdTag } from "../../plan-ui";
 import { useStore } from "../../store.ts";
@@ -13,10 +13,10 @@ import { BacklogCard } from "./BacklogCard.tsx";
 import { CardEditor } from "./CardEditor.tsx";
 import { Caret } from "./Caret.tsx";
 import { DragHandle } from "./DragHandle.tsx";
-import { ProposedStrip } from "./ProposedStrip.tsx";
-import { SortableCard } from "./SortableCard.tsx";
 import { useReveal } from "./new-task.ts";
-import { type Reorder, cId, mId, tId } from "./reorder.ts";
+import { ProposedStrip } from "./ProposedStrip.tsx";
+import { cId, mId, tId } from "./reorder.ts";
+import { SortableCard } from "./SortableCard.tsx";
 import type { Selection } from "./types.ts";
 import { useDecide } from "./useDecide.ts";
 
@@ -34,7 +34,6 @@ export function MilestoneGroup({
   selection,
   ghosts,
   edits,
-  reorder,
 }: {
   milestone: Milestone;
   tasks: Task[];
@@ -42,7 +41,6 @@ export function MilestoneGroup({
   selection: Selection;
   ghosts: GroupedGhosts;
   edits: Map<string, EntityEdit[]>;
-  reorder: Reorder;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [adding, setAdding] = useState(false);

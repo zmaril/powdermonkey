@@ -4,10 +4,10 @@ import { useEffect, useState } from "react";
 import { reasonLabel } from "../../../server/generated.ts";
 import type { ReviewFile } from "../../../server/pr-review.ts";
 import { api } from "../../client.ts";
-import { FilePatch } from "./FilePatch.tsx";
-import { LazyMount } from "./LazyMount.tsx";
 import { useReviewCtx } from "./context.ts";
+import { FilePatch } from "./FilePatch.tsx";
 import { estimateHeight } from "./helpers.ts";
+import { LazyMount } from "./LazyMount.tsx";
 
 /** One file in the diff list: our header (caret · name · status · +/- · Viewed) over
  *  the PatchDiff. Two independent ways to collapse the diff body: the caret (a pure

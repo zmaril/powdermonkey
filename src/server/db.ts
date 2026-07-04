@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { PGlite, type PGliteOptions } from "@electric-sql/pglite";
-import { type PGliteWithLive, live } from "@electric-sql/pglite/live";
+import { live, type PGliteWithLive } from "@electric-sql/pglite/live";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { IS_COMPILED, MIGRATIONS_DIR, PG_DATA, PG_WASM } from "./paths.ts";

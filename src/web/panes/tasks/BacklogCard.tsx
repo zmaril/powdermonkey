@@ -4,15 +4,15 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import type { Phase, Task } from "../../../server/schema.ts";
 import { Decision, ProposalOp, TaskStatus } from "../../../shared/types.ts";
-import { type EntityEdit, type Ghost, editLabel } from "../../ghosts.ts";
+import { type EntityEdit, editLabel, type Ghost } from "../../ghosts.ts";
 import { IdTag, KindBadge, PhaseList, RepoBadge, StarToggle, useRepo } from "../../plan-ui";
 import { CardEditor } from "./CardEditor.tsx";
+import { SELECTED_SHADOW } from "./constants.ts";
 import { GhostCardBody } from "./GhostCardBody.tsx";
+import { useHighlighted } from "./new-task.ts";
 import { ProposedStrip } from "./ProposedStrip.tsx";
 import { TaskActions } from "./TaskActions.tsx";
 import { TaskOutcome } from "./TaskOutcome.tsx";
-import { SELECTED_SHADOW } from "./constants.ts";
-import { useHighlighted } from "./new-task.ts";
 import type { Selection } from "./types.ts";
 import { useDecide } from "./useDecide.ts";
 

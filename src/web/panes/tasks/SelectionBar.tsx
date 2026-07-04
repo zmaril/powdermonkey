@@ -16,7 +16,11 @@ export function SelectionBar({
   ids,
   clear,
   crossRepo = false,
-}: { ids: number[]; clear: () => void; crossRepo?: boolean }) {
+}: {
+  ids: number[];
+  clear: () => void;
+  crossRepo?: boolean;
+}) {
   return (
     <Group
       justify="space-between"

@@ -110,7 +110,9 @@ body {
 .xterm,
 .xterm .xterm-rows {
   font-variant-ligatures: none;
-  font-feature-settings: "liga" 0, "calt" 0;
+  font-feature-settings:
+    "liga" 0,
+    "calt" 0;
 }
 
 /* Cards feel alive: a faint border brighten on hover. Subtle on purpose — the

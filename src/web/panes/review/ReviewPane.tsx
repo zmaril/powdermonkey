@@ -5,11 +5,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PrReview, ReviewEvent } from "../../../server/pr-review.ts";
 import { api } from "../../client.ts";
 import { useActiveTheme } from "../../store.ts";
+import { ReviewCtx, type ReviewCtxValue } from "./context.ts";
 import { DescriptionPanel } from "./DescriptionPanel.tsx";
 import { FilesPanel } from "./FilesPanel.tsx";
-import { ReviewBar } from "./ReviewBar.tsx";
-import { ReviewCtx, type ReviewCtxValue } from "./context.ts";
 import { keyOf } from "./helpers.ts";
+import { ReviewBar } from "./ReviewBar.tsx";
 import type { DraftComment, LineAnchor } from "./types.ts";
 
 // The in-app PR review pane: a PR's diff with inline review comments threaded under

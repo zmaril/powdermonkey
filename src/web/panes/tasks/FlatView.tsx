@@ -1,6 +1,6 @@
 import type { Task } from "../../../server/schema.ts";
 import { VocabKind } from "../../../shared/types.ts";
-import { type EntityEdit, type GroupedGhosts, entityKey } from "../../ghosts.ts";
+import { type EntityEdit, entityKey, type GroupedGhosts } from "../../ghosts.ts";
 import { type Indexes, starFirst } from "../../plan-data.ts";
 import { useListAnimation } from "../../use-list-animation.ts";
 import { BacklogRow } from "./BacklogRow.tsx";

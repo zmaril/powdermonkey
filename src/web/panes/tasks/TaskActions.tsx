@@ -29,7 +29,11 @@ export function TaskActions({
   ids,
   onDone,
   blockedReason,
-}: { ids: number[]; onDone?: () => void; blockedReason?: string }) {
+}: {
+  ids: number[];
+  onDone?: () => void;
+  blockedReason?: string;
+}) {
   const { startLocalMany, dispatchMany, completeTask, cancelTask } = useStore();
   const [running, setRunning] = useState<SessionKind | null>(null);
   const busy = running !== null;
