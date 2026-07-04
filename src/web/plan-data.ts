@@ -2,6 +2,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { useMemo } from "react";
 import type { CloudPr } from "../server/events.ts";
 import type { Goal, Milestone, Phase, Session, Task } from "../server/schema.ts";
+import { ProposalStatus } from "../shared/types.ts";
 import { activeTaskIds, type SessionLink } from "./active.ts";
 import {
   goalsCollection,
@@ -208,6 +209,18 @@ export function useProposalGhosts(): GroupedGhosts {
 export function useProposalEdits(): Map<string, EntityEdit[]> {
   const proposals = useLiveQuery(() => proposalsCollection);
   return useMemo(() => proposalEditsByEntity(proposals.data ?? []), [proposals.data]);
+}
+
+/** The ids of every PENDING proposal — the surface new-proposal detection diffs against
+ *  (a proposal that lands as pending is "new"; one that's been approved/rejected drops
+ *  out), and the count the glanceable badge shows. Live off the synced collection. */
+export function usePendingProposalIds(): Set<number> {
+  const proposals = useLiveQuery(() => proposalsCollection);
+  return useMemo(() => {
+    const ids = new Set<number>();
+    for (const p of proposals.data ?? []) if (p.status === ProposalStatus.Pending) ids.add(p.id);
+    return ids;
+  }, [proposals.data]);
 }
 
 export type FullData = {

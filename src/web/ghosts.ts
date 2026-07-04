@@ -218,6 +218,26 @@ export function proposalEditsByEntity(proposals: Proposal[]): Map<string, Entity
   return out;
 }
 
+/** The ids of every proposal that renders at least one piece somewhere on the board — a
+ *  ghost (goal / milestone / task / phase) or an edit strip on an existing node. This is
+ *  the "present" surface the new-proposal glow gates against (a proposal must render an
+ *  element to be seen/cleared), mirroring the rendered-task-id set the new-task glow uses. */
+export function renderedProposalIds(
+  ghosts: GroupedGhosts,
+  edits: Map<string, EntityEdit[]>,
+): Set<number> {
+  const ids = new Set<number>();
+  const add = (gs: Ghost[]) => {
+    for (const g of gs) ids.add(g.proposalId);
+  };
+  add(ghosts.goals);
+  for (const gs of ghosts.tasksByMilestone.values()) add(gs);
+  for (const gs of ghosts.milestonesByGoal.values()) add(gs);
+  for (const gs of ghosts.phasesByTask.values()) add(gs);
+  for (const es of edits.values()) for (const e of es) ids.add(e.proposalId);
+  return ids;
+}
+
 /** Gather a task's pending-proposal render props in one place: its phases, edits on the
  *  task itself, proposed new phases, and edits on its existing phases — the bundle both
  *  the grouped card and the flat row feed to their task view. */
