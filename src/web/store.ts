@@ -128,7 +128,6 @@ export type State = {
   // Close never leaves the list empty (the last window is replaced by a fresh unscoped
   // one) and hands focus to a neighbour when the active one goes.
   createWindow: (repoIds?: number[]) => string;
-  switchWindow: (id: string) => void;
   // Boot: make THIS webview render `win`, registering it first if the shared registry
   // doesn't already hold it (a spawned/bookmarked window this webview hasn't seen).
   // Called once from window-bridge.bootWindow off the `#w=<id>` hash.
@@ -332,8 +331,6 @@ export const useStore = create<State>()(
         set((s) => ({ windows: [...s.windows, w] }));
         return w.id;
       },
-      switchWindow: (id) =>
-        set((s) => (s.windows.some((w) => w.id === id) ? { activeWindowId: id } : {})),
       adoptWindow: (win) =>
         set((s) => ({
           windows: s.windows.some((w) => w.id === win.id) ? s.windows : [...s.windows, win],
