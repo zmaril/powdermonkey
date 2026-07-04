@@ -54,6 +54,10 @@ export type Indexes = {
   // Goal/milestone a task hangs under — handy for the flat (ungrouped) views.
   milestoneById: Map<number, Milestone>;
   goalById: Map<number, Goal>;
+  // Every task by id — the fresh, server-truth row. Callers that hold an optimistic
+  // order (the drag reorder) resolve card CONTENT through this so a field edit renders
+  // live even while the sequence is held.
+  taskById: Map<number, Task>;
 };
 
 export function phasesUnder(tasks: Task[], idx: Indexes): Phase[] {
@@ -123,6 +127,7 @@ export function buildIndexes(
     prByTask,
     milestoneById,
     goalById,
+    taskById,
   };
 }
 
