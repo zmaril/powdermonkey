@@ -125,7 +125,12 @@ type State = {
   ) => Promise<number[] | null>;
   updateTask: (
     taskId: number,
-    fields: { title?: string; kind?: TaskKind; description?: string | null },
+    fields: {
+      title?: string;
+      kind?: TaskKind;
+      description?: string | null;
+      repoId?: number | null;
+    },
   ) => Promise<void>;
   createPhase: (taskId: number, name: string, position?: number) => Promise<void>;
   updatePhase: (phaseId: number, fields: { name?: string }) => Promise<void>;
