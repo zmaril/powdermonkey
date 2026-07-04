@@ -27,7 +27,7 @@ export function AboutPane() {
         </Text>{" "}
         from{" "}
         <Text span ff="monospace" size="sm">
-          PM-Phase:
+          PM-Note:
         </Text>{" "}
         commit trailers, so nothing self-reports.
       </Text>

@@ -46,15 +46,15 @@ beforeAll(async () => {
   );
 });
 
-test("start-local creates a worktree + branch + session row with trailer block", async () => {
+test("start-local creates a worktree + branch + session row with PM-Note block", async () => {
   const [task] = await taskRepo.list();
   const result = await startLocalSession(task.id);
   if (!result.ok) throw new Error(result.error);
 
   expect(result.branch).toBe(`pm/task-${task.id}`);
   expect(existsSync(result.worktreePath)).toBe(true);
-  expect(result.trailers[0]).toMatch(/^PM-Phase: \d+/);
-  expect(result.prompt).toContain("PM-Phase:");
+  expect(result.trailers[0]).toMatch(/^PM-Note: \{"v":1,"phases":\[\d+\]\}/);
+  expect(result.prompt).toContain("PM-Note:");
 
   expect(result.session.kind).toBe("local");
   expect(result.session.worktreePath).toBe(result.worktreePath);

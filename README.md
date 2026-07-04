@@ -138,37 +138,52 @@ Set `PM_DISPATCH_DRY_RUN=1` to exercise the dispatch flow without touching the
 cloud. `claude` must be installed and logged in.
 
 
-## How progress is tracked (commit trailers)
+## How progress is tracked (the PM-Note trailer)
 
 Progress is read off `main`, never self-reported. When a worker finishes a phase,
-the commit that completes it carries a **trailer** in its message body:
+the commit that completes it carries a **PM-Note** — one structured JSON object on
+its own line in the commit message:
 
 ```
 implement the dispatcher
 
-PM-Phase: 41
+PM-Note: {"v":1,"phases":[41]}
 ```
 
-- `PM-Phase: <id>` — marks one phase done. Repeatable (several lines per commit).
-- `PM-Task: <id>` — shortcut: marks every phase of the task done.
+One note per commit carries everything the commit signals:
 
-The reconciler scans the commit bodies reachable from `main` for these trailers and
-ticks the matching phases/tasks. It runs on a loop and whenever a PR merges, and
-it's idempotent — re-seeing a done phase is a no-op. The tree fills in as branches
-land on `main`.
+- `phases: [<id>, …]` — the phase ids this commit finished (a task spans many commits/PRs).
+- `task: <id>` — shortcut: marks every phase of the task done.
+- `followups: [{ "title": "…", "body": "…" }]` — hand an out-of-scope find back to the
+  operator's decision queue (see below), instead of a separate PR comment.
+
+The reconciler scans the commit bodies reachable from `main` for these notes and ticks
+the matching phases/tasks. It runs on a loop and whenever a PR merges, and it's
+idempotent — re-seeing a done phase is a no-op. The tree fills in as branches land on
+`main`. Follow-ups are read straight off the open PR's commits, so they reach the
+decision queue before the PR even merges.
 
 > [!NOTE]
-> **Squash merges can drop trailers.** A squash collapses a PR's commits into one,
-> so the `PM-Phase:` / `PM-Task:` lines only reach `main` if they survive into the
-> squash commit's message — which depends on your repo's squash-message setting and
-> whether anyone edits it. If they don't, the work merges but its phases silently
-> stay open. **Merge commits and rebase merges keep the trailers as-is**, so prefer
-> those for `pm/task-*` PRs.
->
-> If squash-and-merge actually matters to you, **open an issue** — there are fixes
-> ready to wire up (harvest the trailers from the PR at merge time, or record
-> finished phases as marker files in the tree, which survive any merge strategy) and
-> we'll turn one on.
+> **Why a commit-message trailer and not a git note (`refs/notes/*`)?** A spike proved
+> a real git note can't carry this: a cloud (`claude --remote`) worker can't push a
+> notes ref (the Claude Code git proxy 403s any non-branch ref), and a note doesn't
+> survive a squash merge (the new commit SHA orphans it). A message trailer rides the
+> ordinary branch push and is concatenated into a squash commit's body, so it survives
+> both. See [docs/git-notes-spike.md](docs/git-notes-spike.md).
+
+> [!NOTE]
+> **Squash still needs the note to reach the squash message.** Like any commit-message
+> trailer, a PM-Note only lands on `main` under a squash if it survives into the squash
+> commit's message — which depends on your repo's squash-message setting and whether
+> anyone edits it. **Merge commits and rebase merges keep it as-is**, so prefer those
+> for `pm/task-*` PRs.
+
+> [!NOTE]
+> **Legacy fallback during cutover.** The older single-purpose trailers
+> `PM-Phase: <id>` / `PM-Task: <id>` and the `<!-- pm:followup -->` PR comment are
+> still read, so in-flight PRs and un-migrated workers keep working. They're not
+> retired yet — that waits until PM-Note is proven through a full cloud dispatch →
+> merge → reconcile cycle. Prefer `PM-Note:` for new work.
 
 
 ## CI

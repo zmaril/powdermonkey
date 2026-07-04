@@ -48,7 +48,7 @@ PowderMonkey is a web application that makes `claude --remote` easier to use for
 │   local session: git worktree           remote session: claude --remote                │
 │   on pm/task-<id>, PTY-driven           exec in cloud (against main)                    │
 │              └───────────────┬───────────────────┘                                     │
-│                        branch lands on main with PM-Phase: trailers                     │
+│                        branch lands on main with PM-Note: trailers                      │
 │                        → reconcile marks phases done, tasks merged                      │
 └───────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -77,17 +77,17 @@ sessions    ── id, kind(local|remote), state, task_id, branch, worktree_path
 
 Plans are authored as a **nested, id-less tree** (goal → milestones → tasks → phases) and loaded in one transaction via `POST /plan` — the loader assigns the integer ids and wires the foreign keys, so the author never references an id by hand. Everything else is edited through the typed CRUD API. Sessions are created at runtime and are never authored.
 
-Progress is never written by a session directly. It is set during **reconciliation**, which reads `PM-Phase: <id>` / `PM-Task: <id>` trailers off commits that have landed on `main` (see Flows). The tables hold the desired work; `main` is the source of truth for what's actually done.
+Progress is never written by a session directly. It is set during **reconciliation**, which reads a structured `PM-Note` (a `{ phases, task, followups }` JSON trailer) off commits that have landed on `main` — with the legacy `PM-Phase: <id>` / `PM-Task: <id>` trailers still read as a fallback during cutover (see Flows). The tables hold the desired work; `main` is the source of truth for what's actually done.
 
 # Flows
 
 **Authoring.** A plan is loaded as a nested id-less tree via `POST /plan`. (The forwarded shell makes drafting interactive — you run Claude in the browser-side terminal — but a hand-written plan curl'd up works the same.)
 
-**Running.** Each task is started as a session. **Start local** cuts a `pm/task-<id>` worktree off `main`, records a session, and hands back the prompt plus the per-phase `PM-Phase: <id>` trailer block; you drive it through the forwarded shell in that worktree. **Dispatch remote** is the cloud equivalent (`claude --remote`). Either way work is isolated from the supervisor's `main` checkout and lands on `main` when ready.
+**Running.** Each task is started as a session. **Start local** cuts a `pm/task-<id>` worktree off `main`, records a session, and hands back the prompt plus the per-phase `PM-Note` trailer block; you drive it through the forwarded shell in that worktree. **Dispatch remote** is the cloud equivalent (`claude --remote`). Either way work is isolated from the supervisor's `main` checkout and lands on `main` when ready.
 
-**Reconciliation.** Progress is driven by trailers on commits that have landed on `main`, not by sessions self-reporting. A poll loop (and `POST /reconcile`) scans `git log main` for `PM-Phase: <id>` (one or more phases finished; repeatable across PRs) and the `PM-Task: <id>` shortcut (whole task), marks those phases done, and rolls a task to `merged` once its last phase lands. Idempotent. This is why a task can span several PRs and a session can roam across goals — the system reads the result off `main` rather than trusting anyone.
+**Reconciliation.** Progress is driven by trailers on commits that have landed on `main`, not by sessions self-reporting. A poll loop (and `POST /reconcile`) scans `git log main` for `PM-Note` payloads — `{ "phases": [<id>,…] }` (one or more phases finished; a task spans many commits/PRs) and the `{ "task": <id> }` shortcut (whole task) — marks those phases done, and rolls a task to `merged` once its last phase lands. The legacy single-purpose `PM-Phase:` / `PM-Task:` trailers are unioned in as a fallback. Idempotent. This is why a task can span several PRs and a session can roam across goals — the system reads the result off `main` rather than trusting anyone. A `PM-Note` is a commit-message trailer, not a `refs/notes/*` git note: a cloud worker can't push a notes ref and a note doesn't survive a squash, whereas a message trailer survives the branch push and any merge strategy ([docs/git-notes-spike.md](../docs/git-notes-spike.md)).
 
-Some genuinely-finished work never lands a trailer (a squash that dropped it, out-of-band work, a phase-less task), so reconciliation can never close it — and some tasks are won't-do. For those the operator (in the UI) or the supervisor (on the operator's behalf) can close a phase/task by hand, or cancel a task (a terminal `cancelled` status, not counted as done). A `decision_source` column (`reconciled` | `operator` | `supervisor`) records *who* made each major call — the *what* lives in `status` — so an override call is first-class but never disguised as work that landed on `main`. See [docs/completion-model.md](docs/completion-model.md).
+Some genuinely-finished work never lands a note (a squash that dropped it, out-of-band work, a phase-less task), so reconciliation can never close it — and some tasks are won't-do. For those the operator (in the UI) or the supervisor (on the operator's behalf) can close a phase/task by hand, or cancel a task (a terminal `cancelled` status, not counted as done). A `decision_source` column (`reconciled` | `operator` | `supervisor`) records *who* made each major call — the *what* lives in `status` — so an override call is first-class but never disguised as work that landed on `main`. See [docs/completion-model.md](docs/completion-model.md).
 
 **Monitoring.** The single pane of glass is a dockview split: a live **shell** (xterm.js over a PTY) on the left, the **plan progress tree** on the right — Goal → Milestone → Task → Phase with progress rolled up at the phase grain. Each task carries its actions (Start local / Dispatch / Land) and a session badge, including a "Try Again" label for a remote session parked waiting to resume. History is preserved as an archive — a browsable "book of work."
 
@@ -103,7 +103,7 @@ Some genuinely-finished work never lands a trailer (a squash that dropped it, ou
 | Forwarded shell| Bun native PTY (`Bun.Terminal`) over a `/pty` WebSocket      |
 | Local exec     | git worktree on `pm/task-<id>`, driven via the shell         |
 | Remote exec    | `claude --remote` (cloud, against `main`)                    |
-| Reconciliation | `PM-Phase:` / `PM-Task:` git trailers on `main`              |
+| Reconciliation | `PM-Note` JSON trailer on `main` (`PM-Phase:` / `PM-Task:` legacy) |
 
 # Status
 
@@ -111,7 +111,7 @@ The end-to-end loop is built and dogfoodable:
 
 - **Normalized data model** — goals/milestones/tasks/phases/sessions, int ids, `archived_at` soft deletes.
 - **Typed API** — Elysia + Eden, full CRUD per entity, drizzle-typebox bodies, nested `POST /plan` loader.
-- **Reconciliation** — trailer scan on `main` (`PM-Phase:` / `PM-Task:`), phase-grained, idempotent, on a poll loop.
+- **Reconciliation** — `PM-Note` scan on `main` (JSON `{ phases, task, followups }`; `PM-Phase:` / `PM-Task:` legacy fallback), phase-grained, idempotent, on a poll loop.
 - **Local worktree sessions** — Start local / Land; the on-laptop mirror of `claude --remote`.
 - **Forwarded shell** — Bun native PTY ↔ WebSocket ↔ xterm.js, in a dockview split (shell left, plan right).
 - **Progress tree** — Goal→Milestone→Task→Phase rolled up at the phase grain.

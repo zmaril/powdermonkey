@@ -6,7 +6,8 @@
 PowderMonkey's central invariant is that **progress is read off `main`, never
 self-reported**. A phase or task only becomes "done" when the reconciler
 ([`src/server/reconcile.ts`](../src/server/reconcile.ts)) scans the commits
-reachable from `main`, finds a `PM-Phase: <id>` / `PM-Task: <id>` trailer, and
+reachable from `main`, finds a `PM-Note` payload (`{ phases, task }`; the legacy
+`PM-Phase: <id>` / `PM-Task: <id>` trailers are still read as a fallback), and
 ticks the matching rows. The skill spells this out as a rule: *"Don't fake
 progress. Never `PATCH` a phase to `status: done` to finish work — reconciliation
 is the source of truth."*
