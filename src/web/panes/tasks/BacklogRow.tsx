@@ -1,14 +1,14 @@
 import { Box, Group, Text } from "@mantine/core";
 import type { Phase, Task } from "../../../server/schema.ts";
 import { Decision, ProposalOp, TaskStatus } from "../../../shared/types.ts";
-import { type EntityEdit, type Ghost, editLabel } from "../../ghosts.ts";
+import { type EntityEdit, editLabel, type Ghost } from "../../ghosts.ts";
 import type { Indexes } from "../../plan-data.ts";
 import { IdTag, KindBadge, ProgressPill, RepoBadge, StarToggle, useRepo } from "../../plan-ui";
+import { GHOST_BORDER_COLOR, SELECTED_SHADOW } from "./constants.ts";
+import { useHighlighted } from "./new-task.ts";
 import { ProposedStrip } from "./ProposedStrip.tsx";
 import { TaskActions } from "./TaskActions.tsx";
 import { TaskOutcome } from "./TaskOutcome.tsx";
-import { GHOST_BORDER_COLOR, SELECTED_SHADOW } from "./constants.ts";
-import { useHighlighted } from "./new-task.ts";
 import type { Selection } from "./types.ts";
 import { useDecide } from "./useDecide.ts";
 

@@ -2,18 +2,18 @@ import { eq, isNull } from "drizzle-orm";
 import { db } from "./db.ts";
 import {
   type Goal,
-  type Milestone,
-  type Note,
-  type Phase,
-  type Repo,
-  type Session,
-  type Task,
   goals,
+  type Milestone,
   milestones,
+  type Note,
   notes,
+  type Phase,
   phases,
+  type Repo,
   repos,
+  type Session,
   sessions,
+  type Task,
   tasks,
 } from "./schema.ts";
 

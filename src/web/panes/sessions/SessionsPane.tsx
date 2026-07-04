@@ -1,5 +1,5 @@
-import { Badge, Box, Group, Stack, Switch, Text, Tooltip } from "@mantine/core";
 import type { ComboboxData } from "@mantine/core";
+import { Badge, Box, Group, Stack, Switch, Text, Tooltip } from "@mantine/core";
 import type { DockviewPanelApi } from "dockview-react";
 import { useState } from "react";
 import type { Session } from "../../../server/schema.ts";
@@ -12,10 +12,10 @@ import { FilterBar } from "../FilterBar.tsx";
 import {
   ANY,
   DEFAULT_SESSION_FILTER,
-  SessionBucket,
-  type SessionFilter,
   matchSession,
   parseScope,
+  SessionBucket,
+  type SessionFilter,
   scopeOptions,
   scopeValue,
 } from "../filters.ts";

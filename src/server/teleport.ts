@@ -2,7 +2,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { SessionKind, SessionState } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { lsRemoteHeads } from "./git.ts";
-import { type Session, sessionTasks, sessions, tasks } from "./schema.ts";
+import { type Session, sessions, sessionTasks, tasks } from "./schema.ts";
 import { taskIdsForSession } from "./session-tasks.ts";
 import { startLocalSession } from "./worktree.ts";
 
@@ -18,8 +18,6 @@ import { startLocalSession } from "./worktree.ts";
 // already does — see index.ts), and the worktree's data dir is directory-isolated
 // by default. Keeping that out of the orchestrator is what lets PowderMonkey drive
 // projects other than itself.
-
-const MAIN_BRANCH = process.env.PM_MAIN_BRANCH ?? "main";
 
 /** Pull the cloud teleport id (`session_…`) out of a remote session URL. The URL
  *  is whatever `claude --remote` printed (e.g. https://claude.ai/code/session_abc);

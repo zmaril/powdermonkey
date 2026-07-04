@@ -1,13 +1,13 @@
 import { Badge, Button, Group, Stack, Text, TextInput } from "@mantine/core";
 import { useState } from "react";
 import {
-  type SavedServer,
   defaultOrigin,
   getSavedServers,
   getServerBase,
   isDesktop,
   normalizeServerBase,
   probeServer,
+  type SavedServer,
   setSavedServers,
   setServerBase,
 } from "../../server.ts";

@@ -5,7 +5,7 @@ import { SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { pullMain } from "./git.ts";
 import { repoDirForTask, supervisorRepoDir } from "./repo-cache.ts";
-import { type Phase, type Session, type Task, phases, sessions, tasks } from "./schema.ts";
+import { type Phase, phases, type Session, sessions, type Task, tasks } from "./schema.ts";
 import { linkSessionTasks } from "./session-tasks.ts";
 
 const SHELL = process.env.SHELL || "bash";

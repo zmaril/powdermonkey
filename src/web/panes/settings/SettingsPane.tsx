@@ -1,7 +1,7 @@
 import { Divider, SegmentedControl, Stack, Text } from "@mantine/core";
-import { PaneShell } from "../../PaneShell.tsx";
 import { DENSITY, FONT_SCALE } from "../../appearance.ts";
 import { MOTION } from "../../motion.ts";
+import { PaneShell } from "../../PaneShell.tsx";
 import { useStore } from "../../store.ts";
 import { CommandRow } from "./CommandRow.tsx";
 import { NotifyControl } from "./NotifyControl.tsx";

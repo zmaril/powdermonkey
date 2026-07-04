@@ -4,11 +4,11 @@ import { MultiFileDiff, PatchDiff } from "@pierre/diffs/react";
 import { useMemo } from "react";
 import type { ReviewFile } from "../../../server/pr-review.ts";
 import { Composer } from "./Composer.tsx";
-import { PendingCard } from "./PendingCard.tsx";
-import { Thread } from "./Thread.tsx";
 import { useReviewCtx } from "./context.ts";
 import { DIFF_THEME, fromASide, indexComments, keyOf, parseKey, toASide } from "./helpers.ts";
-import type { ASide, AnnMeta, Side } from "./types.ts";
+import { PendingCard } from "./PendingCard.tsx";
+import { Thread } from "./Thread.tsx";
+import type { AnnMeta, ASide, Side } from "./types.ts";
 
 /** One file's diff, rendered by @pierre/diffs' PatchDiff (Shiki highlighting,
  *  split/unified, virtualized) from the raw GitHub patch. Inline comment threads,

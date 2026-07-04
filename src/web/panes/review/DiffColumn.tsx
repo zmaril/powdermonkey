@@ -1,6 +1,6 @@
 import { Box, Stack, Text } from "@mantine/core";
-import { FileBlock } from "./FileBlock.tsx";
 import { useReviewCtx } from "./context.ts";
+import { FileBlock } from "./FileBlock.tsx";
 
 /** The scrollable diff column (inside the Files panel): one FileBlock per file. */
 export function DiffColumn() {

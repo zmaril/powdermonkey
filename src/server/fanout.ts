@@ -1,7 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { PhaseStatus, type TaskKind } from "../shared/types.ts";
 import { db } from "./db.ts";
-import { type Task, milestones, phases, repos, tasks } from "./schema.ts";
+import { milestones, phases, repos, type Task, tasks } from "./schema.ts";
 
 // Task fan-out: author ONE task spec and stamp it across N repos at once, one task per
 // repo, all sharing the milestone/title/phases. This is how "add the linter to three

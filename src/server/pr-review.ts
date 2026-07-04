@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import {
+  classifyFile,
   type GeneratedReason,
   type LinguistRule,
-  classifyFile,
   parseGitattributes,
 } from "./generated.ts";
 import { gh, resolveRepo } from "./gh.ts";

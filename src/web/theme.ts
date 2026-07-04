@@ -1,4 +1,4 @@
-import { Badge, Button, Card, type MantineTheme, Title, createTheme } from "@mantine/core";
+import { Badge, Button, Card, createTheme, type MantineTheme, Title } from "@mantine/core";
 import { spacingFor } from "./appearance.ts";
 import type { EditorTheme } from "./themes.ts";
 

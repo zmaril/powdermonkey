@@ -4,10 +4,10 @@ import { useEffect, useState } from "react";
 import { reasonLabel } from "../../../server/generated.ts";
 import type { ReviewFile } from "../../../server/pr-review.ts";
 import { api } from "../../client.ts";
-import { FilePatch } from "./FilePatch.tsx";
-import { LazyMount } from "./LazyMount.tsx";
 import { useReviewCtx } from "./context.ts";
+import { FilePatch } from "./FilePatch.tsx";
 import { estimateHeight } from "./helpers.ts";
+import { LazyMount } from "./LazyMount.tsx";
 
 /** The diff body's fold. Starts folded for a generated file, and re-syncs to
  *  `viewed || generated` whenever those change (marking viewed folds; un-viewing

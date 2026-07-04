@@ -3,14 +3,14 @@ import { Group, Stack, Text, Title } from "@mantine/core";
 import { useState } from "react";
 import type { Goal, Milestone, Task } from "../../../server/schema.ts";
 import { Decision, ProposalOp, VocabKind } from "../../../shared/types.ts";
-import { type EntityEdit, type GroupedGhosts, editLabel, entityKey } from "../../ghosts.ts";
+import { type EntityEdit, editLabel, entityKey, type GroupedGhosts } from "../../ghosts.ts";
 import type { Indexes } from "../../plan-data.ts";
 import { IdTag } from "../../plan-ui";
 import { Caret } from "./Caret.tsx";
 import { GhostHeader } from "./GhostHeader.tsx";
 import { MilestoneGroup } from "./MilestoneGroup.tsx";
 import { ProposedStrip } from "./ProposedStrip.tsx";
-import { type Reorder, mId } from "./reorder.ts";
+import { mId, type Reorder } from "./reorder.ts";
 import type { Selection } from "./types.ts";
 import { useDecide } from "./useDecide.ts";
 
@@ -125,7 +125,6 @@ export function GoalGroup({
               selection={selection}
               ghosts={ghosts}
               edits={edits}
-              reorder={reorder}
             />
           ))}
         </SortableContext>

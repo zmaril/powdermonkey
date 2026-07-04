@@ -1,6 +1,6 @@
 import { Box, Group, Stack, Text, UnstyledButton } from "@mantine/core";
 import { useStore } from "../../store.ts";
-import { THEME_ORDER, getTheme } from "../../themes.ts";
+import { getTheme, THEME_ORDER } from "../../themes.ts";
 
 // The theme picker. One swatch-card per editor theme; clicking sets the store
 // selection, which re-skins the whole app live (Mantine palette + dockview chrome +

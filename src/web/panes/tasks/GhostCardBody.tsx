@@ -3,8 +3,8 @@ import type { Phase } from "../../../server/schema.ts";
 import { Decision, PhaseStatus } from "../../../shared/types.ts";
 import type { Ghost } from "../../ghosts.ts";
 import { PhaseList } from "../../plan-ui";
-import { ProposedStrip } from "./ProposedStrip.tsx";
 import { GHOST_BORDER_COLOR } from "./constants.ts";
+import { ProposedStrip } from "./ProposedStrip.tsx";
 import { useDecide } from "./useDecide.ts";
 
 const GHOST_BORDER = `1px dashed ${GHOST_BORDER_COLOR}`;

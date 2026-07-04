@@ -3,10 +3,10 @@ import { join } from "node:path";
 import type { TSchema } from "@sinclair/typebox";
 import { getTableColumns, getTableName } from "drizzle-orm";
 import { Elysia, t } from "elysia";
-import { P, match } from "ts-pattern";
+import { match, P } from "ts-pattern";
 import { Decision, OverrideSource, ProposalStatus, SessionState } from "../shared/types.ts";
 import { applyProposal, decideChange } from "./apply.ts";
-import { type SqlClient, dumpSnapshot } from "./backup.ts";
+import { dumpSnapshot, type SqlClient } from "./backup.ts";
 import { getClaudeUsage } from "./claude-usage.ts";
 import { cancelTask, completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
 import { cors } from "./cors.ts";
@@ -49,14 +49,14 @@ import {
   proposals as proposalsTable,
   pullRequests as pullRequestsTable,
   repos as reposTable,
-  sessionTasks as sessionTasksTable,
   sessions as sessionsTable,
+  sessionTasks as sessionTasksTable,
   tasks as tasksTable,
 } from "./schema.ts";
 import {
-  SUPERVISOR_ID,
   attachSessionPty,
   resizeSessionPty,
+  SUPERVISOR_ID,
   startSupervisorPty,
   writeSessionPty,
 } from "./session-pty.ts";

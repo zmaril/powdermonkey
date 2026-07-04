@@ -1,5 +1,5 @@
-import { ActionIcon, Group, Select, TextInput, Tooltip } from "@mantine/core";
 import type { ComboboxData } from "@mantine/core";
+import { ActionIcon, Group, Select, TextInput, Tooltip } from "@mantine/core";
 import { IconSearch, IconStar, IconStarFilled, IconX } from "@tabler/icons-react";
 import { SessionKind } from "../../shared/types.ts";
 import { ANY } from "./filters.ts";

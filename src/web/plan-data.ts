@@ -2,15 +2,15 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { useMemo } from "react";
 import type { CloudPr } from "../server/events.ts";
 import type { Goal, Milestone, Phase, Session, Task } from "../server/schema.ts";
-import { type SessionLink, activeTaskIds } from "./active.ts";
+import { activeTaskIds, type SessionLink } from "./active.ts";
 import {
   goalsCollection,
   milestonesCollection,
   phasesCollection,
   proposalsCollection,
   pullRequestsCollection,
-  sessionTasksCollection,
   sessionsCollection,
+  sessionTasksCollection,
   tasksCollection,
 } from "./collections.ts";
 import {

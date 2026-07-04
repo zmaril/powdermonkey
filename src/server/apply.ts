@@ -8,8 +8,8 @@ import {
   type VocabKind,
 } from "../shared/types.ts";
 import { db } from "./db.ts";
-import { PARENT_COLUMN, getProposal, repoFor } from "./proposals.ts";
-import { type Proposal, goals, milestones, phases, proposals, tasks } from "./schema.ts";
+import { getProposal, PARENT_COLUMN, repoFor } from "./proposals.ts";
+import { goals, milestones, type Proposal, phases, proposals, tasks } from "./schema.ts";
 
 // The apply engine: translate an APPROVED proposal's change-set into real vocab CRUD,
 // run atomically in one transaction. Before touching anything it re-checks the

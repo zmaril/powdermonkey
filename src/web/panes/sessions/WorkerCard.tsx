@@ -12,8 +12,8 @@ import {
   useRepo,
 } from "../../plan-ui";
 import { ColumnLabel } from "./ColumnLabel.tsx";
-import { TaskLine } from "./TaskLine.tsx";
 import { contextOf, workerPrs } from "./grouping.ts";
+import { TaskLine } from "./TaskLine.tsx";
 
 /** Compact relative time ("5m ago") for the agent-comment stamp. Null on bad input. */
 function timeAgo(iso: string | null): string | null {

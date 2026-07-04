@@ -6,15 +6,15 @@ import {
   type SerializedDockview,
 } from "dockview-react";
 import { type RefObject, useEffect, useRef } from "react";
-import { ActivityTab, useTabActivity } from "../TabActivity.tsx";
 import { useNeedsInputNotifications } from "../notifications.ts";
 import { useRevealEntity } from "../reveal.ts";
 import { useActiveTheme, useStore } from "../store.ts";
+import { ActivityTab, useTabActivity } from "../TabActivity.tsx";
 import { useRunEffect } from "../use-run-effect.ts";
 import { DisconnectBanner } from "./DisconnectBanner.tsx";
+import { buildDefaultLayout, dockComponents, PANE_TITLES } from "./layout.ts";
 import { ReviewOverlay } from "./ReviewOverlay.tsx";
 import { TopBar } from "./TopBar.tsx";
-import { PANE_TITLES, buildDefaultLayout, dockComponents } from "./layout.ts";
 import { useConnectionWatch } from "./useConnectionWatch.ts";
 
 type ShellReq = {

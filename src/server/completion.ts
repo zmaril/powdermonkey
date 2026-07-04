@@ -1,7 +1,7 @@
 import { and, eq, isNull, ne } from "drizzle-orm";
 import { DecisionSource, type OverrideSource, PhaseStatus, TaskStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
-import { type Phase, type Task, phases, tasks } from "./schema.ts";
+import { type Phase, phases, type Task, tasks } from "./schema.ts";
 
 // Operator/supervisor-driven decisions — the non-reconciled path. Reconciliation
 // owns `decision_source = reconciled` (a trailer landed on `main`); everything here
