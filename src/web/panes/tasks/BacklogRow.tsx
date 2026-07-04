@@ -8,7 +8,7 @@ import { useBoardData } from "./board-data-context.ts";
 import { GHOST_BORDER_COLOR, SELECTED_SHADOW } from "./constants.ts";
 import { GhostStrip } from "./GhostStrip.tsx";
 import { useHighlighted } from "./new-task.ts";
-import { useSelection } from "./selection-context.ts";
+import { shiftSelectHandlers, useSelection } from "./selection-context.ts";
 import { TaskActions } from "./TaskActions.tsx";
 import { TaskOutcome } from "./TaskOutcome.tsx";
 import { TaskProposalStrips } from "./TaskProposalStrips.tsx";
@@ -73,15 +73,7 @@ export function BacklogRow({
         background: checked ? "var(--pm-surface)" : undefined,
         boxShadow: checked ? SELECTED_SHADOW : undefined,
       }}
-      onMouseDown={(e) => {
-        if (e.shiftKey) e.preventDefault();
-      }}
-      onClick={(e) => {
-        if (e.shiftKey) {
-          e.preventDefault();
-          selection.toggle(task.id);
-        }
-      }}
+      {...shiftSelectHandlers(selection, task.id)}
     >
       <Group gap="sm" wrap="nowrap" align="center">
         <StarToggle task={task} />

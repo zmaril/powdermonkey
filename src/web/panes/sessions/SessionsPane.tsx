@@ -1,3 +1,6 @@
+// straitjacket-allow-file:duplication  the <FilterBar> call site resembles TasksPane's,
+// but FilterBar is already the shared component — the two just bind different filter types
+// (SessionFilter vs TaskFilter); a wrapper would re-thread every prop for nothing.
 import type { ComboboxData } from "@mantine/core";
 import { Badge, Box, Group, Stack, Switch, Text, Tooltip } from "@mantine/core";
 import type { DockviewPanelApi } from "dockview-react";

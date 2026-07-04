@@ -10,7 +10,7 @@ import { CardEditor } from "./CardEditor.tsx";
 import { SELECTED_SHADOW } from "./constants.ts";
 import { GhostCardBody } from "./GhostCardBody.tsx";
 import { useHighlighted } from "./new-task.ts";
-import { useSelection } from "./selection-context.ts";
+import { shiftSelectHandlers, useSelection } from "./selection-context.ts";
 import { TaskActions } from "./TaskActions.tsx";
 import { TaskOutcome } from "./TaskOutcome.tsx";
 import { TaskProposalStrips } from "./TaskProposalStrips.tsx";
@@ -73,15 +73,7 @@ export function BacklogCard({
       className={highlight ? "pm-new-card" : undefined}
       bg={checked ? "dark.5" : undefined}
       style={{ boxShadow: checked ? SELECTED_SHADOW : undefined }}
-      onMouseDown={(e) => {
-        if (e.shiftKey) e.preventDefault();
-      }}
-      onClick={(e) => {
-        if (e.shiftKey) {
-          e.preventDefault();
-          selection.toggle(task.id);
-        }
-      }}
+      {...shiftSelectHandlers(selection, task.id)}
     >
       <Group justify="space-between" wrap="nowrap" mb="snug">
         <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>

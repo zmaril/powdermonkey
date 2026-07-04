@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, type MouseEvent, useContext } from "react";
 import type { Selection } from "./types.ts";
 
 // Multi-select state (which cards are checked, the toggle, whether any selection is live)
@@ -15,4 +15,21 @@ export function useSelection(): Selection {
     throw new Error("useSelection must be used within a SelectionProvider");
   }
   return selection;
+}
+
+/** Shift-click to toggle a card into the multi-selection, without starting a text
+ *  selection — the same interaction on the card and the row, so it lives here. Spread
+ *  onto the card/row's root element. */
+export function shiftSelectHandlers(selection: Selection, id: number) {
+  return {
+    onMouseDown: (e: MouseEvent) => {
+      if (e.shiftKey) e.preventDefault();
+    },
+    onClick: (e: MouseEvent) => {
+      if (e.shiftKey) {
+        e.preventDefault();
+        selection.toggle(id);
+      }
+    },
+  };
 }
