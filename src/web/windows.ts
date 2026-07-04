@@ -1,16 +1,20 @@
 import type { SerializedDockview } from "dockview-react";
 
 // The Window model (docs/windows.md, vocabulary.md § Window): a Window is a saved
-// *view* — a set of repo "tabs" plus the dockview layout you look at them through,
-// plus a device-local scratchpad. Firefox-style: usually unnamed and disposable,
-// identified by its repo set, session-restored on launch. Pure frontend state,
-// persisted per-device (the store's localStorage persist) — never synced, never
-// part of the plan hierarchy.
+// *view* — a set of repo "tabs" plus the dockview layout you look at them through.
+// Firefox-style: usually unnamed and disposable, identified by its repo set,
+// session-restored on launch. Pure frontend state, persisted per-device (the
+// store's localStorage persist) — never synced, never part of the plan hierarchy.
 //
 // This module is the pure core — window construction and list surgery, free of
 // React and the store — so the semantics (never-empty list, focus handoff on
 // close, the legacy single-layout migration) are unit-testable. The store holds
 // the list and delegates here.
+
+/** Where a window last was in the (global) Scratch note: selection + scroll. The
+ *  CONTENT is global and server-side — closing a window loses nothing — a window
+ *  only remembers its own reading/writing position into it. */
+export type ScratchCursor = { start: number; end: number; scroll: number };
 
 export type PmWindow = {
   // Client-minted, stable across reloads — the persisted identity of the window.
@@ -24,13 +28,12 @@ export type PmWindow = {
   // The dockview arrangement, exactly what api.toJSON() returns. Null until the
   // window has been shown once — the default layout is built on first show.
   layout: SerializedDockview | null;
-  // The per-window local scratchpad body. Device-local and disposable with the
-  // window — the durable, supervisor-readable notepad is the server-side @notes.
-  scratch: string;
+  // This window's cursor into the global Scratch note; null = never opened it.
+  scratchCursor: ScratchCursor | null;
 };
 
 export function newWindow(repoIds: number[] = []): PmWindow {
-  return { id: crypto.randomUUID(), name: null, repoIds, layout: null, scratch: "" };
+  return { id: crypto.randomUUID(), name: null, repoIds, layout: null, scratchCursor: null };
 }
 
 /** Patch one window in place (immutably); unknown ids are a no-op. */

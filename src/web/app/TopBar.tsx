@@ -57,10 +57,7 @@ export function TopBar() {
           <Divider orientation="vertical" my="tight" />
           <PaneButton label="Shell" onClick={() => openTerminal("")} />
           <PaneButton label="Browser" onClick={() => openBrowser()} />
-          {/* Two notepads: Scratch is the per-window throwaway, Notes the durable
-              server-side @notes the supervisor reads. */}
-          <PaneButton label="Scratch" onClick={() => openPane("winscratch")} />
-          <PaneButton label="Notes" onClick={() => openPane("scratch")} />
+          <PaneButton label="Scratch" onClick={() => openPane("scratch")} />
           <Divider orientation="vertical" my="tight" />
           <PaneButton label="Settings" onClick={() => openPane("settings")} />
           <PaneButton label="About" onClick={() => openPane("about")} />

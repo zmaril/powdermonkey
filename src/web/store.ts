@@ -14,6 +14,7 @@ import {
   newWindow,
   type PmWindow,
   resolveActive,
+  type ScratchCursor,
   updateWindow,
 } from "./windows.ts";
 
@@ -107,7 +108,7 @@ export type State = {
   // dockview panel — review is a focused activity). null = no overlay.
   review: { number: number; title: string } | null;
   // The device's Windows (windows.ts, docs/windows.md): Firefox-style saved views,
-  // each a set of repo tabs + a dockview layout + a local scratchpad. Persisted
+  // each a set of repo tabs + a dockview layout + a cursor into Scratch. Persisted
   // per-device, so a reload — notably the disconnect→refresh recovery — restores
   // every window; the active one is what the dock shows. Never empty. This is the
   // single source of truth for the dock; layout-changing buttons write the active
@@ -125,7 +126,7 @@ export type State = {
   removeWindow: (id: string) => void;
   renameWindow: (id: string, name: string | null) => void;
   setWindowRepos: (id: string, repoIds: number[]) => void;
-  setWindowScratch: (id: string, body: string) => void;
+  setScratchCursor: (id: string, cursor: ScratchCursor | null) => void;
   openTerminal: (cwd?: string) => void;
   openSessionTerminal: (sessionId: number, title: string) => void;
   openBrowser: (url?: string) => void;
@@ -323,8 +324,8 @@ export const useStore = create<State>()(
       renameWindow: (id, name) => set((s) => ({ windows: updateWindow(s.windows, id, { name }) })),
       setWindowRepos: (id, repoIds) =>
         set((s) => ({ windows: updateWindow(s.windows, id, { repoIds }) })),
-      setWindowScratch: (id, body) =>
-        set((s) => ({ windows: updateWindow(s.windows, id, { scratch: body }) })),
+      setScratchCursor: (id, cursor) =>
+        set((s) => ({ windows: updateWindow(s.windows, id, { scratchCursor: cursor }) })),
       openTerminal: (cwd = "") =>
         set((s) => ({
           shellReq: {
@@ -547,21 +548,30 @@ export const useStore = create<State>()(
       name: "pm-ui",
       // v1: the single dock `layout` became the window list (windows.ts). The
       // migration folds a v0 device's layout into "window 1" so it comes up
-      // exactly as it was, now inside a window. The casts are honest: a v0 blob
-      // has no `windows`, so only the migration's own output claims the v1 shape.
-      version: 1,
+      // exactly as it was, now inside a window. v2: scratch content went global
+      // (the server note) — a window keeps only a CURSOR into it, so the v1
+      // per-window `scratch` body is dropped and `scratchCursor` starts null.
+      // The casts are honest: only the migration's own output claims the v2 shape.
+      version: 2,
       migrate: (persisted, version) => {
-        const s = (persisted ?? {}) as Record<string, unknown> & {
+        let s = (persisted ?? {}) as Record<string, unknown> & {
           layout?: SerializedDockview | null;
+          windows?: (PmWindow & { scratch?: string })[];
         };
         if (version === 0) {
           const w = fromLegacyLayout(s.layout ?? null);
           const { layout: _legacy, ...rest } = s;
-          return { ...rest, windows: [w], activeWindowId: w.id } as PersistedUi;
+          s = { ...rest, windows: [w], activeWindowId: w.id };
+        }
+        if (version <= 1) {
+          s.windows = (s.windows ?? []).map(({ scratch: _dropped, ...w }) => ({
+            ...w,
+            scratchCursor: w.scratchCursor ?? null,
+          }));
         }
         return s as PersistedUi;
       },
-      // The windows (layouts, repo tabs, local scratchpads) plus the toggles that
+      // The windows (layouts, repo tabs, scratch cursors) plus the toggles that
       // should render in their last position synchronously on load — the auto-rebase
       // toggle would otherwise flip from the default once the server value arrives.
       partialize: (s) => ({

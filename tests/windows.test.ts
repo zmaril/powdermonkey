@@ -23,7 +23,7 @@ test("newWindow: unscoped, unnamed, no layout yet", () => {
   expect(w.repoIds).toEqual([]);
   expect(w.name).toBeNull();
   expect(w.layout).toBeNull();
-  expect(w.scratch).toBe("");
+  expect(w.scratchCursor).toBeNull();
   expect(w.id).not.toBe(newWindow().id); // ids are minted per window
 });
 
@@ -99,7 +99,7 @@ test("windowLabel: name, else the repo tabs, else a placeholder", () => {
 test("mergeExternalWindows: keeps our active window, adopts the rest", () => {
   const a = newWindow([1]);
   const b = newWindow([2]);
-  const ourA = { ...a, name: "fresh here", scratch: "typing…" };
+  const ourA = { ...a, name: "fresh here", scratchCursor: { start: 3, end: 3, scroll: 40 } };
   const staleA = { ...a, name: "stale copy" };
   const theirB = { ...b, name: "their edit" };
   // The other tab edited B and holds a stale A; we're showing A.

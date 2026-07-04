@@ -19,8 +19,8 @@ This feature lands in four phases:
    Sessions/Tasks panes.
 3. **Session restore of windows / tabs / layout** — every open window comes back
    on launch, layout and repo tabs intact.
-4. **Per-window local scratchpad** — throwaway notes that live and die with the
-   window (the global server-side Scratch stays).
+4. **Per-window cursor into the global scratchpad** — Scratch content is one
+   durable, server-side note; a window only remembers where you were in it.
 
 ## State model (per-device)
 
@@ -32,7 +32,7 @@ type PmWindow = {
   name: string | null;        // optional; unnamed windows read as their repo set
   repoIds: number[];          // the repo "tabs", ordered; [] = unscoped (everything)
   layout: SerializedDockview | null;  // null = build the default layout on first show
-  scratch: string;            // the per-window local scratchpad body
+  scratchCursor: ScratchCursor | null;  // this window's place in the global Scratch
 };
 
 // store additions
@@ -53,7 +53,8 @@ holding a repo id that has since been archived just drops that tab on render.
 ## What changes where
 
 - **`store.ts`** — the window list + active id + actions (create/close/rename/
-  switch/set-repo-tabs/set-scratch); `layout` and `setLayout` become per-window.
+  switch/set-repo-tabs/set-scratch-cursor); `layout` and `setLayout` become
+  per-window.
 - **`App.tsx`** — on window switch: `api.toJSON()` is already mirrored on every
   change; swap `activeWindowId`, `fromJSON` the incoming window's layout (same
   compatibility guard as today's reload path).
@@ -63,8 +64,9 @@ holding a repo id that has since been archived just drops that tab on render.
 - **`filters.ts` / the panes** — a window scope (the active window's `repoIds`)
   layered *under* the FilterBar: the panes only ever see plan rows whose repo is
   in scope; the FilterBar keeps refining within that.
-- **A local-scratch pane** — a dock panel like Scratch, but bound to the active
-  window's `scratch` string instead of the server note.
+- **Scratch stays one pane** — the server-note pad renders in every window; the
+  window contributes only a `scratchCursor` (selection + scroll) restored on
+  switch.
 
 ## Decisions (settled with the operator on the PR)
 
@@ -88,8 +90,9 @@ holding a repo id that has since been archived just drops that tab on render.
   are last-write-wins, and a window being viewed somewhere can't be closed out
   from under its viewer — the viewing tab resurrects it.
 
-- **Two notepads, two names.** The per-window pane is **"Scratch"** (device-local,
-  throwaway, disposed with the window); the durable server-side note the supervisor
-  reads as `@notes` shows as **"Notes"**. Its dockview component id stays `scratch`
-  (saved layouts reference it); the per-window pane is `winscratch`. Implemented as
-  proposed on the PR — trivially flippable if the naming reads wrong in practice.
+- **Scratch is global; a window keeps only its cursor.** One durable, server-side
+  Scratch (the `@notes` the supervisor reads) shown in every window — closing a
+  window can never lose notes, and nothing note-shaped is tied to windows. What IS
+  per-window is the *cursor*: each window remembers its own selection + scroll
+  into the shared pad and restores it on switch. (Supersedes an earlier two-pane
+  Scratch/Notes split, cut on the operator's call.)
