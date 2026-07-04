@@ -58,8 +58,14 @@ function diaryLines(comments: TaskComment[]): string[] {
 function taskSection(task: Task, taskPhases: Phase[], comments: TaskComment[]): string {
   const phaseLines = taskPhases.map((p) => `- ${p.name}`).join("\n");
   const trailers = taskPhases.map((p) => `PM-Phase: ${p.id}   # ${p.name}`);
+  // The description carries the task's narrative — why it exists, what's known,
+  // where it was seen. Hand it to the worker verbatim (right under the title, so
+  // it frames the phases that follow) whenever the operator wrote one. Null/blank
+  // descriptions just fall away, leaving the section exactly as it was before.
+  const description = task.description?.trim();
   return [
     `Task: ${task.title}`,
+    ...(description ? ["", description] : []),
     "",
     "Phases:",
     phaseLines,
