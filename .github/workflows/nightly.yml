@@ -24,6 +24,6 @@ jobs:
           workspaces: src-tauri
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.11
       - run: bun install --frozen-lockfile
       - run: bun run tauri build
