@@ -17,7 +17,6 @@ import { EditStrips } from "./EditStrips.tsx";
 import { useReveal } from "./new-task.ts";
 import { cId, mId, tId } from "./reorder.ts";
 import { SortableCard } from "./SortableCard.tsx";
-import type { Selection } from "./types.ts";
 
 /** A milestone and its backlog cards. The header drag-handle reorders the milestone within
  *  its goal; each card drags to reorder within the milestone or move to another. Pending
@@ -30,14 +29,12 @@ export function MilestoneGroup({
   milestone,
   tasks,
   idx,
-  selection,
   ghosts,
   edits,
 }: {
   milestone: Milestone;
   tasks: Task[];
   idx: Indexes;
-  selection: Selection;
   ghosts: GroupedGhosts;
   edits: Map<string, EntityEdit[]>;
 }) {
@@ -101,12 +98,7 @@ export function MilestoneGroup({
               }}
             >
               {tasks.map((t) => (
-                <SortableCard
-                  key={t.id}
-                  task={t}
-                  selection={selection}
-                  {...taskProposalProps(t, idx, ghosts, edits)}
-                />
+                <SortableCard key={t.id} task={t} {...taskProposalProps(t, idx, ghosts, edits)} />
               ))}
             </Stack>
           </SortableContext>

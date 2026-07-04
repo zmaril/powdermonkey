@@ -24,6 +24,7 @@ import { useBacklogReorder } from "./reorder.ts";
 import { ScrollIndicator } from "./ScrollIndicator.tsx";
 import { SelectionBar } from "./SelectionBar.tsx";
 import { StartPanel } from "./StartPanel.tsx";
+import { SelectionProvider } from "./selection-context.ts";
 import type { Selection, View } from "./types.ts";
 
 // The task lifecycle buckets the operator filters on (default Backlog). Done/archived
@@ -229,145 +230,146 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
 
   return (
     <HighlightProvider value={highlighted}>
-      <Box
-        style={{
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          background: "var(--pm-pane-bg)",
-        }}
-      >
-        <Stack gap="cozy" px="md" py="cozy" style={{ flex: "0 0 auto" }}>
-          <Group justify="space-between">
-            <Group gap="cozy">
-              <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
-                TASKS
-              </Text>
-              <Text size="xs" c="dimmed">
-                {loading ? "loading…" : `${visibleTasks.length} shown`}
-              </Text>
-            </Group>
-            <SegmentedControl
-              size="xs"
-              value={view}
-              onChange={(v) => setView(v as View)}
-              data={[
-                { label: "Flat", value: "flat" },
-                { label: "Grouped", value: "grouped" },
-              ]}
-            />
-          </Group>
-          <FilterBar
-            search={filter.search}
-            onSearch={(v) => set({ search: v })}
-            searchPlaceholder="task id or title"
-            statusData={STATUS_DATA}
-            status={filter.status}
-            onStatus={(v) => set({ status: v as TaskFilter["status"] })}
-            env={filter.env}
-            onEnv={(v) => set({ env: v as TaskFilter["env"] })}
-            scopeData={scopeOptions(idx)}
-            scope={scopeValue(filter)}
-            onScope={(v) => set(parseScope(v))}
-            starred={filter.starred}
-            onStarred={(v) => set({ starred: v })}
-            onReset={() => setFilter(DEFAULT_TASK_FILTER)}
-            isDefault={isDefault}
-          />
-        </Stack>
-
-        {/* Relative wrapper so the off-screen new-task indicators can pin to the viewport
-          edges without scrolling away with the list. */}
-        <Box style={{ flex: 1, position: "relative", minHeight: 0, display: "flex" }}>
-          <Box
-            ref={scroll.ref}
-            onScroll={scroll.onScroll}
-            data-pm-scroll="tasks" // lint-allow-string: dockview pane id, not an enum value
-            // overflowAnchor none: when starring re-sorts the list, the browser's own scroll
-            // anchoring chases the card that floated to the top and yanks the whole list up
-            // to it (scrollTop → 0), losing your place. Turn it off so a re-sort leaves the
-            // scroll where it is; usePreserveScrollAcrossResort then holds your exact spot.
-            // position relative anchors contentTop's offset walk (see the helper).
-            style={{ flex: 1, overflowY: "auto", overflowAnchor: "none", position: "relative" }}
-            px={view === "grouped" ? "md" : 0}
-            py="tight"
-          >
-            <Box px={view === "grouped" ? 0 : "md"}>
-              <StartPanel />
-            </Box>
-            {goals.length === 0 ? (
-              <Text c="dimmed" size="sm" px="md" py="lg">
-                No plan loaded. POST one to /plan.
-              </Text>
-            ) : view === "flat" ? (
-              visibleTasks.length === 0 ? (
-                <Text c="dimmed" size="sm" px="md" py="lg">
-                  No tasks match.
+      <SelectionProvider value={selection}>
+        <Box
+          style={{
+            height: "100%",
+            display: "flex",
+            flexDirection: "column",
+            background: "var(--pm-pane-bg)",
+          }}
+        >
+          <Stack gap="cozy" px="md" py="cozy" style={{ flex: "0 0 auto" }}>
+            <Group justify="space-between">
+              <Group gap="cozy">
+                <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
+                  TASKS
                 </Text>
-              ) : (
-                <>
-                  <FlatView
-                    tasks={shownTasks}
-                    idx={idx}
-                    selection={selection}
-                    ghosts={ghosts}
-                    edits={edits}
-                  />
-                  {win.hasMore && (
-                    <div ref={win.sentinelRef}>
-                      <Text c="dimmed" size="xs" ta="center" py="sm">
-                        loading more… ({shownTasks.length} of {visibleTasks.length})
-                      </Text>
-                    </div>
-                  )}
-                </>
-              )
-            ) : (
-              <DndContext
-                sensors={reorder.sensors}
-                collisionDetection={closestCorners}
-                onDragStart={reorder.onDragStart}
-                onDragOver={reorder.onDragOver}
-                onDragEnd={reorder.onDragEnd}
-              >
-                <Stack gap="xl">
-                  {goals.map((g) => (
-                    <GoalGroup
-                      key={g.id}
-                      goal={g}
-                      idx={idx}
-                      backlog={visible}
-                      selection={selection}
-                      ghosts={ghosts}
-                      edits={edits}
-                      reorder={reorder}
-                    />
-                  ))}
-                </Stack>
-                <DragOverlay>
-                  {reorder.draggedLabel ? (
-                    <Card withBorder radius="md" padding="xs" bg="dark.5" style={{ opacity: 0.95 }}>
-                      <Text size="sm" fw={600} truncate>
-                        {reorder.draggedLabel}
-                      </Text>
-                    </Card>
-                  ) : null}
-                </DragOverlay>
-              </DndContext>
-            )}
-          </Box>
-          {hasAbove && <ScrollIndicator dir="up" onClick={jumpAbove} />}
-          {hasBelow && <ScrollIndicator dir="down" onClick={jumpBelow} />}
-        </Box>
+                <Text size="xs" c="dimmed">
+                  {loading ? "loading…" : `${visibleTasks.length} shown`}
+                </Text>
+              </Group>
+              <SegmentedControl
+                size="xs"
+                value={view}
+                onChange={(v) => setView(v as View)}
+                data={[
+                  { label: "Flat", value: "flat" },
+                  { label: "Grouped", value: "grouped" },
+                ]}
+              />
+            </Group>
+            <FilterBar
+              search={filter.search}
+              onSearch={(v) => set({ search: v })}
+              searchPlaceholder="task id or title"
+              statusData={STATUS_DATA}
+              status={filter.status}
+              onStatus={(v) => set({ status: v as TaskFilter["status"] })}
+              env={filter.env}
+              onEnv={(v) => set({ env: v as TaskFilter["env"] })}
+              scopeData={scopeOptions(idx)}
+              scope={scopeValue(filter)}
+              onScope={(v) => set(parseScope(v))}
+              starred={filter.starred}
+              onStarred={(v) => set({ starred: v })}
+              onReset={() => setFilter(DEFAULT_TASK_FILTER)}
+              isDefault={isDefault}
+            />
+          </Stack>
 
-        {selectedIds.length > 0 && (
-          <SelectionBar
-            ids={selectedIds}
-            clear={() => setSelected(new Set())}
-            crossRepo={crossRepo}
-          />
-        )}
-      </Box>
+          {/* Relative wrapper so the off-screen new-task indicators can pin to the viewport
+          edges without scrolling away with the list. */}
+          <Box style={{ flex: 1, position: "relative", minHeight: 0, display: "flex" }}>
+            <Box
+              ref={scroll.ref}
+              onScroll={scroll.onScroll}
+              data-pm-scroll="tasks" // lint-allow-string: dockview pane id, not an enum value
+              // overflowAnchor none: when starring re-sorts the list, the browser's own scroll
+              // anchoring chases the card that floated to the top and yanks the whole list up
+              // to it (scrollTop → 0), losing your place. Turn it off so a re-sort leaves the
+              // scroll where it is; usePreserveScrollAcrossResort then holds your exact spot.
+              // position relative anchors contentTop's offset walk (see the helper).
+              style={{ flex: 1, overflowY: "auto", overflowAnchor: "none", position: "relative" }}
+              px={view === "grouped" ? "md" : 0}
+              py="tight"
+            >
+              <Box px={view === "grouped" ? 0 : "md"}>
+                <StartPanel />
+              </Box>
+              {goals.length === 0 ? (
+                <Text c="dimmed" size="sm" px="md" py="lg">
+                  No plan loaded. POST one to /plan.
+                </Text>
+              ) : view === "flat" ? (
+                visibleTasks.length === 0 ? (
+                  <Text c="dimmed" size="sm" px="md" py="lg">
+                    No tasks match.
+                  </Text>
+                ) : (
+                  <>
+                    <FlatView tasks={shownTasks} idx={idx} ghosts={ghosts} edits={edits} />
+                    {win.hasMore && (
+                      <div ref={win.sentinelRef}>
+                        <Text c="dimmed" size="xs" ta="center" py="sm">
+                          loading more… ({shownTasks.length} of {visibleTasks.length})
+                        </Text>
+                      </div>
+                    )}
+                  </>
+                )
+              ) : (
+                <DndContext
+                  sensors={reorder.sensors}
+                  collisionDetection={closestCorners}
+                  onDragStart={reorder.onDragStart}
+                  onDragOver={reorder.onDragOver}
+                  onDragEnd={reorder.onDragEnd}
+                >
+                  <Stack gap="xl">
+                    {goals.map((g) => (
+                      <GoalGroup
+                        key={g.id}
+                        goal={g}
+                        idx={idx}
+                        backlog={visible}
+                        ghosts={ghosts}
+                        edits={edits}
+                        reorder={reorder}
+                      />
+                    ))}
+                  </Stack>
+                  <DragOverlay>
+                    {reorder.draggedLabel ? (
+                      <Card
+                        withBorder
+                        radius="md"
+                        padding="xs"
+                        bg="dark.5"
+                        style={{ opacity: 0.95 }}
+                      >
+                        <Text size="sm" fw={600} truncate>
+                          {reorder.draggedLabel}
+                        </Text>
+                      </Card>
+                    ) : null}
+                  </DragOverlay>
+                </DndContext>
+              )}
+            </Box>
+            {hasAbove && <ScrollIndicator dir="up" onClick={jumpAbove} />}
+            {hasBelow && <ScrollIndicator dir="down" onClick={jumpBelow} />}
+          </Box>
+
+          {selectedIds.length > 0 && (
+            <SelectionBar
+              ids={selectedIds}
+              clear={() => setSelected(new Set())}
+              crossRepo={crossRepo}
+            />
+          )}
+        </Box>
+      </SelectionProvider>
     </HighlightProvider>
   );
 }

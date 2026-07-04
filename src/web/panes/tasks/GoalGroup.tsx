@@ -11,7 +11,6 @@ import { EditStrips } from "./EditStrips.tsx";
 import { GhostHeader } from "./GhostHeader.tsx";
 import { MilestoneGroup } from "./MilestoneGroup.tsx";
 import { mId, type Reorder } from "./reorder.ts";
-import type { Selection } from "./types.ts";
 
 /** A goal and its milestones. A caret collapses the whole goal. Edits on the goal itself
  *  (rename / delete) show as strips on its header; proposed new milestones render as ghost
@@ -21,7 +20,6 @@ export function GoalGroup({
   goal,
   idx,
   backlog,
-  selection,
   ghosts,
   edits,
   reorder,
@@ -29,7 +27,6 @@ export function GoalGroup({
   goal: Goal;
   idx: Indexes;
   backlog: Set<number>;
-  selection: Selection;
   ghosts: GroupedGhosts;
   edits: Map<string, EntityEdit[]>;
   reorder: Reorder;
@@ -111,7 +108,6 @@ export function GoalGroup({
               milestone={m}
               tasks={tasks}
               idx={idx}
-              selection={selection}
               ghosts={ghosts}
               edits={edits}
             />

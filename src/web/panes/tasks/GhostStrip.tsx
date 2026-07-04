@@ -1,3 +1,6 @@
+// straitjacket-allow-file:prop-drilling  `label` is a presentational string set by the
+// caller (GhostCardBody's "Proposed: new task" vs GhostHeader's ghostLabel), not shared
+// state that could be lifted into a store/context.
 import { Decision } from "../../../shared/types.ts";
 import type { Ghost } from "../../ghosts.ts";
 import { ProposedStrip } from "./ProposedStrip.tsx";

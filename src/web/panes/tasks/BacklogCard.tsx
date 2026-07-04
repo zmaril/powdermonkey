@@ -9,11 +9,11 @@ import { CardEditor } from "./CardEditor.tsx";
 import { SELECTED_SHADOW } from "./constants.ts";
 import { GhostCardBody } from "./GhostCardBody.tsx";
 import { useHighlighted } from "./new-task.ts";
+import { useSelection } from "./selection-context.ts";
 import { TaskActions } from "./TaskActions.tsx";
 import { TaskOutcome } from "./TaskOutcome.tsx";
 import { TaskProposalStrips } from "./TaskProposalStrips.tsx";
 import { isTerminal } from "./task-status.ts";
-import type { Selection } from "./types.ts";
 
 /** One backlog card. A real task: star + id + title with an Edit button top-right (the
  *  one way to edit — it opens the whole card as a craft block), its phases, and the
@@ -23,7 +23,6 @@ import type { Selection } from "./types.ts";
 export function BacklogCard({
   task,
   phases = [],
-  selection,
   ghost,
   edits = [],
   phaseGhosts = [],
@@ -33,7 +32,6 @@ export function BacklogCard({
 }: {
   task?: Task;
   phases?: Phase[];
-  selection?: Selection;
   ghost?: Ghost;
   edits?: EntityEdit[];
   phaseGhosts?: Ghost[];
@@ -50,6 +48,9 @@ export function BacklogCard({
   const highlight = useHighlighted(task?.id ?? -1);
   // The task's repo identity (color + icon); undefined for repo-less tasks.
   const repo = useRepo(task?.repoId);
+  // Multi-select state comes from context (provided at the TasksPane root), so the
+  // goal/milestone/sortable layers don't thread it down.
+  const selection = useSelection();
   const setEdit = (on: boolean) => {
     onEditingChange?.(on);
     setEditing(on);
@@ -57,7 +58,7 @@ export function BacklogCard({
 
   if (ghost) return <GhostCardBody ghost={ghost} />;
 
-  if (!task || !selection) return null;
+  if (!task) return null;
   if (editing) return <CardEditor task={task} phases={phases} onDone={() => setEdit(false)} />;
   const checked = selection.selected.has(task.id);
   const archiveProposed = edits.some((e) => e.op === ProposalOp.Archive);

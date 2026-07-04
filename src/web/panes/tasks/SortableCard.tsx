@@ -6,7 +6,6 @@ import type { EntityEdit, Ghost } from "../../ghosts.ts";
 import { BacklogCard } from "./BacklogCard.tsx";
 import { DragHandle } from "./DragHandle.tsx";
 import { tId } from "./reorder.ts";
-import type { Selection } from "./types.ts";
 
 /** A backlog task card made draggable: a drag handle (in the card header) reorders it
  *  within its milestone or moves it to another, while the rest of the card stays fully
@@ -15,7 +14,6 @@ import type { Selection } from "./types.ts";
 export function SortableCard({
   task,
   phases,
-  selection,
   edits,
   phaseGhosts,
   phaseEdits,
@@ -23,7 +21,6 @@ export function SortableCard({
 }: {
   task: Task;
   phases: Phase[];
-  selection: Selection;
   edits?: EntityEdit[];
   phaseGhosts?: Ghost[];
   phaseEdits?: EntityEdit[];
@@ -45,7 +42,6 @@ export function SortableCard({
       <BacklogCard
         task={task}
         phases={phases}
-        selection={selection}
         edits={edits}
         phaseGhosts={phaseGhosts}
         phaseEdits={phaseEdits}

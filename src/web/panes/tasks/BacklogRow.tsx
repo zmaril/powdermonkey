@@ -7,11 +7,11 @@ import { IdTag, KindBadge, ProgressPill, RepoBadge, StarToggle, useRepo } from "
 import { GHOST_BORDER_COLOR, SELECTED_SHADOW } from "./constants.ts";
 import { GhostStrip } from "./GhostStrip.tsx";
 import { useHighlighted } from "./new-task.ts";
+import { useSelection } from "./selection-context.ts";
 import { TaskActions } from "./TaskActions.tsx";
 import { TaskOutcome } from "./TaskOutcome.tsx";
 import { TaskProposalStrips } from "./TaskProposalStrips.tsx";
 import { isTerminal } from "./task-status.ts";
-import type { Selection } from "./types.ts";
 
 const ROW_BORDER = "1px solid var(--pm-hairline)";
 const GHOST_BORDER = `2px solid ${GHOST_BORDER_COLOR}`;
@@ -24,7 +24,6 @@ export function BacklogRow({
   task,
   idx,
   context,
-  selection,
   ghost,
   edits = [],
   phaseGhosts = [],
@@ -33,7 +32,6 @@ export function BacklogRow({
   task?: Task;
   idx: Indexes;
   context?: string;
-  selection: Selection;
   ghost?: Ghost;
   edits?: EntityEdit[];
   phaseGhosts?: Ghost[];
@@ -44,6 +42,8 @@ export function BacklogRow({
   const highlight = useHighlighted(task?.id ?? -1);
   // The task's repo identity (color + icon); undefined for repo-less tasks.
   const repo = useRepo(task?.repoId);
+  // Multi-select state comes from context (provided at the TasksPane root).
+  const selection = useSelection();
 
   if (ghost) {
     return (
