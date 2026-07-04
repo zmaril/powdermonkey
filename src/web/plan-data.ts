@@ -213,14 +213,18 @@ export function useProposalEdits(): Map<string, EntityEdit[]> {
 
 /** The ids of every PENDING proposal — the surface new-proposal detection diffs against
  *  (a proposal that lands as pending is "new"; one that's been approved/rejected drops
- *  out), and the count the glanceable badge shows. Live off the synced collection. */
-export function usePendingProposalIds(): Set<number> {
+ *  out), and the count the glanceable badge shows. `ready` flips true once the collection
+ *  has delivered its first snapshot, so detection can seed an empty seen-set on a board that
+ *  loads with no pending proposals (the common case) and still light up the first arrival.
+ *  Live off the synced collection. */
+export function usePendingProposalIds(): { ids: Set<number>; ready: boolean } {
   const proposals = useLiveQuery(() => proposalsCollection);
-  return useMemo(() => {
-    const ids = new Set<number>();
-    for (const p of proposals.data ?? []) if (p.status === ProposalStatus.Pending) ids.add(p.id);
-    return ids;
+  const ids = useMemo(() => {
+    const out = new Set<number>();
+    for (const p of proposals.data ?? []) if (p.status === ProposalStatus.Pending) out.add(p.id);
+    return out;
   }, [proposals.data]);
+  return { ids, ready: !proposals.isLoading };
 }
 
 export type FullData = {

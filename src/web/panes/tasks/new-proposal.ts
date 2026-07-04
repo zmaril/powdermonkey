@@ -1,17 +1,16 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, type RefObject, useContext } from "react";
+import { useSeenHighlight, useSeenObserver } from "./seen-reveal.ts";
 
 // The "a new proposal just landed" affordances for the Tasks pane — the proposal-side twin
-// of new-task.ts. A pending proposal projects onto the plan as ghost cards (a proposed new
-// node) and edit strips (a proposed change on an existing node), scattered wherever each
-// piece belongs. When one arrives while you weren't looking, those pieces should catch the
-// eye until you've seen them — the same "new, not yet seen" glow real cards get, keyed on
-// the PROPOSAL id (a change-set can render several pieces, all glowing together) rather than
-// a task id.
+// of new-task.ts, built on the same seen-reveal engine. A pending proposal projects onto the
+// plan as ghost cards (a proposed new node) and edit strips (a proposed change on an existing
+// node), scattered wherever each piece belongs. When one arrives while you weren't looking,
+// those pieces should catch the eye until you've seen them — the same "new, not yet seen"
+// glow real cards get, keyed on the PROPOSAL id (a change-set can render several pieces, all
+// glowing together) rather than a task id.
 //
-// Detection mirrors useNewTaskReveal exactly: diff the live proposal-id set against what
-// we've already seen and light up whatever appeared AFTER load. Unlike tasks there's no
-// "locally added" reveal queue — you don't author proposals from this UI, so nothing here
-// ever yanks your scroll; a new proposal only ever lights up in place.
+// Unlike tasks there's no "locally added" reveal queue — you don't author proposals from this
+// UI, so nothing here ever yanks your scroll; a new proposal only ever lights up in place.
 
 // ── Highlight context ────────────────────────────────────────────────────────
 // The ids of pending proposals currently glowing as "new, not yet seen". The Tasks pane owns
@@ -24,77 +23,37 @@ export const ProposalHighlightProvider = ProposalHighlightContext.Provider;
 export const useProposalHighlighted = (proposalId: number): boolean =>
   useContext(ProposalHighlightContext).has(proposalId);
 
+// Ghost cards and edit strips carry their proposal id on `data-pm-proposal` — the handle the
+// seen-reveal engine observes to clear the glow once a piece has been on screen.
+const PROPOSAL_ATTR = "data-pm-proposal";
+
 export type NewProposalTracking = {
   highlighted: ReadonlySet<number>;
 };
 
-/** Detect newly-arrived pending proposals off the synced collection.
+/** Drive the Tasks pane's new-proposal glow. Two jobs, both on the shared seen-reveal engine:
  *
- *   • `allIds` — every pending proposal id (the full surface, live off the collection).
- *   • `present` — the proposal ids that render at least one piece on the board right now
- *     (renderedProposalIds). Detection is gated to these, so a proposal only lights up when
- *     it has an element to glow — exactly as the new-task glow gates to rendered cards.
- *   • `idsKey` — a stable digest of `present`; it changes precisely when the rendered
- *     proposal set does (a proposal lands/leaves, a filter shifts), which is when detection
- *     and the prune should re-run.
+ *   1. Detect newly-arrived pending proposals off the synced collection (useSeenHighlight):
+ *      diff the live pending-proposal set (`allIds`) against what we've already seen, gated
+ *      to the ones that render a piece right now (`present` = renderedProposalIds). The
+ *      proposals already pending on load are adopted as seen and never light up — only ones
+ *      that appear AFTER are "new". `idsKey` (a digest of `present`) re-fires the diff, and
+ *      `ready` (the collection's first snapshot) lets a board that loads with no pending
+ *      proposals seed an empty seen-set and still light up its first arrival.
  *
- *  `seen` is null until the first snapshot, so the proposals already pending on load are
- *  adopted as already-known and never light up — only ones that appear AFTER are "new". */
+ *   2. Glow each new proposal's pieces until seen (useSeenObserver): a ring stays on every
+ *      ghost card / edit strip carrying the proposal's id until one of them has actually been
+ *      on screen, cleared by an IntersectionObserver dwell.
+ *
+ *  Returns the live highlight set for the pane to provide over context. */
 export function useNewProposalReveal(
+  scrollRef: RefObject<HTMLDivElement | null>,
   idsKey: string,
   allIds: Set<number>,
   present: Set<number>,
+  ready: boolean,
 ): NewProposalTracking {
-  const [highlighted, setHighlighted] = useState<ReadonlySet<number>>(() => new Set());
-
-  // Read the live sets through refs so the id-keyed effects fire off idsKey (which changes
-  // only when the rendered set does) instead of re-running on every render.
-  const presentRef = useRef(present);
-  presentRef.current = present;
-  const allIdsRef = useRef(allIds);
-  allIdsRef.current = allIds;
-
-  // Diff the live proposal set against what we've already seen. The initial set is adopted
-  // as seen (never glows); anything that appears later and renders a piece is highlighted.
-  const seenRef = useRef<Set<number> | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: allIds/present are read via refs; idsKey changing is exactly when the rendered proposal set changed.
-  useEffect(() => {
-    const all = allIdsRef.current;
-    const seen = seenRef.current;
-    if (seen === null) {
-      if (all.size > 0) seenRef.current = new Set(all); // adopt the initial set as seen
-      return;
-    }
-    const known = presentRef.current;
-    const fresh: number[] = [];
-    for (const id of all) if (!seen.has(id) && known.has(id)) fresh.push(id);
-    seenRef.current = new Set(all);
-    if (fresh.length === 0) return;
-    setHighlighted((prev) => {
-      let next: Set<number> | null = null;
-      for (const id of fresh)
-        if (!prev.has(id)) {
-          next ??= new Set(prev);
-          next.add(id);
-        }
-      return next ?? prev;
-    });
-  }, [idsKey]);
-
-  // Drop a highlight whose proposal no longer renders a piece — it was approved, rejected,
-  // or otherwise dropped out before it was ever seen — so a glow can't get stranded forever.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: present is read via a ref; idsKey changing is exactly when the rendered set changed.
-  useEffect(() => {
-    setHighlighted((prev) => {
-      let next: Set<number> | null = null;
-      for (const id of prev)
-        if (!presentRef.current.has(id)) {
-          next ??= new Set(prev);
-          next.delete(id);
-        }
-      return next ?? prev;
-    });
-  }, [idsKey]);
-
+  const [highlighted, setHighlighted] = useSeenHighlight(idsKey, allIds, present, ready);
+  useSeenObserver(scrollRef, PROPOSAL_ATTR, highlighted, setHighlighted, idsKey);
   return { highlighted };
 }

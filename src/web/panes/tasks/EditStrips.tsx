@@ -19,6 +19,7 @@ export function EditStrips({ edits }: { edits: EntityEdit[] }) {
           busy={busy}
           onAccept={() => decide(e.proposalId, e.changeIndex, Decision.Accept)}
           onReject={() => decide(e.proposalId, e.changeIndex, Decision.Reject)}
+          proposalId={e.proposalId}
         />
       ))}
     </>

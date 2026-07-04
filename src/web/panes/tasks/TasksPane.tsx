@@ -232,16 +232,18 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
   // the full live surface; `renderedProposals` is which of them render a piece on the board
   // right now (the "present" set the glow gates against); `proposalIdsKey` re-fires
   // detection when that rendered set changes.
-  const pendingProposalIds = usePendingProposalIds();
+  const { ids: pendingProposalIds, ready: proposalsReady } = usePendingProposalIds();
   const renderedProposals = useMemo(() => renderedProposalIds(ghosts, edits), [ghosts, edits]);
   const proposalIdsKey = useMemo(
     () => [...renderedProposals].sort((a, b) => a - b).join(","),
     [renderedProposals],
   );
   const { highlighted: proposalHighlighted } = useNewProposalReveal(
+    scroll.ref,
     proposalIdsKey,
     pendingProposalIds,
     renderedProposals,
+    proposalsReady,
   );
 
   const toggle = (id: number) =>
