@@ -46,6 +46,7 @@ export function TaskProposalStrips({
       busy={busy}
       onAccept={() => decide(proposalId, ix, Decision.Accept)}
       onReject={() => decide(proposalId, ix, Decision.Reject)}
+      proposalId={proposalId}
     />
   );
   return (

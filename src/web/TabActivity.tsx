@@ -5,7 +5,7 @@ import {
   type IDockviewPanelHeaderProps,
 } from "dockview-react";
 import { type RefObject, useEffect, useRef } from "react";
-import { sessionsCollection, tasksCollection } from "./collections.ts";
+import { proposalsCollection, sessionsCollection, tasksCollection } from "./collections.ts";
 import { RepoBadge, useSessionRepo } from "./plan-ui";
 import { useStore } from "./store.ts";
 import { type ActivitySnapshot, paneActivity, snapshotActivity } from "./tab-activity.ts";
@@ -77,11 +77,12 @@ export function ActivityTab(props: IDockviewPanelHeaderProps) {
 export function useTabActivity(apiRef: RefObject<DockviewApi | null>): void {
   const sessions = useLiveQuery(() => sessionsCollection).data ?? [];
   const tasks = useLiveQuery(() => tasksCollection).data ?? [];
+  const proposals = useLiveQuery(() => proposalsCollection).data ?? [];
   const flagTab = useStore((s) => s.flagTab);
   const prev = useRef<ActivitySnapshot | null>(null);
 
   useEffect(() => {
-    const snap = snapshotActivity(sessions, tasks);
+    const snap = snapshotActivity(sessions, tasks, proposals);
     if (prev.current === null) {
       prev.current = snap;
       return;
@@ -92,5 +93,5 @@ export function useTabActivity(apiRef: RefObject<DockviewApi | null>): void {
       const visible = apiRef.current?.getPanel(pane)?.api.isVisible ?? false;
       if (!visible) flagTab(pane);
     }
-  }, [sessions, tasks, flagTab, apiRef]);
+  }, [sessions, tasks, proposals, flagTab, apiRef]);
 }

@@ -1,5 +1,5 @@
-import type { Session, Task } from "../server/schema.ts";
-import { TaskStatus } from "../shared/types.ts";
+import type { Proposal, Session, Task } from "../server/schema.ts";
+import { ProposalStatus, TaskStatus } from "../shared/types.ts";
 
 // The in-app, glanceable layer (distinct from OS notifications): when something
 // happens in a pane you're not currently looking at, its dockview TAB lights up so
@@ -17,14 +17,24 @@ export type ActivitySnapshot = {
   sessionIds: number[];
   needsInput: Record<number, boolean>;
   taskStatus: Record<number, string>;
+  // The ids of every PENDING proposal — a proposal appearing here that wasn't in the
+  // previous snapshot is a fresh decision landing in the queue (Tasks).
+  pendingProposalIds: number[];
 };
 
-export function snapshotActivity(sessions: Session[], tasks: Task[]): ActivitySnapshot {
+export function snapshotActivity(
+  sessions: Session[],
+  tasks: Task[],
+  proposals: Proposal[] = [],
+): ActivitySnapshot {
   const needsInput: Record<number, boolean> = {};
   for (const s of sessions) needsInput[s.id] = s.needsInput;
   const taskStatus: Record<number, string> = {};
   for (const t of tasks) taskStatus[t.id] = t.status;
-  return { sessionIds: sessions.map((s) => s.id), needsInput, taskStatus };
+  const pendingProposalIds = proposals
+    .filter((p) => p.status === ProposalStatus.Pending)
+    .map((p) => p.id);
+  return { sessionIds: sessions.map((s) => s.id), needsInput, taskStatus, pendingProposalIds };
 }
 
 /** Which panes should light up given the change from prev→next. Pure; the caller
@@ -33,7 +43,10 @@ export function snapshotActivity(sessions: Session[], tasks: Task[]): ActivitySn
  *   • a needs-you transition (needs_input false→true)        → Sessions
  *   • a task status change                                   → the pane it moved
  *     toward: merged/pending → Tasks (done & backlog both live there now that the
- *     Archive tab is folded into a status filter), dispatched → Sessions. */
+ *     Archive tab is folded into a status filter), dispatched → Sessions.
+ *   • a new pending proposal (a fresh change-set to decide on) → Tasks, where the
+ *     ghost cards / edit strips render. UNLIKE a brand-new task (which isn't a
+ *     status edge — it has its own reveal), a proposal landing IS the trigger. */
 export function paneActivity(prev: ActivitySnapshot, next: ActivitySnapshot): Set<string> {
   const panes = new Set<string>();
   const prevSessions = new Set(prev.sessionIds);
@@ -50,6 +63,11 @@ export function paneActivity(prev: ActivitySnapshot, next: ActivitySnapshot): Se
     if (status === TaskStatus.Merged) panes.add(PANE_TASKS);
     else if (status === TaskStatus.Dispatched) panes.add(PANE_SESSIONS);
     else if (status === TaskStatus.Pending) panes.add(PANE_TASKS);
+  }
+
+  const prevPending = new Set(prev.pendingProposalIds);
+  for (const id of next.pendingProposalIds) {
+    if (!prevPending.has(id)) panes.add(PANE_TASKS); // a proposal landed in the queue
   }
 
   return panes;

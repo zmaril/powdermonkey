@@ -1,13 +1,11 @@
-import {
-  createContext,
-  type RefObject,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { createContext, type RefObject, useContext, useEffect } from "react";
 import { create } from "zustand";
+import {
+  addHighlights,
+  useOffscreenJump,
+  useSeenHighlight,
+  useSeenObserver,
+} from "./seen-reveal.ts";
 
 // Shared state for the "a new task just landed" affordances in the Tasks pane.  Two concerns,
 // kept apart on purpose:
@@ -50,13 +48,8 @@ const HighlightContext = createContext<ReadonlySet<number>>(new Set());
 export const HighlightProvider = HighlightContext.Provider;
 export const useHighlighted = (taskId: number): boolean => useContext(HighlightContext).has(taskId);
 
-// How long a new card must sit on screen before its glow clears — long enough to register
-// as "seen" without lingering. Restarts if the card scrolls back off before it elapses.
-const SEEN_DWELL_MS = 1100;
-
-// Where a highlighted card sits relative to the scroll viewport — drives the off-screen
-// indicator (an "above" card → a top arrow, a "below" card → a bottom arrow).
-type Spot = "above" | "in" | "below";
+// Cards carry their task id on `data-pm-card` — the handle the seen-reveal engine observes.
+const TASK_ATTR = "data-pm-card";
 
 export type NewTaskTracking = {
   highlighted: ReadonlySet<number>;
@@ -70,12 +63,13 @@ export type NewTaskTracking = {
 
 /** Drive the Tasks pane's new-task affordances. Three jobs:
  *
- *   1. Detect new tasks off the synced collection (PHASE 871): diff the full live task-id
- *      set (`allIds`) against what we've already seen, and highlight any task that's newly
- *      appeared — wherever it came from (your "+ Add task", a worker, an accepted proposal).
- *      Detection alone never scrolls; that's the local/remote split — only a task YOU added
- *      (the reveal queue) yanks your scroll, so a task that arrives from elsewhere lights up
- *      and gets the indicator without moving you.
+ *   1. Detect new tasks off the synced collection: diff the full live task-id set (`allIds`)
+ *      against what we've already seen, and highlight any task that's newly appeared —
+ *      wherever it came from (your "+ Add task", a worker, an accepted proposal). Detection
+ *      alone never scrolls; that's the local/remote split — only a task YOU added (the reveal
+ *      queue) yanks your scroll, so a task that arrives from elsewhere lights up and gets the
+ *      indicator without moving you. (The seen-set diff + prune live in useSeenHighlight,
+ *      shared with the proposal reveal.)
  *
  *   2. Auto-scroll locally-added tasks: drain the reveal queue, scrolling each queued card
  *      into view the moment it mounts. `idsKey` (a stable digest of the rendered task ids)
@@ -83,10 +77,10 @@ export type NewTaskTracking = {
  *      collection, so the card usually isn't in the DOM on the first drain.
  *
  *   3. Highlight new cards until seen: a glowing ring stays on each new card until it has
- *      actually been on screen, cleared by an IntersectionObserver. `present` is the set of
- *      currently-rendered (backlog) task ids, used both to gate detection to cards that
- *      actually render and to drop a highlight whose card left the backlog (launched /
- *      removed) before it was ever seen.
+ *      actually been on screen, cleared by an IntersectionObserver (useSeenObserver).
+ *      `present` is the set of currently-rendered (backlog) task ids, used both to gate
+ *      detection to cards that actually render and to drop a highlight whose card left the
+ *      backlog (launched / removed) before it was ever seen.
  *
  *  Returns the live highlight set + off-screen-indicator state for the pane. */
 export function useNewTaskReveal(
@@ -98,46 +92,7 @@ export function useNewTaskReveal(
 ): NewTaskTracking {
   const queue = useReveal((s) => s.queue);
   const consumeReveal = useReveal((s) => s.consumeReveal);
-  const [highlighted, setHighlighted] = useState<ReadonlySet<number>>(() => new Set());
-  // Each highlighted card's spot relative to the viewport, kept current by the same
-  // IntersectionObserver that clears the glow (it fires exactly on the in/out crossings the
-  // indicator cares about). Stale entries for cleared highlights are simply ignored below.
-  const [spots, setSpots] = useState<ReadonlyMap<number, Spot>>(() => new Map());
-
-  // Read the live sets through refs so the id-keyed effects below can fire off idsKey (which
-  // changes only when the rendered set does) instead of re-running on every render.
-  const presentRef = useRef(present);
-  presentRef.current = present;
-  const allIdsRef = useRef(allIds);
-  allIdsRef.current = allIds;
-
-  // Detect new tasks off the synced collection. `seen` is null until the first non-empty
-  // snapshot, so the existing backlog on load (or a freshly-POSTed plan) is adopted as
-  // already-known and never lights up — only tasks that appear AFTER are "new".
-  const seenRef = useRef<Set<number> | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: allIds/present are read via refs; idsKey changing is exactly when the live task set changed.
-  useEffect(() => {
-    const all = allIdsRef.current;
-    const seen = seenRef.current;
-    if (seen === null) {
-      if (all.size > 0) seenRef.current = new Set(all); // adopt the initial set as seen
-      return;
-    }
-    const known = presentRef.current;
-    const fresh: number[] = [];
-    for (const id of all) if (!seen.has(id) && known.has(id)) fresh.push(id);
-    seenRef.current = new Set(all);
-    if (fresh.length === 0) return;
-    setHighlighted((prev) => {
-      let next: Set<number> | null = null;
-      for (const id of fresh)
-        if (!prev.has(id)) {
-          next ??= new Set(prev);
-          next.add(id);
-        }
-      return next ?? prev;
-    });
-  }, [idsKey]);
+  const [highlighted, setHighlighted] = useSeenHighlight(idsKey, allIds, present);
 
   // Drain the reveal queue: mark each locally-added task as highlighted (even one that's
   // already on screen still glows), then scroll it in and drop it from the queue once its
@@ -145,144 +100,19 @@ export function useNewTaskReveal(
   // biome-ignore lint/correctness/useExhaustiveDependencies: idsKey is a retry trigger, not read here — a queued reveal re-attempts the moment its card mounts (idsKey changes).
   useEffect(() => {
     if (queue.length === 0) return;
-    setHighlighted((prev) => {
-      let next: Set<number> | null = null;
-      for (const id of queue)
-        if (!prev.has(id)) {
-          next ??= new Set(prev);
-          next.add(id);
-        }
-      return next ?? prev;
-    });
+    setHighlighted((prev) => addHighlights(prev, queue));
     for (const id of queue) if (revealCard(id)) consumeReveal(id);
-  }, [queue, idsKey, revealCard, consumeReveal]);
+  }, [queue, idsKey, revealCard, consumeReveal, setHighlighted]);
 
-  // Drop highlights whose card is no longer in the backlog (e.g. just launched), so a glow
-  // that never got seen can't get stranded in the set forever.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: present is read via a ref; idsKey changing is exactly when the rendered set changed.
-  useEffect(() => {
-    setHighlighted((prev) => {
-      let next: Set<number> | null = null;
-      for (const id of prev)
-        if (!presentRef.current.has(id)) {
-          next ??= new Set(prev);
-          next.delete(id);
-        }
-      return next ?? prev;
-    });
-  }, [idsKey]);
-
-  // Clear each highlight once its card has actually been on screen. The observer watches the
-  // highlighted cards against the scroll viewport; an intersecting card starts a short dwell,
-  // and if it's still on screen when the dwell elapses the glow clears. Scrolling it away
-  // before then cancels the dwell so it restarts next time it enters.
-  const highlightedKey = [...highlighted].sort((a, b) => a - b).join(",");
-  const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
-  // biome-ignore lint/correctness/useExhaustiveDependencies: highlightedKey/idsKey capture the observable set + DOM; `highlighted` itself is read live and would only churn the observer.
-  useEffect(() => {
-    const scroller = scrollRef.current;
-    if (!scroller || highlighted.size === 0) return;
-    const liveTimers = timers.current;
-    const cancel = (id: number) => {
-      const t = liveTimers.get(id);
-      if (t != null) {
-        clearTimeout(t);
-        liveTimers.delete(id);
-      }
-    };
-    const io = new IntersectionObserver(
-      (entries) => {
-        const nextSpots = new Map<number, Spot>();
-        for (const e of entries) {
-          const id = Number((e.target as HTMLElement).dataset.pmCard);
-          if (!id) continue;
-          // Classify above/in/below for the off-screen indicator.
-          const root = e.rootBounds;
-          nextSpots.set(
-            id,
-            e.isIntersecting
-              ? "in"
-              : root && e.boundingClientRect.top >= root.bottom
-                ? "below"
-                : "above",
-          );
-          if (e.isIntersecting) {
-            if (!liveTimers.has(id))
-              liveTimers.set(
-                id,
-                setTimeout(() => {
-                  liveTimers.delete(id);
-                  setHighlighted((prev) => {
-                    if (!prev.has(id)) return prev;
-                    const next = new Set(prev);
-                    next.delete(id);
-                    return next;
-                  });
-                }, SEEN_DWELL_MS),
-              );
-          } else {
-            cancel(id);
-          }
-        }
-        setSpots((prev) => {
-          const merged = new Map(prev);
-          for (const [id, spot] of nextSpots) merged.set(id, spot);
-          return merged;
-        });
-      },
-      { root: scroller, threshold: 0 },
-    );
-    for (const id of highlighted) {
-      const node = scroller.querySelector<HTMLElement>(`[data-pm-card="${id}"]`);
-      if (node) io.observe(node);
-    }
-    return () => {
-      io.disconnect();
-      for (const t of liveTimers.values()) clearTimeout(t);
-      liveTimers.clear();
-    };
-  }, [highlightedKey, idsKey, scrollRef]);
-
-  // The indicator only counts cards still glowing (a spot for a since-cleared highlight is
-  // stale). Scanning the highlighted set keeps it honest without pruning the spots map.
-  let hasAbove = false;
-  let hasBelow = false;
-  for (const id of highlighted) {
-    const spot = spots.get(id);
-    if (spot === "above") hasAbove = true;
-    else if (spot === "below") hasBelow = true;
-  }
-
-  // Jump to the nearest off-screen new card in a direction. Measured against the live
-  // viewport at click time (via getBoundingClientRect) rather than the observer's
-  // last-known spots, so it lands on the closest one even after intervening scrolls.
-  const jump = useCallback(
-    (dir: "up" | "down") => {
-      const scroller = scrollRef.current;
-      if (!scroller) return;
-      const sRect = scroller.getBoundingClientRect();
-      let bestId: number | null = null;
-      let bestDist = Number.POSITIVE_INFINITY;
-      for (const id of highlighted) {
-        const node = scroller.querySelector<HTMLElement>(`[data-pm-card="${id}"]`);
-        if (!node) continue;
-        const r = node.getBoundingClientRect();
-        const dist =
-          dir === "up"
-            ? sRect.top - r.bottom // card fully above the top edge
-            : r.top - sRect.bottom; // card fully below the bottom edge
-        if (dist > 0 && dist < bestDist) {
-          bestDist = dist;
-          bestId = id;
-        }
-      }
-      if (bestId != null) revealCard(bestId);
-    },
-    [highlighted, revealCard, scrollRef],
+  // Clear each highlight once its card has dwelt on screen, tracking its off-screen spot.
+  const spots = useSeenObserver(scrollRef, TASK_ATTR, highlighted, setHighlighted, idsKey);
+  const { hasAbove, hasBelow, jumpAbove, jumpBelow } = useOffscreenJump(
+    scrollRef,
+    TASK_ATTR,
+    highlighted,
+    spots,
+    revealCard,
   );
-
-  const jumpAbove = useCallback(() => jump("up"), [jump]);
-  const jumpBelow = useCallback(() => jump("down"), [jump]);
 
   return { highlighted, hasAbove, hasBelow, jumpAbove, jumpBelow };
 }
