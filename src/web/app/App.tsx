@@ -11,6 +11,7 @@ import { useRevealEntity } from "../reveal.ts";
 import { useActiveTheme, useStore } from "../store.ts";
 import { ActivityTab, useTabActivity } from "../TabActivity.tsx";
 import { useRunEffect } from "../use-run-effect.ts";
+import { isDesktop, openNewWindow } from "../window-bridge.ts";
 import { mergeExternalWindows, type PmWindow, resolveActive } from "../windows.ts";
 import { DisconnectBanner } from "./DisconnectBanner.tsx";
 import { buildDefaultLayout, dockComponents, PANE_TITLES } from "./layout.ts";
@@ -146,6 +147,24 @@ export function useCrossTabWindows(): void {
   }, []);
 }
 
+/** Window keyboard shortcuts. `Cmd/Ctrl-N` opens a real new window. It's a desktop
+ *  feature: browsers reserve `Cmd-N` (opens a fresh browser window, which our handler
+ *  never sees) — the "New window" button in the top bar is the browser affordance. */
+export function useWindowKeybindings(): void {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod || e.altKey || e.shiftKey) return;
+      if (e.key.toLowerCase() === "n" && isDesktop()) {
+        e.preventDefault();
+        openNewWindow();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+}
+
 /** Switching windows swaps the dock wholesale to the incoming window's layout. The
  *  `shownWindowRef` distinguishes a real switch from the initial mount (onReady
  *  already showed the first window) and from unrelated re-renders. The layout
@@ -265,6 +284,9 @@ export function App() {
   // merge window-list writes from other tabs instead of clobbering.
   useWindowUrlPin(activeWindowId);
   useCrossTabWindows();
+
+  // Cmd/Ctrl-N → open a real new window.
+  useWindowKeybindings();
 
   // Tear the layout subscription down with the component.
   useDisposeOnUnmount(layoutSubRef);

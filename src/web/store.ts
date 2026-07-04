@@ -118,9 +118,11 @@ export type State = {
   // Write the *active* window's dock layout (api.toJSON()); null = "lay out the
   // default on next show".
   setLayout: (layout: SerializedDockview | null) => void;
-  // Window surgery. Create switches to the new window; close never leaves the list
-  // empty (the last window is replaced by a fresh unscoped one) and hands focus to
-  // a neighbour when the active one goes.
+  // Window surgery. Create just registers a new PM window in the shared registry and
+  // returns its id — it does NOT switch this webview to it: a real OS window is
+  // spawned for it (window-bridge.ts), and this webview keeps showing its own window.
+  // Close never leaves the list empty (the last window is replaced by a fresh unscoped
+  // one) and hands focus to a neighbour when the active one goes.
   createWindow: (repoIds?: number[]) => string;
   switchWindow: (id: string) => void;
   removeWindow: (id: string) => void;
@@ -317,7 +319,9 @@ export const useStore = create<State>()(
         }),
       createWindow: (repoIds = []) => {
         const w = newWindow(repoIds);
-        set((s) => ({ windows: [...s.windows, w], activeWindowId: w.id }));
+        // Register only — no activeWindowId change. The bridge spawns a real OS window
+        // for `w.id`; that window's webview adopts it via its `#w=` hash on boot.
+        set((s) => ({ windows: [...s.windows, w] }));
         return w.id;
       },
       switchWindow: (id) =>

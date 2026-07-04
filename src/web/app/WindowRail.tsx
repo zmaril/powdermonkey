@@ -3,6 +3,7 @@ import { IconPlus, IconX } from "@tabler/icons-react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { reposCollection } from "../collections.ts";
 import { useStore } from "../store.ts";
+import { openNewWindow } from "../window-bridge.ts";
 import { type PmWindow, windowLabel } from "../windows.ts";
 import { RailGlyph } from "./RailGlyph.tsx";
 
@@ -18,7 +19,6 @@ export function WindowRail() {
   const windows = useStore((s) => s.windows);
   const activeWindowId = useStore((s) => s.activeWindowId);
   const switchWindow = useStore((s) => s.switchWindow);
-  const createWindow = useStore((s) => s.createWindow);
   const removeWindow = useStore((s) => s.removeWindow);
   const repos = useLiveQuery(() => reposCollection);
   const byId = new Map((repos.data ?? []).map((r) => [r.id, r]));
@@ -81,7 +81,7 @@ export function WindowRail() {
           size="md"
           variant="subtle"
           color="gray"
-          onClick={() => createWindow()}
+          onClick={() => openNewWindow()}
           aria-label="New window"
         >
           <IconPlus size={15} />
