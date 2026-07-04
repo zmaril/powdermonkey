@@ -83,3 +83,38 @@ test("loadTaskPrompt returns null if any task in the list is unknown", async () 
   const [task] = await taskRepo.list();
   expect(await loadTaskPrompt([task.id, 99999])).toBeNull();
 });
+
+test("the brief includes the task's diary lines, attributed by author", async () => {
+  const [task] = (await taskRepo.list()).sort((a, b) => a.id - b.id);
+  // Muttered onto the task in order: an operator line then a supervisor line.
+  await fetch(`${base}/tasks/${task.id}/comments`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ body: "not sure the FK belongs here" }),
+  });
+  await fetch(`${base}/tasks/${task.id}/comments`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ body: "split this out per the proposal", author: "supervisor" }),
+  });
+
+  const built = await loadTaskPrompt(task.id);
+  if (!built) throw new Error("no prompt");
+  expect(built.prompt).toContain("Diary");
+  // Operator lines read bare; supervisor lines are attributed.
+  expect(built.prompt).toContain("- not sure the FK belongs here");
+  expect(built.prompt).toContain("- (supervisor) split this out per the proposal");
+  // Oldest first — the operator line comes before the supervisor line.
+  expect(built.prompt.indexOf("not sure the FK")).toBeLessThan(
+    built.prompt.indexOf("split this out"),
+  );
+});
+
+test("a task with no diary gets no Diary block", async () => {
+  // The second task ("polish the thing") has no comments.
+  const tasks = (await taskRepo.list()).sort((a, b) => a.id - b.id);
+  const built = await loadTaskPrompt(tasks[1].id);
+  if (!built) throw new Error("no prompt");
+  expect(built.prompt).toContain("Task: polish the thing");
+  expect(built.prompt).not.toContain("Diary");
+});
