@@ -7,16 +7,22 @@ import { SessionsPanel } from "./SessionsPanel.tsx";
 import { SettingsPanel } from "./SettingsPanel.tsx";
 import { ShellPanel } from "./ShellPanel.tsx";
 import { TasksPanel } from "./TasksPanel.tsx";
+import { WindowScratchPad } from "./WindowScratchPad.tsx";
 
 // The dockview component registry: each panel id maps to the component that renders
 // it. The list panes (Sessions/Tasks) and Browser take their panel api/params through
 // a thin wrapper; the prop-less panes render directly. The old Archive pane is gone —
 // done/archived is a status filter on Sessions and Tasks now, not its own tab.
+// Two notepads, two scopes (vocabulary.md § Scratchpad): `scratch` is the DURABLE
+// server-side note the supervisor reads as @notes — its component id predates the
+// split, so it keeps the id (saved layouts reference it) but shows as "Notes";
+// `winscratch` is the per-window throwaway, shown as "Scratch".
 export const dockComponents = {
   shell: ShellPanel,
   sessions: SessionsPanel,
   tasks: TasksPanel,
   scratch: ScratchPanel,
+  winscratch: WindowScratchPad,
   browser: BrowserPanel,
   settings: SettingsPanel,
   about: AboutPanel,
@@ -28,15 +34,17 @@ export const dockComponents = {
 export const PANE_TITLES: Record<string, string> = {
   sessions: "Sessions",
   tasks: "Tasks",
-  scratch: "Scratch",
+  scratch: "Notes",
+  winscratch: "Scratch",
   settings: "Settings",
   about: "About",
   help: "Help",
 };
 
 // The default arrangement, built from scratch when there's no saved layout (or a
-// saved one we couldn't restore): Sessions/Tasks tabs in the main group, the
-// scratchpad over the supervisor shell on the left.
+// saved one we couldn't restore): Sessions/Tasks tabs in the main group, the two
+// notepads (window Scratch in front, durable Notes behind) over the supervisor
+// shell on the left.
 export function buildDefaultLayout(api: DockviewApi) {
   const sessions = api.addPanel({ id: "sessions", component: "sessions", title: "Sessions" });
   api.addPanel({
@@ -48,9 +56,16 @@ export function buildDefaultLayout(api: DockviewApi) {
   api.addPanel({
     id: "scratch",
     component: "scratch",
-    title: "Scratch",
+    title: "Notes",
     position: { direction: "left", referencePanel: "sessions" },
   });
+  const winscratch = api.addPanel({
+    id: "winscratch",
+    component: "winscratch",
+    title: "Scratch",
+    position: { direction: "within", referencePanel: "scratch" },
+  });
+  winscratch.api.setActive();
   api.addPanel({
     id: "shell-0",
     component: "shell",

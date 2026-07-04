@@ -76,8 +76,14 @@ export function ScratchPad() {
       }}
     >
       <Group justify="space-between" px="sm" py="snug" style={{ flex: "0 0 auto" }}>
-        <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
-          SCRATCH
+        <Text
+          size="xs"
+          c="dimmed"
+          fw={700}
+          style={{ letterSpacing: 0.5 }}
+          title="Durable and synced; the supervisor reads this as @notes"
+        >
+          NOTES
         </Text>
         <Text size="xs" c="dimmed">
           {id == null ? "…" : saved ? "saved" : "saving…"}

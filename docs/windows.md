@@ -88,9 +88,8 @@ holding a repo id that has since been archived just drops that tab on render.
   are last-write-wins, and a window being viewed somewhere can't be closed out
   from under its viewer — the viewing tab resurrects it.
 
-## Open questions (being settled on the PR)
-
-1. **Naming the two scratchpads.** Per-window scratch (device-local, dies with the
-   window) vs. the global server-side note the supervisor reads as `@notes`.
-   Proposal: the per-window pane takes the name "Scratch"; the global pane is
-   renamed "Notes" to match `@notes`.
+- **Two notepads, two names.** The per-window pane is **"Scratch"** (device-local,
+  throwaway, disposed with the window); the durable server-side note the supervisor
+  reads as `@notes` shows as **"Notes"**. Its dockview component id stays `scratch`
+  (saved layouts reference it); the per-window pane is `winscratch`. Implemented as
+  proposed on the PR — trivially flippable if the naming reads wrong in practice.
