@@ -39,7 +39,7 @@
     "@mantine/core": "^7.15.0",
     "@mantine/hooks": "^7.15.0",
     "@pierre/diffs": "^1.2.12",
-    "@pierre/trees": "^1.0.0-beta.4",
+    "@pierre/trees": "^1.0.0-beta.5",
     "@sinclair/typebox": "0.34.49",
     "@tabler/icons-react": "^3.44.0",
     "@tanstack/db": "^0.6.14",
