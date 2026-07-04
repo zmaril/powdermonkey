@@ -17,6 +17,7 @@ import { buildDefaultLayout, dockComponents, PANE_TITLES } from "./layout.ts";
 import { ReviewOverlay } from "./ReviewOverlay.tsx";
 import { TopBar } from "./TopBar.tsx";
 import { useConnectionWatch } from "./useConnectionWatch.ts";
+import { WindowTabs } from "./WindowTabs.tsx";
 
 type ShellReq = {
   key: string;
@@ -233,6 +234,7 @@ export function App() {
     <div style={{ height: "100vh", width: "100vw", display: "flex", flexDirection: "column" }}>
       {disconnected && <DisconnectBanner />}
       <TopBar />
+      <WindowTabs />
       <div className={skinClass} style={{ flex: 1, minHeight: 0 }}>
         <DockviewReact
           components={dockComponents}

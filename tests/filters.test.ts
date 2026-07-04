@@ -11,7 +11,9 @@ import {
   parseScope,
   scopeValue,
   sessionBucket,
+  sessionInScope,
   taskBucket,
+  taskInScope,
 } from "../src/web/panes/filters.ts";
 import { buildIndexes } from "../src/web/plan-data.ts";
 
@@ -144,4 +146,28 @@ test("scope value round-trips goal/milestone/none", () => {
   expect(parseScope(ANY)).toEqual({ goalId: null, milestoneId: null });
   expect(parseScope("g:3")).toEqual({ goalId: 3, milestoneId: null });
   expect(parseScope("m:7")).toEqual({ goalId: null, milestoneId: 7 });
+});
+
+// ── window repo scope ──
+
+test("taskInScope: empty scope sees everything, a scoped window only its tabs", () => {
+  const inRepo = task(1, 1, { repoId: 4 });
+  const otherRepo = task(2, 1, { repoId: 9 });
+  const repoless = task(3, 1, { repoId: null });
+  expect(taskInScope(inRepo, [])).toBe(true);
+  expect(taskInScope(repoless, [])).toBe(true);
+  expect(taskInScope(inRepo, [4, 5])).toBe(true);
+  expect(taskInScope(otherRepo, [4, 5])).toBe(false);
+  // A repo-less task is on no tab — out of every scoped window.
+  expect(taskInScope(repoless, [4, 5])).toBe(false);
+});
+
+test("sessionInScope: a session reaches the scope through its tasks", () => {
+  const tasks = [task(1, 1, { repoId: 4 }), task(2, 1, { repoId: 9 })];
+  expect(sessionInScope(tasks, [])).toBe(true);
+  expect(sessionInScope(tasks, [9])).toBe(true); // any task on a tab pulls it in
+  expect(sessionInScope(tasks, [5])).toBe(false);
+  // A task-less session only shows in an unscoped window.
+  expect(sessionInScope([], [])).toBe(true);
+  expect(sessionInScope([], [4])).toBe(false);
 });

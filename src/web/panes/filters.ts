@@ -56,6 +56,26 @@ export function scopeValue(f: { goalId: number | null; milestoneId: number | nul
   return ANY;
 }
 
+// ── Window repo scope ────────────────────────────────────────────────────────────
+// The active window's ambient scope (windows.ts, docs/windows.md), layered UNDER the
+// FilterBar: the panes only ever see plan rows whose repo is on one of the window's
+// tabs, and the FilterBar refines within that. Empty = an unscoped window — it sees
+// everything. Union semantics: a window watching three repos shows all three at once.
+
+/** True when a task is on one of the window's repo tabs. Nothing is repo-less by
+ *  policy (the boot seed backfills), but a null repoId that slips through is out of
+ *  every scoped window — it's on no tab. */
+export function taskInScope(task: Task, repoIds: number[]): boolean {
+  return repoIds.length === 0 || (task.repoId != null && repoIds.includes(task.repoId));
+}
+
+/** A session reaches the scope through its tasks (it has no repo of its own — one
+ *  session runs one repo, via its task). `tasks` are the session's own, from
+ *  idx.tasksBySession. A task-less session only shows in an unscoped window. */
+export function sessionInScope(tasks: Task[], repoIds: number[]): boolean {
+  return repoIds.length === 0 || tasks.some((t) => taskInScope(t, repoIds));
+}
+
 // ── Tasks ──────────────────────────────────────────────────────────────────────
 
 /** A task's derived lifecycle bucket — the axis the Tasks pane filters on. One task
