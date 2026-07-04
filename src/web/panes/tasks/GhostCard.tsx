@@ -1,3 +1,5 @@
+// straitjacket-allow-file:prop-drilling  `label` is a presentational string set by the
+// caller (GhostCardBody vs GhostHeader), forwarded to the strip — not shared state to lift.
 import { Card, Text } from "@mantine/core";
 import type { ReactNode } from "react";
 import type { Ghost } from "../../ghosts.ts";
