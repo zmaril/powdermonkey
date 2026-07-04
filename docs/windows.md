@@ -77,15 +77,20 @@ holding a repo id that has since been archived just drops that tab on render.
   the Blender-style gh-sourced picker (yours / public search / fork-first) is its
   own follow-up.
 
+- **The rail, plus URL pinning (side-by-side for free).** Windows live in a
+  Slack-style switcher: a thin always-open rail on the left edge, one entry per
+  window (its repo-color dots), click to swap the whole dock — layout + scope — to
+  that window. Each browser tab also pins itself to its window via the URL
+  (`#w=<id>`), so duplicating the tab or opening the app in a second OS window
+  gives real side-by-side, Firefox-style. Same-origin tabs share the persisted
+  blob, so writes are merged rather than clobbered: each tab is authoritative for
+  the window it is *showing* (`mergeExternalWindows`), two tabs on the same window
+  are last-write-wins, and a window being viewed somewhere can't be closed out
+  from under its viewer — the viewing tab resurrects it.
+
 ## Open questions (being settled on the PR)
 
-1. **Rail-switching vs. real side-by-side windows.** Rail-switching = a Slack-style
-   workspace switcher: a thin always-open strip on the left edge, one entry per
-   window, click to swap the whole dock (layout + scope) to that window. The
-   alternative is a PM window per actual browser/OS window. Proposal: the rail,
-   plus pinning a browser tab to a window id via the URL (`#w=<id>`) so a second
-   OS window naturally shows a different PM window — side-by-side for free.
-2. **Naming the two scratchpads.** Per-window scratch (device-local, dies with the
+1. **Naming the two scratchpads.** Per-window scratch (device-local, dies with the
    window) vs. the global server-side note the supervisor reads as `@notes`.
    Proposal: the per-window pane takes the name "Scratch"; the global pane is
    renamed "Notes" to match `@notes`.

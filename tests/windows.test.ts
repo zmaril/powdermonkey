@@ -4,6 +4,7 @@ import {
   type PmWindow,
   closeWindow,
   fromLegacyLayout,
+  mergeExternalWindows,
   newWindow,
   resolveActive,
   updateWindow,
@@ -93,4 +94,32 @@ test("windowLabel: name, else the repo tabs, else a placeholder", () => {
   // An archived/unknown repo drops out of the label rather than rendering a hole.
   expect(windowLabel({ ...w, repoIds: [1, 99] }, label)).toBe("zmaril/powdermonkey");
   expect(windowLabel(newWindow(), label)).toBe("new window");
+});
+
+test("mergeExternalWindows: keeps our active window, adopts the rest", () => {
+  const a = newWindow([1]);
+  const b = newWindow([2]);
+  const ourA = { ...a, name: "fresh here", scratch: "typing…" };
+  const staleA = { ...a, name: "stale copy" };
+  const theirB = { ...b, name: "their edit" };
+  // The other tab edited B and holds a stale A; we're showing A.
+  const merged = mergeExternalWindows([ourA, b], [staleA, theirB], a.id);
+  expect(merged.find((w) => w.id === a.id)?.name).toBe("fresh here");
+  expect(merged.find((w) => w.id === b.id)?.name).toBe("their edit");
+});
+
+test("mergeExternalWindows: resurrects our active window if the other tab closed it", () => {
+  const a = newWindow();
+  const b = newWindow();
+  const merged = mergeExternalWindows([a, b], [b], a.id);
+  expect(merged.map((w) => w.id)).toEqual([b.id, a.id]);
+});
+
+test("mergeExternalWindows: adopts new windows the other tab created", () => {
+  const a = newWindow();
+  const c = newWindow();
+  const merged = mergeExternalWindows([a], [a, c], a.id);
+  expect(merged.map((w) => w.id)).toEqual([a.id, c.id]);
+  // A stale active id (shouldn't happen, but device state drifts): take theirs wholesale.
+  expect(mergeExternalWindows([a], [c], "gone")).toEqual([c]);
 });

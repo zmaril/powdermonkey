@@ -74,6 +74,26 @@ export function fromLegacyLayout(layout: SerializedDockview | null): PmWindow {
   return { ...newWindow(), layout };
 }
 
+/** Merge a pm-ui blob written by ANOTHER browser tab into this tab's window list.
+ *  Same-origin tabs share the localStorage blob, and zustand persists the whole
+ *  window list on every write — so without a merge, a background tab's write would
+ *  clobber the layout being edited here with its stale copy. The rule: each tab is
+ *  authoritative for the window it's SHOWING. Adopt the other tab's list (it may
+ *  have created/closed/re-arranged windows or edited the ones it shows), but keep
+ *  our copy of our active window — and resurrect it if the other tab closed it (a
+ *  window being looked at can't be closed out from under the viewer). Two tabs on
+ *  the SAME window stay last-write-wins, accepted. */
+export function mergeExternalWindows(
+  ours: PmWindow[],
+  theirs: PmWindow[],
+  activeId: string,
+): PmWindow[] {
+  const mine = ours.find((w) => w.id === activeId);
+  if (!mine) return theirs;
+  if (!theirs.some((w) => w.id === activeId)) return [...theirs, mine];
+  return theirs.map((w) => (w.id === activeId ? mine : w));
+}
+
 /** What a rail entry / tab strip calls the window: its name if given, else the
  *  labels of its repo tabs (resolved by the caller from the repos collection),
  *  else a placeholder for a fresh unscoped window. */

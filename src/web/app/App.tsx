@@ -11,12 +11,13 @@ import { useRevealEntity } from "../reveal.ts";
 import { useActiveTheme, useStore } from "../store.ts";
 import { ActivityTab, useTabActivity } from "../TabActivity.tsx";
 import { useRunEffect } from "../use-run-effect.ts";
-import { resolveActive } from "../windows.ts";
+import { type PmWindow, mergeExternalWindows, resolveActive } from "../windows.ts";
 import { DisconnectBanner } from "./DisconnectBanner.tsx";
 import { buildDefaultLayout, dockComponents, PANE_TITLES } from "./layout.ts";
 import { ReviewOverlay } from "./ReviewOverlay.tsx";
 import { TopBar } from "./TopBar.tsx";
 import { useConnectionWatch } from "./useConnectionWatch.ts";
+import { WindowRail } from "./WindowRail.tsx";
 import { WindowTabs } from "./WindowTabs.tsx";
 
 type ShellReq = {
@@ -97,6 +98,52 @@ export function usePaneLauncher(apiRef: RefObject<DockviewApi | null>, paneReq: 
       position: anchor ? { referencePanel: anchor, direction: "within" } : undefined,
     });
   }, [paneReq, apiRef]);
+}
+
+/** Pin this browser tab to a window via the URL (`#w=<id>`). On mount a valid hash
+ *  wins over the persisted active id — so duplicating the tab, bookmarking it, or
+ *  opening the app in a second OS window next to the first lands on the window that
+ *  tab was showing (side-by-side, Firefox-style). A stale hash (window since closed)
+ *  is a no-op: switchWindow ignores unknown ids and the effect below re-stamps the
+ *  hash with the window that actually shows. replaceState, not pushState — switching
+ *  windows shouldn't grow the browser history. */
+export function useWindowUrlPin(activeWindowId: string): void {
+  useEffect(() => {
+    const m = window.location.hash.match(/^#w=(.+)$/);
+    if (m) useStore.getState().switchWindow(decodeURIComponent(m[1]));
+  }, []);
+  useEffect(() => {
+    history.replaceState(null, "", `#w=${encodeURIComponent(activeWindowId)}`);
+  }, [activeWindowId]);
+}
+
+/** Adopt window-list changes written by OTHER tabs. Same-origin tabs share the
+ *  persisted pm-ui blob but zustand doesn't cross-sync live, so each write persists
+ *  the writer's whole (possibly stale) window list — without this, a background tab
+ *  would clobber the layout being edited here. On a storage event, merge: take the
+ *  other tab's list, keep our copy of our active window (mergeExternalWindows). The
+ *  merged write re-persists; convergence ends the ping-pong because a same-value
+ *  setItem fires no storage event. A corrupt/foreign blob is ignored. */
+export function useCrossTabWindows(): void {
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== "pm-ui" || !e.newValue) return;
+      try {
+        const incoming = (JSON.parse(e.newValue) as { state?: { windows?: unknown } })?.state
+          ?.windows;
+        if (!Array.isArray(incoming)) return;
+        const s = useStore.getState();
+        const merged = mergeExternalWindows(s.windows, incoming as PmWindow[], s.activeWindowId);
+        if (JSON.stringify(merged) !== JSON.stringify(s.windows)) {
+          useStore.setState({ windows: merged });
+        }
+      } catch {
+        // never let another tab's bad write break this one
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 }
 
 /** Switching windows swaps the dock wholesale to the incoming window's layout. The
@@ -214,6 +261,11 @@ export function App() {
   // Switching windows swaps the dock wholesale to the incoming window's layout.
   useWindowSwitch(apiRef, shownWindowRef, activeWindowId, showWindow);
 
+  // Session restore across browser tabs: pin this tab to its window via the URL, and
+  // merge window-list writes from other tabs instead of clobbering.
+  useWindowUrlPin(activeWindowId);
+  useCrossTabWindows();
+
   // Tear the layout subscription down with the component.
   useDisposeOnUnmount(layoutSubRef);
 
@@ -234,14 +286,19 @@ export function App() {
     <div style={{ height: "100vh", width: "100vw", display: "flex", flexDirection: "column" }}>
       {disconnected && <DisconnectBanner />}
       <TopBar />
-      <WindowTabs />
-      <div className={skinClass} style={{ flex: 1, minHeight: 0 }}>
-        <DockviewReact
-          components={dockComponents}
-          defaultTabComponent={ActivityTab}
-          onReady={onReady}
-          theme={editor.dockTheme}
-        />
+      <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+        <WindowRail />
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+          <WindowTabs />
+          <div className={skinClass} style={{ flex: 1, minHeight: 0 }}>
+            <DockviewReact
+              components={dockComponents}
+              defaultTabComponent={ActivityTab}
+              onReady={onReady}
+              theme={editor.dockTheme}
+            />
+          </div>
+        </div>
       </div>
       <ReviewOverlay />
     </div>
