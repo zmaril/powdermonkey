@@ -1,6 +1,6 @@
 import { closestCorners, DndContext, DragOverlay } from "@dnd-kit/core";
 import type { ComboboxData } from "@mantine/core";
-import { Box, Card, Group, SegmentedControl, Stack, Text } from "@mantine/core";
+import { Badge, Box, Card, Group, SegmentedControl, Stack, Text } from "@mantine/core";
 import type { DockviewPanelApi } from "dockview-react";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { renderedProposalIds } from "../../ghosts.ts";
@@ -163,7 +163,23 @@ function usePreserveScrollAcrossResort(
     [scrollRef],
   );
 
-  return { revealCard };
+  // The same deliberate scroll for a proposal: bring its first piece (ghost card or edit
+  // strip) into view and re-anchor, so the resort preserver holds the new position. Returns
+  // false if no piece is in the DOM yet, so the jump can retry.
+  const revealProposal = useCallback(
+    (proposalId: number): boolean => {
+      const scroller = scrollRef.current;
+      if (!scroller) return false;
+      const node = scroller.querySelector<HTMLElement>(`[data-pm-proposal="${proposalId}"]`);
+      if (!node) return false;
+      node.scrollIntoView({ block: "nearest" });
+      anchor.current = topAnchor(scroller);
+      return true;
+    },
+    [scrollRef],
+  );
+
+  return { revealCard, revealProposal };
 }
 
 export function TasksPane({ api }: { api?: DockviewPanelApi }) {
@@ -177,7 +193,10 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
   // Pause the scroll re-anchor while a drag is in flight — a reorder shifts cards on
   // purpose every frame, and re-anchoring to a moving card would fight the drag. Also
   // exposes revealCard for the new-task glow/scroll (below).
-  const { revealCard } = usePreserveScrollAcrossResort(scroll.ref, reorder.activeId != null);
+  const { revealCard, revealProposal } = usePreserveScrollAcrossResort(
+    scroll.ref,
+    reorder.activeId != null,
+  );
   // Opens to backlog (DEFAULT_TASK_FILTER) so the pane comes up showing what the old
   // Backlog did; widen the status filter to see active / done / cancelled / archived.
   const [filter, setFilter] = useState<TaskFilter>(DEFAULT_TASK_FILTER);
@@ -238,12 +257,19 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
     () => [...renderedProposals].sort((a, b) => a - b).join(","),
     [renderedProposals],
   );
-  const { highlighted: proposalHighlighted } = useNewProposalReveal(
+  const {
+    highlighted: proposalHighlighted,
+    hasAbove: proposalHasAbove,
+    hasBelow: proposalHasBelow,
+    jumpAbove: proposalJumpAbove,
+    jumpBelow: proposalJumpBelow,
+  } = useNewProposalReveal(
     scroll.ref,
     proposalIdsKey,
     pendingProposalIds,
     renderedProposals,
     proposalsReady,
+    revealProposal,
   );
 
   const toggle = (id: number) =>
@@ -288,6 +314,26 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
                     <Text size="xs" c="dimmed">
                       {loading ? "loading…" : `${visibleTasks.length} shown`}
                     </Text>
+                    {/* Glanceable count of pending proposals waiting on a decision — teal to
+                        match the ghost cards / edit strips they render as. Clicking jumps to
+                        the nearest off-screen new one (a no-op when none is off-screen). */}
+                    {pendingProposalIds.size > 0 && (
+                      <Badge
+                        size="sm"
+                        color="teal"
+                        variant="light"
+                        style={{ cursor: "pointer" }}
+                        title={`${pendingProposalIds.size} pending proposal${
+                          pendingProposalIds.size === 1 ? "" : "s"
+                        } to decide on`}
+                        onClick={() => {
+                          if (proposalHasAbove) proposalJumpAbove();
+                          else if (proposalHasBelow) proposalJumpBelow();
+                        }}
+                      >
+                        {pendingProposalIds.size} proposed
+                      </Badge>
+                    )}
                   </Group>
                   <SegmentedControl
                     size="xs"
@@ -404,6 +450,26 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
                 </Box>
                 {hasAbove && <ScrollIndicator dir="up" onClick={jumpAbove} />}
                 {hasBelow && <ScrollIndicator dir="down" onClick={jumpBelow} />}
+                {/* Proposal jump pills — teal, and stacked one pill-height inboard when a
+                    new-task pill already sits on the same edge, so the two never overlap. */}
+                {proposalHasAbove && (
+                  <ScrollIndicator
+                    dir="up"
+                    onClick={proposalJumpAbove}
+                    label="New proposal"
+                    color="teal"
+                    offset={hasAbove ? 1 : 0}
+                  />
+                )}
+                {proposalHasBelow && (
+                  <ScrollIndicator
+                    dir="down"
+                    onClick={proposalJumpBelow}
+                    label="New proposal"
+                    color="teal"
+                    offset={hasBelow ? 1 : 0}
+                  />
+                )}
               </Box>
 
               {selectedIds.length > 0 && (

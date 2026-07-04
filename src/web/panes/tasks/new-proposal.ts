@@ -1,5 +1,5 @@
 import { createContext, type RefObject, useContext } from "react";
-import { useSeenHighlight, useSeenObserver } from "./seen-reveal.ts";
+import { useOffscreenJump, useSeenHighlight, useSeenObserver } from "./seen-reveal.ts";
 
 // The "a new proposal just landed" affordances for the Tasks pane — the proposal-side twin
 // of new-task.ts, built on the same seen-reveal engine. A pending proposal projects onto the
@@ -29,6 +29,12 @@ const PROPOSAL_ATTR = "data-pm-proposal";
 
 export type NewProposalTracking = {
   highlighted: ReadonlySet<number>;
+  // True when at least one still-glowing proposal piece is off-screen in that direction.
+  hasAbove: boolean;
+  hasBelow: boolean;
+  // Scroll to the nearest off-screen new proposal in that direction.
+  jumpAbove: () => void;
+  jumpBelow: () => void;
 };
 
 /** Drive the Tasks pane's new-proposal glow. Two jobs, both on the shared seen-reveal engine:
@@ -45,15 +51,27 @@ export type NewProposalTracking = {
  *      ghost card / edit strip carrying the proposal's id until one of them has actually been
  *      on screen, cleared by an IntersectionObserver dwell.
  *
- *  Returns the live highlight set for the pane to provide over context. */
+ *   3. Point at the off-screen ones (useOffscreenJump): the up/down "New proposal" pill and
+ *      its jump-to-nearest, so a glow that landed above/below the fold is still findable.
+ *      `revealProposal` scrolls a proposal's first piece into view.
+ *
+ *  Returns the live highlight set (provided over context) + the off-screen-indicator state. */
 export function useNewProposalReveal(
   scrollRef: RefObject<HTMLDivElement | null>,
   idsKey: string,
   allIds: Set<number>,
   present: Set<number>,
   ready: boolean,
+  revealProposal: (proposalId: number) => boolean,
 ): NewProposalTracking {
   const [highlighted, setHighlighted] = useSeenHighlight(idsKey, allIds, present, ready);
-  useSeenObserver(scrollRef, PROPOSAL_ATTR, highlighted, setHighlighted, idsKey);
-  return { highlighted };
+  const spots = useSeenObserver(scrollRef, PROPOSAL_ATTR, highlighted, setHighlighted, idsKey);
+  const { hasAbove, hasBelow, jumpAbove, jumpBelow } = useOffscreenJump(
+    scrollRef,
+    PROPOSAL_ATTR,
+    highlighted,
+    spots,
+    revealProposal,
+  );
+  return { highlighted, hasAbove, hasBelow, jumpAbove, jumpBelow };
 }
