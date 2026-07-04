@@ -4,11 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { notesCollection } from "../collections.ts";
 import { useStore } from "../store.ts";
 
-// The scratchpad: one note, one big textarea. Holds its own draft state seeded
-// once from the server so the 4s background poll can't clobber what you're typing;
-// edits update the draft immediately and debounce a PATCH. The supervisor reads it
-// on "check @notes" (GET /notes).
-export function ScratchPad() {
+/** The scratchpad's note state: one note seeded once from the server so the 4s
+ *  background poll can't clobber in-flight keystrokes; edits update the draft
+ *  immediately and debounce a PATCH. Out-of-band edits (another tab, or the
+ *  supervisor editing @notes) are adopted only when nothing local is pending. */
+export function useScratchNote() {
   const { ensureScratch, saveNote } = useStore();
   const [id, setId] = useState<number | null>(null);
   const [body, setBody] = useState("");
@@ -17,9 +17,6 @@ export function ScratchPad() {
   // The server value we're synced with. We only adopt an incoming change when the
   // local draft still equals this — i.e. there are no unsaved keystrokes to lose.
   const serverBody = useRef("");
-  // The scratch note as the notes collection keeps it (synced live from PGlite).
-  // Watching it lets out-of-band edits (another tab, or the supervisor editing
-  // @notes) show up here.
   const notes = useLiveQuery(() => notesCollection);
   const storeBody = id == null ? undefined : notes.data?.find((n) => n.id === id)?.body;
 
@@ -58,6 +55,16 @@ export function ScratchPad() {
       });
     }, 500);
   };
+
+  return { id, body, saved, onChange };
+}
+
+// The scratchpad: one note, one big textarea. Holds its own draft state seeded
+// once from the server so the 4s background poll can't clobber what you're typing;
+// edits update the draft immediately and debounce a PATCH. The supervisor reads it
+// on "check @notes" (GET /notes). All the load/sync logic lives in useScratchNote.
+export function ScratchPad() {
+  const { id, body, saved, onChange } = useScratchNote();
 
   return (
     <div
