@@ -111,11 +111,14 @@ export type State = {
   // The PR currently under review, shown as a full-window takeover overlay (not a
   // dockview panel — review is a focused activity). null = no overlay.
   review: { number: number; title: string } | null;
-  // The Blender-style repo picker modal (picker/RepoPickerModal.tsx) — add repos to
-  // the flat registry. Opened from the TopBar or a `?pick=1` boot (a fresh window
-  // opened onto the picker). Transient — never persisted.
-  repoPicker: boolean;
-  openRepoPicker: () => void;
+  // The Blender-style repo picker modal (picker/RepoPickerModal.tsx) — gh-sourced,
+  // fork-first, feeding the flat registry. null = closed. `forWindowId` is the
+  // populate-a-window intent: a fresh window spawned onto the picker (?pick=1) and
+  // the tab strip's "From GitHub…" open it scoped to that window, and the repos
+  // picked become its tabs; the TopBar launcher opens it unscoped (registry add
+  // only). Transient — never persisted.
+  repoPicker: { forWindowId: string | null } | null;
+  openRepoPicker: (forWindowId?: string) => void;
   closeRepoPicker: () => void;
   // The registry (windows.ts, docs/windows.md): every currently-open PM window, each a
   // set of repo tabs + a dockview layout + a cursor into Scratch. Persisted per-device
@@ -320,9 +323,9 @@ export const useStore = create<State>()(
           return { tabActivity: rest };
         }),
       review: null,
-      repoPicker: false,
-      openRepoPicker: () => set({ repoPicker: true }),
-      closeRepoPicker: () => set({ repoPicker: false }),
+      repoPicker: null,
+      openRepoPicker: (forWindowId) => set({ repoPicker: { forWindowId: forWindowId ?? null } }),
+      closeRepoPicker: () => set({ repoPicker: null }),
       ...(() => {
         // The pre-rehydrate default: one fresh unscoped window. persist overwrites
         // this the moment a device has saved state.

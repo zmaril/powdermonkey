@@ -208,8 +208,9 @@ export function App() {
   // the pane it lives in, scroll it into view, and flash it.
   useRevealEntity(apiRef);
 
-  // A `?pick=1` boot (a window spawned onto the picker, or a deep-link): bring the
-  // picker up and clean the URL. See new-window.ts.
+  // A `?pick=1` boot — a fresh window spawned onto the picker (openNewWindow stamps
+  // the flag), or a deep-link: open the picker scoped to this webview's window and
+  // clean the URL. See new-window.ts.
   usePickerBootParam();
 
   // Show this webview's window on the dock: restore its saved layout, else lay out the

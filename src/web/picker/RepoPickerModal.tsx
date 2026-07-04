@@ -14,19 +14,25 @@ import {
 import { useLiveQuery } from "@tanstack/react-db";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PickerRepo } from "../../server/repo-picker.ts";
+import type { Repo } from "../../server/schema.ts";
 import { api } from "../client.ts";
 import { reposCollection } from "../collections.ts";
 import { useStore } from "../store.ts";
 
-// The Blender-style repo picker (docs/vocabulary.md § Repo): a centered,
-// keyboard-first overlay for adding repos to the flat registry. Two sources —
-// your own gh repos (fetched once per open, filtered as you type) and a public
-// GitHub search (debounced) — rendered as one multi-select list. Confirm POSTs
-// each picked slug to /repos/register, which is fork-first: a repo you can't
-// push to is forked and YOUR FORK is registered (upstream recorded), so the
-// result may live under a different slug than the one you picked — that's shown
-// in place before the modal closes. Registered rows stream back over /sync into
-// the repos collection, so everything else updates on its own.
+// The Blender-style repo picker (docs/vocabulary.md § Repo, docs/windows.md): a
+// centered, keyboard-first overlay for adding repos to the flat registry. Two
+// sources — your own gh repos (fetched once per open, filtered as you type) and
+// a public GitHub search (debounced) — rendered as one multi-select list.
+// Confirm POSTs each picked slug to /repos/register, which is fork-first: a repo
+// you can't push to is forked and YOUR FORK is registered (upstream recorded),
+// so the result may live under a different slug than the one you picked —
+// that's shown in place before the modal closes. Registered rows stream back
+// over /sync into the repos collection, so everything else updates on its own.
+//
+// Scoped mode (`repoPicker.forWindowId`, set by Ctrl+N / the rail's `+`): the
+// picker is populating a fresh Window, so the picked repos also become that
+// window's tabs — including already-registered rows, which stay pickable and
+// just contribute their existing id.
 
 const MINE = "mine";
 const SEARCH = "search";
@@ -34,24 +40,24 @@ const SEARCH = "search";
 type AddOutcome = { forked: string[] } | null;
 
 export function RepoPickerModal() {
-  const opened = useStore((s) => s.repoPicker);
+  const picker = useStore((s) => s.repoPicker);
   const close = useStore((s) => s.closeRepoPicker);
   return (
     <Modal
-      opened={opened}
+      opened={picker != null}
       onClose={close}
-      title="Add repos"
+      title={picker?.forWindowId ? "New window — pick its repos" : "Add repos"}
       size="lg"
       centered
       // Fresh state per open (source, query, selection) — cheapest as a remount.
       keepMounted={false}
     >
-      {opened && <PickerBody close={close} />}
+      {picker != null && <PickerBody close={close} forWindowId={picker.forWindowId} />}
     </Modal>
   );
 }
 
-function PickerBody({ close }: { close: () => void }) {
+function PickerBody({ close, forWindowId }: { close: () => void; forWindowId: string | null }) {
   const [source, setSource] = useState(MINE);
   const [query, setQuery] = useState("");
   const [mine, setMine] = useState<PickerRepo[] | null>(null);
@@ -64,18 +70,21 @@ function PickerBody({ close }: { close: () => void }) {
   const [addError, setAddError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<AddOutcome>(null);
 
-  // Already-registered slugs (and the upstreams of forks we made) — shown as
-  // "added" and excluded from selection. Live off the synced repos collection.
+  // The live registry (synced repos collection), keyed by slug AND by the upstream
+  // of forks we made. Registered rows read as "added"; when the picker is scoped to
+  // a window they stay pickable (picking one just adds the existing repo as a tab),
+  // otherwise there's nothing left to do with them and they're inert.
   const repoRows = useLiveQuery(() => reposCollection);
-  const registered = useMemo(() => {
-    const s = new Set<string>();
+  const bySlug = useMemo(() => {
+    const m = new Map<string, Repo>();
     for (const r of repoRows.data ?? []) {
       if (r.archivedAt != null) continue;
-      s.add(r.slug);
-      if (r.upstream) s.add(r.upstream);
+      m.set(r.slug, r);
+      if (r.upstream) m.set(r.upstream, r);
     }
-    return s;
+    return m;
   }, [repoRows.data]);
+  const registered = useMemo(() => new Set(bySlug.keys()), [bySlug]);
 
   // Your repos: one fetch per open.
   useEffect(() => {
@@ -135,7 +144,9 @@ function PickerBody({ close }: { close: () => void }) {
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const toggle = (slug: string) => {
-    if (registered.has(slug)) return;
+    // Unscoped, an already-registered row is inert; scoped to a window it's still
+    // a valid pick (it just becomes a tab without re-registering).
+    if (forWindowId == null && registered.has(slug)) return;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(slug)) next.delete(slug);
@@ -151,19 +162,34 @@ function PickerBody({ close }: { close: () => void }) {
   };
 
   const add = async () => {
-    const slugs = [...selected].filter((s) => !registered.has(s));
-    if (slugs.length === 0) return;
+    if (selected.size === 0) return;
     setBusy(true);
     setAddError(null);
     const forked: string[] = [];
-    for (const slug of slugs) {
+    const ids: number[] = [];
+    for (const slug of selected) {
+      // Already in the registry (directly or as the upstream of our fork): no
+      // gh work, just carry its id — a scoped pick adds it as a tab below.
+      const existing = bySlug.get(slug);
+      if (existing) {
+        ids.push(existing.id);
+        continue;
+      }
       const { data, error } = await api.repos.register.post({ slug });
       if (error || !data || !data.ok) {
         setBusy(false);
         setAddError(`${slug}: ${pickerErr(error?.value, "registration failed")}`);
         return;
       }
+      ids.push(data.repo.id);
       if (data.forked) forked.push(`${slug} → ${data.repo.slug}`);
+    }
+    // The populate-a-window intent (Ctrl+N / the rail's +): the picked repos —
+    // fresh registrations and existing rows alike — become the window's tabs.
+    if (forWindowId != null) {
+      const s = useStore.getState();
+      const win = s.windows.find((w) => w.id === forWindowId);
+      if (win) s.setWindowRepos(forWindowId, [...new Set([...win.repoIds, ...ids])]);
     }
     setBusy(false);
     setSelected(new Set());
@@ -244,6 +270,7 @@ function PickerBody({ close }: { close: () => void }) {
               key={r.slug}
               repo={r}
               added={registered.has(r.slug)}
+              pickable={forWindowId != null || !registered.has(r.slug)}
               selected={selected.has(r.slug)}
               cursor={i === active}
               refFn={(el) => {
@@ -275,7 +302,9 @@ function PickerBody({ close }: { close: () => void }) {
 
       <Group justify="space-between" align="center">
         <Text size="xs" c="dimmed">
-          Repos you can’t push to are forked — your fork is registered, upstream tracked.
+          {forWindowId != null
+            ? "Picked repos become this window’s tabs; ones you can’t push to are forked first."
+            : "Repos you can’t push to are forked — your fork is registered, upstream tracked."}
         </Text>
         <Button onClick={add} loading={busy} disabled={selected.size === 0}>
           Add {selected.size > 0 ? selected.size : ""} {selected.size === 1 ? "repo" : "repos"}
@@ -288,6 +317,7 @@ function PickerBody({ close }: { close: () => void }) {
 function RepoRow({
   repo,
   added,
+  pickable,
   selected,
   cursor,
   onClick,
@@ -295,6 +325,8 @@ function RepoRow({
 }: {
   repo: PickerRepo;
   added: boolean;
+  /** Added rows stay pickable when the picker is populating a window. */
+  pickable: boolean;
   selected: boolean;
   cursor: boolean;
   onClick: () => void;
@@ -304,7 +336,7 @@ function RepoRow({
     <UnstyledButton
       ref={refFn}
       onClick={onClick}
-      disabled={added}
+      disabled={!pickable}
       px="sm"
       py="tight"
       style={{
@@ -312,7 +344,7 @@ function RepoRow({
         background: selected ? "var(--pm-selection)" : undefined,
         outline: cursor ? "1px solid var(--pm-accent)" : undefined,
         outlineOffset: -1,
-        opacity: added ? 0.55 : 1,
+        opacity: added && !selected ? 0.55 : 1,
       }}
     >
       <Group gap="sm" wrap="nowrap" justify="space-between">

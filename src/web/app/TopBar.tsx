@@ -72,9 +72,9 @@ export function TopBar() {
           <Divider orientation="vertical" my="tight" />
           <PaneButton label="Sessions" onClick={() => openPane("sessions")} />
           <PaneButton label="Tasks" onClick={() => openPane("tasks")} />
-          {/* The Blender-style picker (add repos, fork-first). Also on Ctrl/Cmd+N —
-              but browsers reserve Ctrl+N, so the button is the reliable path. */}
-          <PaneButton label="Repos" onClick={openRepoPicker} />
+          {/* The Blender-style picker, unscoped: add repos to the registry
+              (fork-first) without touching any window's tabs. */}
+          <PaneButton label="Repos" onClick={() => openRepoPicker()} />
           <Divider orientation="vertical" my="tight" />
           <PaneButton label="Shell" onClick={() => openTerminal("")} />
           <PaneButton label="Browser" onClick={() => openBrowser()} />
