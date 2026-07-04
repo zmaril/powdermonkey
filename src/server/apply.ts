@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, max } from "drizzle-orm";
 import {
   type Decision,
   Decision as DecisionEnum,
@@ -83,7 +83,22 @@ async function applyChange(
       if (parentId == null) throw new Error(`create ${change.kind}: unresolved parent`);
       values[parentCol] = parentId;
     }
-    if (change.position != null) values.position = change.position;
+    // Position: honor an explicit one, else APPEND to the end of the siblings (max + 1)
+    // so an accepted ghost — which renders at the bottom of its list — stays put instead
+    // of taking the position-0 column default and jumping to the top on accept.
+    if (change.position != null) {
+      values.position = change.position;
+    } else {
+      // biome-ignore lint/suspicious/noExplicitAny: dynamic column lookup by parent-key name.
+      const parentColumn: any = parentCol ? (table as any)[parentCol] : null;
+      const parentVal = parentCol ? (values[parentCol] as number | undefined) : undefined;
+      const where = parentColumn && parentVal != null ? eq(parentColumn, parentVal) : undefined;
+      const [agg] = await tx
+        .select({ max: max(table.position) })
+        .from(table)
+        .where(where);
+      values.position = (agg?.max ?? -1) + 1;
+    }
     const [row] = await tx.insert(table).values(values).returning();
     if (change.ref) refs.set(change.ref, row.id);
     return row.id;
