@@ -21,6 +21,27 @@ import { type ActivitySnapshot, paneActivity, snapshotActivity } from "./tab-act
 // The dot's style and pulse live in motion.css (.pm-tab-dot), so the motion setting
 // controls it like every other animation.
 
+/** ActivityTab's effect: clear this tab's flag the moment it's viewed (becomes
+ *  visible), so the cue is self-extinguishing. */
+function useClearTabWhenVisible(
+  api: IDockviewPanelHeaderProps["api"],
+  id: string,
+  clearTab: (id: string) => void,
+): void {
+  useEffect(() => {
+    const clearIfVisible = () => {
+      if (api.isVisible) clearTab(id);
+    };
+    clearIfVisible(); // already on screen when mounted → nothing to flag
+    const d1 = api.onDidVisibilityChange(clearIfVisible);
+    const d2 = api.onDidActiveChange(clearIfVisible);
+    return () => {
+      d1.dispose();
+      d2.dispose();
+    };
+  }, [id, api, clearTab]);
+}
+
 /** Custom dockview tab = the default tab (title + close) prefixed with an activity
  *  dot when this pane is flagged — and, for a session's shell pane, the repo's
  *  identity badge (icon in its color ring), so the tab strip reads like a rail of
@@ -35,18 +56,7 @@ export function ActivityTab(props: IDockviewPanelHeaderProps) {
   const session = (props.params as { session?: number | null } | undefined)?.session;
   const repo = useSessionRepo(session);
 
-  useEffect(() => {
-    const clearIfVisible = () => {
-      if (props.api.isVisible) clearTab(id);
-    };
-    clearIfVisible(); // already on screen when mounted → nothing to flag
-    const d1 = props.api.onDidVisibilityChange(clearIfVisible);
-    const d2 = props.api.onDidActiveChange(clearIfVisible);
-    return () => {
-      d1.dispose();
-      d2.dispose();
-    };
-  }, [id, props.api, clearTab]);
+  useClearTabWhenVisible(props.api, id, clearTab);
 
   return (
     <div style={{ display: "flex", alignItems: "center", height: "100%" }}>

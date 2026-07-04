@@ -5,16 +5,97 @@ import {
   type DockviewReadyEvent,
   type SerializedDockview,
 } from "dockview-react";
-import { useEffect, useRef } from "react";
+import { type RefObject, useEffect, useRef } from "react";
 import { ActivityTab, useTabActivity } from "../TabActivity.tsx";
 import { useNeedsInputNotifications } from "../notifications.ts";
 import { useRevealEntity } from "../reveal.ts";
 import { useActiveTheme, useStore } from "../store.ts";
+import { useRunEffect } from "../use-run-effect.ts";
 import { DisconnectBanner } from "./DisconnectBanner.tsx";
 import { ReviewOverlay } from "./ReviewOverlay.tsx";
 import { TopBar } from "./TopBar.tsx";
 import { PANE_TITLES, buildDefaultLayout, dockComponents } from "./layout.ts";
 import { useConnectionWatch } from "./useConnectionWatch.ts";
+
+type ShellReq = {
+  key: string;
+  cwd: string;
+  session: number | null;
+  title: string;
+  n: number;
+} | null;
+type BrowserReq = { url: string; n: number } | null;
+type PaneReq = { id: string; n: number } | null;
+
+/** Dispose `ref.current` (a subscription) when the component unmounts. */
+export function useDisposeOnUnmount(ref: RefObject<{ dispose: () => void } | null>): void {
+  useEffect(() => () => ref.current?.dispose(), [ref]);
+}
+
+/** Each open*Terminal() adds (or focuses) a shell panel keyed by shellReq.key. */
+export function useShellPanels(apiRef: RefObject<DockviewApi | null>, shellReq: ShellReq): void {
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!shellReq || !api) return;
+    const id = shellReq.key === "repo" ? "shell-0" : `shell-${shellReq.key}`;
+    const existing = api.getPanel(id);
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    api.addPanel({
+      id,
+      component: "shell",
+      params: { cwd: shellReq.cwd, session: shellReq.session },
+      // Session panels show the bare tag (LOCAL · PM/TASK-35); plain shells keep
+      // a "shell · " prefix to set them apart.
+      title: shellReq.session != null ? shellReq.title : `shell · ${shellReq.title}`,
+      position: { referencePanel: "shell-0", direction: "within" },
+    });
+  }, [shellReq, apiRef]);
+}
+
+/** Browser button → add a new browser pane (an iframe on a dev server / preview).
+ *  Each request opens a distinct panel (keyed by `n`) so several previews can run at
+ *  once; the loaded URL rides in the panel params so it persists with the layout. */
+export function useBrowserPanels(
+  apiRef: RefObject<DockviewApi | null>,
+  browserReq: BrowserReq,
+): void {
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!browserReq) return;
+    api?.addPanel({
+      id: `browser-${browserReq.n}`,
+      component: "browser",
+      params: { url: browserReq.url },
+      title: "Browser",
+      position: { referencePanel: "sessions", direction: "within" },
+    });
+  }, [browserReq, apiRef]);
+}
+
+/** A pane-launcher button → focus the singleton pane if it's already open, else add
+ *  it. New panes land "within" the main group (next to Sessions/Tasks) when that
+ *  anchor exists, otherwise wherever dockview puts a group-less panel. */
+export function usePaneLauncher(apiRef: RefObject<DockviewApi | null>, paneReq: PaneReq): void {
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!paneReq || !api) return;
+    const existing = api.getPanel(paneReq.id);
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    const anchor = api.getPanel("sessions") ? "sessions" : api.panels[0]?.id;
+    api.addPanel({
+      id: paneReq.id,
+      component: paneReq.id,
+      title: PANE_TITLES[paneReq.id] ?? paneReq.id,
+      position: anchor ? { referencePanel: anchor, direction: "within" } : undefined,
+    });
+  }, [paneReq, apiRef]);
+}
 
 // The single pane of glass. The plan is split into two list panels — a SESSIONS
 // monitor (every run of work, live + history) and a TASKS launchpad/record (every
@@ -50,9 +131,7 @@ export function App() {
   // The plan/session data flows through the TanStack DB collections (each syncs
   // itself over /sync). The only server state not in a collection is the auto-rebase
   // toggle, so fetch that once on mount.
-  useEffect(() => {
-    loadSettings();
-  }, [loadSettings]);
+  useRunEffect(loadSettings);
 
   // Ping the operator (OS notification) whenever a session falls idle at a prompt.
   // Watches the sessions collection, firing only on the needs_input edge.
@@ -95,65 +174,12 @@ export function App() {
   };
 
   // Tear the layout subscription down with the component.
-  useEffect(() => () => layoutSubRef.current?.dispose(), []);
+  useDisposeOnUnmount(layoutSubRef);
 
-  // Each open*Terminal() adds (or focuses) a shell panel keyed by shellReq.key.
-  useEffect(() => {
-    const api = apiRef.current;
-    if (!shellReq || !api) return;
-    const id = shellReq.key === "repo" ? "shell-0" : `shell-${shellReq.key}`;
-    const existing = api.getPanel(id);
-    if (existing) {
-      existing.api.setActive();
-      return;
-    }
-    api.addPanel({
-      id,
-      component: "shell",
-      params: { cwd: shellReq.cwd, session: shellReq.session },
-      // Session panels show the bare tag (LOCAL · PM/TASK-35); plain shells keep
-      // a "shell · " prefix to set them apart.
-      title: shellReq.session != null ? shellReq.title : `shell · ${shellReq.title}`,
-      position: { referencePanel: "shell-0", direction: "within" },
-    });
-  }, [shellReq]);
-
-  // Browser button → add a new browser pane (an iframe on a dev server / preview).
-  // Each request opens a distinct panel (keyed by `n`) so you can watch several
-  // previews at once; the loaded URL rides in the panel params so it persists with
-  // the layout. Added in the main group, alongside Sessions/Tasks.
-  useEffect(() => {
-    const api = apiRef.current;
-    if (!browserReq) return;
-    api?.addPanel({
-      id: `browser-${browserReq.n}`,
-      component: "browser",
-      params: { url: browserReq.url },
-      title: "Browser",
-      position: { referencePanel: "sessions", direction: "within" },
-    });
-  }, [browserReq]);
-
-  // A pane-launcher button → focus the singleton pane if it's already open, else add
-  // it. New panes land "within" the main group (next to Sessions/Tasks) when
-  // that anchor exists, otherwise wherever dockview puts a group-less panel — so a
-  // launcher always brings the pane up even if the default layout was torn apart.
-  useEffect(() => {
-    const api = apiRef.current;
-    if (!paneReq || !api) return;
-    const existing = api.getPanel(paneReq.id);
-    if (existing) {
-      existing.api.setActive();
-      return;
-    }
-    const anchor = api.getPanel("sessions") ? "sessions" : api.panels[0]?.id;
-    api.addPanel({
-      id: paneReq.id,
-      component: paneReq.id,
-      title: PANE_TITLES[paneReq.id] ?? paneReq.id,
-      position: anchor ? { referencePanel: anchor, direction: "within" } : undefined,
-    });
-  }, [paneReq]);
+  // Store-request → dockview panel effects (add/focus a shell, browser, or pane).
+  useShellPanels(apiRef, shellReq);
+  useBrowserPanels(apiRef, browserReq);
+  usePaneLauncher(apiRef, paneReq);
 
   const disconnected = useConnectionWatch();
   // The dock chrome follows the selected editor theme (store state). Switching it in

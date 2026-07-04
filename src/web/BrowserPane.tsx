@@ -3,6 +3,23 @@ import { IconExternalLink, IconRefresh } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import { normalizeUrl } from "./browser-url.ts";
 
+/** Track a URL `prop` as editable `draft` + loaded `current` state. They diverge
+ *  while the operator is typing and re-converge on submit; an externally-changed
+ *  prop (e.g. a layout restore) is adopted without clobbering an in-progress edit. */
+export function useUrlSync(url: string) {
+  const [draft, setDraft] = useState(url);
+  const [current, setCurrent] = useState(url);
+  const lastProp = useRef(url);
+  useEffect(() => {
+    if (url !== lastProp.current) {
+      lastProp.current = url;
+      setDraft(url);
+      setCurrent(url);
+    }
+  }, [url]);
+  return { draft, setDraft, current, setCurrent };
+}
+
 // A browser pane: loads a URL in an iframe so you can watch a dev server / local
 // preview without leaving the app. Point it at a worker's `bun run dev` (or any
 // localhost preview) and see what it built on the same pane of glass as the shell
@@ -27,25 +44,14 @@ export function BrowserPane({
   onNavigate: (url: string) => void;
 }) {
   // `draft` is the editable text in the bar; `current` is what the iframe loads.
-  // They diverge while the operator is typing and re-converge on submit.
-  const [draft, setDraft] = useState(url);
-  const [current, setCurrent] = useState(url);
+  // They diverge while typing, re-converge on submit, and adopt an externally-changed
+  // `url` prop (a layout restore) without clobbering an in-progress edit (see the hook).
+  const { draft, setDraft, current, setCurrent } = useUrlSync(url);
   // Bumped to force the iframe to reload — re-setting src to the same value won't
   // re-fetch, and a cross-origin frame can't be reloaded via contentWindow, so we
   // remount the element by changing its React key.
   const [nonce, setNonce] = useState(0);
   const [showHint, setShowHint] = useState(true);
-
-  // Adopt an externally-changed url prop (e.g. a layout restore seeding the pane)
-  // without clobbering an in-progress edit on every render.
-  const lastProp = useRef(url);
-  useEffect(() => {
-    if (url !== lastProp.current) {
-      lastProp.current = url;
-      setDraft(url);
-      setCurrent(url);
-    }
-  }, [url]);
 
   const go = (raw: string) => {
     const next = normalizeUrl(raw);
