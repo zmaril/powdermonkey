@@ -24,7 +24,8 @@ export function GhostStrip({ ghost, label }: { ghost: Ghost; label: string }) {
       <Text size="xs" style={{ color: PROPOSED_TEXT_COLOR }}>
         {label}
       </Text>
-      <DecideControls changes={[changeRef(ghost, ProposalOp.Create)]} />
+      {/* glow off: the ghost card itself carries the proposal handle + glow (GhostCard). */}
+      <DecideControls changes={[changeRef(ghost, ProposalOp.Create)]} glow={false} />
     </Group>
   );
 }

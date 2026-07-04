@@ -2,6 +2,7 @@ import { Button, Group, Text, Tooltip } from "@mantine/core";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { Decision, ProposalOp } from "../../../shared/types.ts";
 import { PROPOSED_TEXT_COLOR } from "./constants.ts";
+import { useProposalHighlights } from "./new-proposal.ts";
 import type { ChangeRef } from "./preview.ts";
 import { useDecide } from "./useDecide.ts";
 
@@ -38,18 +39,27 @@ const DECISIONS = [
  *  above already shows WHAT the change does (the highlighted after-state), so this is just
  *  the decision. One pair per pending change (so each is accepted/rejected on its own),
  *  labeled by op only when there's more than one to keep apart. Owns one useDecide() for
- *  the group; surfaces a decide() conflict inline when `showConflict`. */
+ *  the group; surfaces a decide() conflict inline when `showConflict`.
+ *
+ *  Each pair carries its proposal's `data-pm-proposal` handle and glows while that proposal
+ *  is freshly-arrived and unseen — the edit-side twin of the ghost card's glow (the strip
+ *  used to carry this; the strip's gone, so the control does). `glow={false}` opts out for
+ *  a ghost card, which already glows on the card itself (no double ring). */
 export function DecideControls({
   changes,
   showConflict = false,
   compact = false,
+  glow = true,
 }: {
   changes: ChangeRef[];
   showConflict?: boolean;
   /** Tighter buttons for a dense spot (a phase row); default is the card-footer size. */
   compact?: boolean;
+  /** Carry the new-proposal glow + handle (default). Off inside a ghost card. */
+  glow?: boolean;
 }) {
   const { busy, conflict, decide } = useDecide();
+  const highlights = useProposalHighlights();
   if (changes.length === 0) return null;
   const labeled = changes.length > 1;
   const size = compact ? "compact-xs" : "compact-sm";
@@ -62,7 +72,14 @@ export function DecideControls({
           withArrow
           openDelay={300}
         >
-          <Group gap="tight" wrap="nowrap">
+          <Group
+            gap="tight"
+            wrap="nowrap"
+            data-pm-proposal={glow ? c.proposalId : undefined}
+            className={glow && highlights.has(c.proposalId) ? "pm-new-card" : undefined}
+            // A little inset so the glow ring reads as intentional around the pair.
+            style={glow ? { borderRadius: 6, padding: 2 } : undefined}
+          >
             {labeled && (
               <Text size="xs" style={{ color: PROPOSED_TEXT_COLOR }}>
                 {OP_VERB[c.op]}
