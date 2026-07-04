@@ -9,10 +9,10 @@ import { DEFAULT_MOTION } from "./motion.ts";
 import type { PmKind } from "./pm-ids.ts";
 import { DEFAULT_THEME, type EditorTheme, getTheme } from "./themes.ts";
 import {
-  type PmWindow,
   closeWindow,
   fromLegacyLayout,
   newWindow,
+  type PmWindow,
   resolveActive,
   updateWindow,
 } from "./windows.ts";
