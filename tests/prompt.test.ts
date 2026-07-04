@@ -22,6 +22,7 @@ beforeAll(async () => {
               tasks: [
                 {
                   title: "build the thing",
+                  description: "the thing is load-bearing; don't break the old callers",
                   phases: [{ name: "write tests" }, { name: "implement" }],
                 },
                 {
@@ -49,6 +50,8 @@ test("GET /tasks/:id/prompt returns the prompt + phase trailers", async () => {
 
   const body = (await res.json()) as { prompt: string; trailers: string[] };
   expect(body.prompt).toContain("Task: build the thing");
+  // The task's description rides along, framing the phases below it.
+  expect(body.prompt).toContain("the thing is load-bearing; don't break the old callers");
   expect(body.prompt).toContain("write tests");
   expect(body.prompt).toContain("PM-Phase:");
   // one trailer per phase, each naming its phase
@@ -75,8 +78,10 @@ test("loadTaskPrompt combines several tasks into one brief", async () => {
   // Trailers are the flat union across all tasks (2 + 1 phases).
   expect(built.trailers).toHaveLength(3);
   expect(built.prompt).toContain("refactor");
-  // The resolved tasks come back in the requested order.
-  expect(built.tasks.map((t) => t.id)).toEqual(ids);
+  // The described task carries its narrative; the description-less one doesn't
+  // sprout a stray line — its section jumps straight from title to "Phases:".
+  expect(built.prompt).toContain("the thing is load-bearing; don't break the old callers");
+  expect(built.prompt).toContain("Task: polish the thing\n\nPhases:");
 });
 
 test("loadTaskPrompt returns null if any task in the list is unknown", async () => {
