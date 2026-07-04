@@ -53,6 +53,11 @@ export type EntityEdit = {
   op: ProposalOp; // update | archive | reorder
   /** For an update: the proposed new title/name, when the change sets one. */
   newTitle?: string;
+  /** For an update: the proposed new task kind (task | bug | spike), when set. */
+  newKind?: string;
+  /** For an update: the proposed new description, when the change touches it (null =
+   *  cleared). `undefined` means the change doesn't touch the description at all. */
+  newDescription?: string | null;
   /** For a reorder: the proposed new position (0 = top) and/or parent. */
   position?: number;
   parentId?: number;
@@ -83,7 +88,20 @@ export function editLabel(e: EntityEdit): string {
     if (e.position != null) return `Proposed: move to position ${e.position + 1}`;
     return "Proposed: reorder";
   }
-  return e.newTitle ? `Proposed: rename → "${e.newTitle}"` : "Proposed: edit";
+  // Update: list EVERY field the change touches, so accepting is never a surprise — a
+  // rename that also retags or rewrites the description must say so, not read as "rename".
+  const parts: string[] = [];
+  if (e.newTitle != null) parts.push(`rename → "${e.newTitle}"`);
+  if (e.newKind != null) parts.push(`kind → ${e.newKind}`);
+  if (e.newDescription !== undefined) {
+    const d = e.newDescription;
+    parts.push(
+      d
+        ? `description → "${d.length > 44 ? `${d.slice(0, 44).trimEnd()}…` : d}"`
+        : "clear description",
+    );
+  }
+  return parts.length ? `Proposed: ${parts.join(" · ")}` : "Proposed: edit";
 }
 
 /** Every pending create, as a ghost placed under its parent. A create parented to a
@@ -168,12 +186,16 @@ export function proposalEditsByEntity(proposals: Proposal[]): Map<string, Entity
       ) {
         return;
       }
+      const isUpdate = c.op === ProposalOp.Update;
       const titleOrName =
-        c.op === ProposalOp.Update
-          ? (c.fields.title ?? c.fields.name) != null
-            ? String(c.fields.title ?? c.fields.name)
-            : undefined
+        isUpdate && (c.fields.title ?? c.fields.name) != null
+          ? String(c.fields.title ?? c.fields.name)
           : undefined;
+      // Surface every content field an update touches (not just the title) so the review
+      // strip shows the whole change. `"description" in fields` keeps an explicit clear.
+      const newKind = isUpdate && c.fields.kind != null ? String(c.fields.kind) : undefined;
+      const newDescription =
+        isUpdate && "description" in c.fields ? (c.fields.description as string | null) : undefined;
       const edit: EntityEdit = {
         proposalId: p.id,
         proposalTitle: p.title,
@@ -182,6 +204,8 @@ export function proposalEditsByEntity(proposals: Proposal[]): Map<string, Entity
         id: c.id,
         op: c.op,
         newTitle: titleOrName,
+        newKind,
+        newDescription,
         position: c.op === ProposalOp.Reorder ? c.position : undefined,
         parentId: c.op === ProposalOp.Reorder ? c.parentId : undefined,
       };
