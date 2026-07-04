@@ -5,3 +5,6 @@ public/assets/
 *.log
 .DS_Store
 dist/
+
+# Storybook build output
+storybook-static/
