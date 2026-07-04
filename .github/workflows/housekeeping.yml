@@ -4,7 +4,8 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    - cron: "0 7 * * 1"  # weekly drift check: dead links, stale PRs, settings flips
+    - cron: "0 7 * * 1"
+  workflow_dispatch:  # weekly drift check: dead links, stale PRs, settings flips
 
 jobs:
   housekeeping:
