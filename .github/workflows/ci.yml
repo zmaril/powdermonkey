@@ -1,8 +1,13 @@
 name: CI
 
-# Lint, format, and tests on every push to main and every PR targeting main.
-# Both jobs must pass; mark them as required status checks in the branch
-# protection rules for `main` so a red run blocks the merge button.
+# Lint, format, typecheck, tests, and the compiled builds. These are required status
+# checks on `main` (see the branch ruleset), so a red run blocks the merge button.
+#
+# Each heavy job runs only when files that could affect it changed, gated off the
+# `changes` filter below. This is deliberately a job-level `if:` and NOT a workflow-level
+# `paths:` filter: a job skipped by `if:` reports a "skipped" conclusion, which a required
+# status check treats as success — so a docs-only PR still satisfies every required check.
+# A `paths:` filter would instead leave the check *pending forever* and wedge the merge.
 on:
   push:
     branches: [main]
@@ -15,8 +20,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      tauri: ${{ steps.filter.outputs.tauri }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'tests/**'
+              - 'bin/**'
+              - 'scripts/**'
+              - 'drizzle/**'
+              - 'package.json'
+              - 'bun.lock'
+              - 'tsconfig*.json'
+              - 'biome.json'
+              - '.github/workflows/ci.yml'
+            tauri:
+              - 'src-tauri/**'
+              - '.github/workflows/ci.yml'
+
   check:
     name: Lint & format (biome)
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -29,6 +63,8 @@ jobs:
 
   test:
     name: Tests (bun test)
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -47,6 +83,8 @@ jobs:
 
   build:
     name: Build (web + compiled binary)
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -59,6 +97,8 @@ jobs:
 
   desktop-check:
     name: Desktop compile check (cargo check on src-tauri)
+    needs: changes
+    if: ${{ needs.changes.outputs.tauri == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
