@@ -18,9 +18,11 @@
 
 import { mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import pkg from "../package.json" with { type: "json" };
 import { attachDashboard, attachTo } from "../src/server/attach.ts";
 import type { SqlClient } from "../src/server/backup.ts";
+import { IS_COMPILED, PUBLIC_DIR } from "../src/server/paths.ts";
 import { launchServer, runWithBackoff } from "../src/server/supervise.ts";
 import { TMUX_BIN } from "../src/server/tmux.ts";
 
@@ -75,6 +77,26 @@ function installAlias(dir?: string): number {
   return 0;
 }
 
+/** Rebuild the web bundle before the server boots, so a freshly-pulled UI change can
+ *  never be masked by a stale public/assets left over from an earlier build — the trap
+ *  where `serve` restarts but the browser still shows old code. Every `__server` boot
+ *  (fresh launch or serve-loop respawn) rebuilds first. Skipped in a compiled binary:
+ *  there is no toolchain or src/web there — the bundle is baked in at build:compile time.
+ *  A build failure is logged, not fatal: serving the previous bundle beats no server. */
+async function buildWebBundle(): Promise<void> {
+  if (IS_COMPILED) return;
+  const entry = fileURLToPath(new URL("../src/web/main.tsx", import.meta.url));
+  const result = await Bun.build({
+    entrypoints: [entry],
+    outdir: join(PUBLIC_DIR, "assets"),
+    target: "browser",
+  });
+  if (!result.success) {
+    console.error("web bundle build failed — serving the previous bundle:");
+    for (const log of result.logs) console.error(String(log));
+  }
+}
+
 const [cmd, ...rest] = process.argv.slice(2);
 
 switch (cmd) {
@@ -107,6 +129,7 @@ switch (cmd) {
     await runWithBackoff();
     break;
   case "__server":
+    await buildWebBundle();
     await import("../src/server/index.ts");
     break;
   case "alias":
