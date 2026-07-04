@@ -1,4 +1,5 @@
 import { useStore } from "./store.ts";
+import { planBoot, windowWithId } from "./windows.ts";
 
 // The platform layer for real native windows (docs/windows.md). Each PM window is a
 // real OS window: on the desktop a Tauri v2 WebviewWindow, in the browser a separate
@@ -65,4 +66,23 @@ export async function spawnWindow(id: string): Promise<void> {
 export async function openNewWindow(): Promise<void> {
   const id = useStore.getState().createWindow();
   await spawnWindow(id);
+}
+
+/** Bind THIS webview to its PM window, synchronously, before React mounts (so the dock
+ *  restores the right layout on its first `onReady`). If the URL carries `#w=<id>`,
+ *  that window is this webview's; otherwise this is the primary boot webview, which
+ *  adopts the first registered window (or mints one). Either way we stamp the hash so
+ *  the reconnect→reload recovery comes back on the same window.
+ *
+ *  The store's `windows` registry has already rehydrated from localStorage at this
+ *  point (zustand `persist` is synchronous for localStorage), so the lookup sees the
+ *  real registry — shared across every native window / browser tab on the origin. */
+export function bootWindow(): void {
+  const s = useStore.getState();
+  const hashId = hashWindowId();
+  const win = hashId
+    ? (s.windows.find((w) => w.id === hashId) ?? windowWithId(hashId))
+    : planBoot(s.windows).adopt;
+  s.adoptWindow(win);
+  history.replaceState(null, "", windowUrl(win.id));
 }

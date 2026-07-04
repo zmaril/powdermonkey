@@ -6,9 +6,11 @@ import {
   fromLegacyLayout,
   mergeExternalWindows,
   newWindow,
+  planBoot,
   resolveActive,
   updateWindow,
   windowLabel,
+  windowWithId,
 } from "../src/web/windows.ts";
 
 // The pure Window core (windows.ts): construction, list surgery, the legacy
@@ -94,6 +96,30 @@ test("windowLabel: name, else the repo tabs, else a placeholder", () => {
   // An archived/unknown repo drops out of the label rather than rendering a hole.
   expect(windowLabel({ ...w, repoIds: [1, 99] }, label)).toBe("zmaril/powdermonkey");
   expect(windowLabel(newWindow(), label)).toBe("new window");
+});
+
+test("windowWithId: an empty window under a specific id", () => {
+  const w = windowWithId("hash-abc");
+  expect(w.id).toBe("hash-abc");
+  expect(w.repoIds).toEqual([]);
+  expect(w.name).toBeNull();
+  expect(w.layout).toBeNull();
+  expect(w.scratchCursor).toBeNull();
+});
+
+test("planBoot: adopts the first window, spawns the rest", () => {
+  const [a, b, c] = [newWindow([1]), newWindow([2]), newWindow([3])];
+  const plan = planBoot([a, b, c]);
+  expect(plan.minted).toBe(false);
+  expect(plan.adopt).toBe(a);
+  expect(plan.spawn.map((w) => w.id)).toEqual([b.id, c.id]);
+});
+
+test("planBoot: an empty registry mints a fresh unscoped window, nothing to spawn", () => {
+  const plan = planBoot([]);
+  expect(plan.minted).toBe(true);
+  expect(plan.adopt.repoIds).toEqual([]);
+  expect(plan.spawn).toEqual([]);
 });
 
 test("mergeExternalWindows: keeps our active window, adopts the rest", () => {

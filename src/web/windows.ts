@@ -1,15 +1,21 @@
 import type { SerializedDockview } from "dockview-react";
 
-// The Window model (docs/windows.md, vocabulary.md § Window): a Window is a saved
-// *view* — a set of repo "tabs" plus the dockview layout you look at them through.
-// Firefox-style: usually unnamed and disposable, identified by its repo set,
-// session-restored on launch. Pure frontend state, persisted per-device (the
-// store's localStorage persist) — never synced, never part of the plan hierarchy.
+// The Window model (docs/windows.md, vocabulary.md § Window): a Window is a real
+// native OS window — one per PM window, each owning its own repo "tabs" plus the
+// dockview layout you look at them through. Firefox-style: usually unnamed and
+// disposable, identified by its repo set, reopened on relaunch. Pure frontend state,
+// persisted per-device (the store's localStorage persist) — never synced, never part
+// of the plan hierarchy.
 //
-// This module is the pure core — window construction and list surgery, free of
-// React and the store — so the semantics (never-empty list, focus handoff on
-// close, the legacy single-layout migration) are unit-testable. The store holds
-// the list and delegates here.
+// The shared `windows` list is the *registry*: every currently-open PM window. Each
+// webview renders exactly ONE of them, chosen by its `#w=<id>` URL hash — there is no
+// in-app switcher. The registry is shared across every native window / browser tab on
+// the origin (same localStorage), so the merge rule (mergeExternalWindows) keeps each
+// webview authoritative for its own window while adopting the rest.
+//
+// This module is the pure core — window construction, list surgery, the boot planner,
+// and the legacy single-layout migration, free of React and the store — so the
+// semantics are unit-testable. The store holds the registry and delegates here.
 
 /** Where a window last was in the (global) Scratch note: selection + scroll. The
  *  CONTENT is global and server-side — closing a window loses nothing — a window
@@ -34,6 +40,28 @@ export type PmWindow = {
 
 export function newWindow(repoIds: number[] = []): PmWindow {
   return { id: crypto.randomUUID(), name: null, repoIds, layout: null, scratchCursor: null };
+}
+
+/** An empty window under a *specific* id. A webview learns which window it is from its
+ *  `#w=<id>` hash; the full record should be in the shared registry, but when it isn't
+ *  — a stale bookmark, a since-closed window, a raced cross-tab write — we stand up an
+ *  empty (unscoped) window under that id so the webview still renders something. */
+export function windowWithId(id: string): PmWindow {
+  return { id, name: null, repoIds: [], layout: null, scratchCursor: null };
+}
+
+/** Boot planning for the *primary* webview — the one launched with no `#w=` hash (the
+ *  Tauri boot window, or a fresh browser visit). It adopts the first registered window
+ *  as its own, or mints a fresh one when the registry is empty. `spawn` is the rest of
+ *  the registry: the windows a desktop relaunch reopens as their own OS windows (the
+ *  primary webview fans them out; see window-bridge.ts). */
+export function planBoot(registry: PmWindow[]): {
+  adopt: PmWindow;
+  spawn: PmWindow[];
+  minted: boolean;
+} {
+  if (registry.length === 0) return { adopt: newWindow(), spawn: [], minted: true };
+  return { adopt: registry[0], spawn: registry.slice(1), minted: false };
 }
 
 /** Patch one window in place (immutably); unknown ids are a no-op. */

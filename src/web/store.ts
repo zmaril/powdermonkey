@@ -18,6 +18,11 @@ import {
   updateWindow,
 } from "./windows.ts";
 
+// The registry (windows) is persisted and shared across every native window / browser
+// tab on the origin; `activeWindowId` is NOT — it's which registry entry THIS webview
+// renders, seeded from the `#w=<id>` URL hash on boot (window-bridge.bootWindow).
+// Persisting it would make every webview rehydrate some other webview's window.
+
 // UI + action store. All *plan/session data* now lives in TanStack DB collections
 // (collections.ts), synced live from PGlite — so this store no longer holds or
 // refetches server data. What's left is transient UI state (dock layout, shell/notes
@@ -38,7 +43,6 @@ export type StartInfo = {
 // this shape too (it's what a v0 blob is upgraded into).
 type PersistedUi = {
   windows: PmWindow[];
-  activeWindowId: string;
   autoRebase: boolean;
   lastBrowserUrl: string;
   theme: string;
@@ -125,6 +129,10 @@ export type State = {
   // one) and hands focus to a neighbour when the active one goes.
   createWindow: (repoIds?: number[]) => string;
   switchWindow: (id: string) => void;
+  // Boot: make THIS webview render `win`, registering it first if the shared registry
+  // doesn't already hold it (a spawned/bookmarked window this webview hasn't seen).
+  // Called once from window-bridge.bootWindow off the `#w=<id>` hash.
+  adoptWindow: (win: PmWindow) => void;
   removeWindow: (id: string) => void;
   renameWindow: (id: string, name: string | null) => void;
   setWindowRepos: (id: string, repoIds: number[]) => void;
@@ -326,6 +334,11 @@ export const useStore = create<State>()(
       },
       switchWindow: (id) =>
         set((s) => (s.windows.some((w) => w.id === id) ? { activeWindowId: id } : {})),
+      adoptWindow: (win) =>
+        set((s) => ({
+          windows: s.windows.some((w) => w.id === win.id) ? s.windows : [...s.windows, win],
+          activeWindowId: win.id,
+        })),
       removeWindow: (id) =>
         set((s) => {
           const next = closeWindow(s.windows, id, s.activeWindowId);
@@ -602,7 +615,6 @@ export const useStore = create<State>()(
       // toggle would otherwise flip from the default once the server value arrives.
       partialize: (s) => ({
         windows: s.windows,
-        activeWindowId: s.activeWindowId,
         autoRebase: s.autoRebase,
         lastBrowserUrl: s.lastBrowserUrl,
         theme: s.theme,

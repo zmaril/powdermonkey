@@ -101,18 +101,12 @@ export function usePaneLauncher(apiRef: RefObject<DockviewApi | null>, paneReq: 
   }, [paneReq, apiRef]);
 }
 
-/** Pin this browser tab to a window via the URL (`#w=<id>`). On mount a valid hash
- *  wins over the persisted active id — so duplicating the tab, bookmarking it, or
- *  opening the app in a second OS window next to the first lands on the window that
- *  tab was showing (side-by-side, Firefox-style). A stale hash (window since closed)
- *  is a no-op: switchWindow ignores unknown ids and the effect below re-stamps the
- *  hash with the window that actually shows. replaceState, not pushState — switching
- *  windows shouldn't grow the browser history. */
+/** Keep the URL hash (`#w=<id>`) in step with the window this webview shows. The
+ *  initial bind happens in window-bridge.bootWindow before React mounts; this only
+ *  re-stamps if activeWindowId ever changes afterward (e.g. the transitional in-app
+ *  switch), so the reconnect→reload recovery always comes back on the same window.
+ *  replaceState, not pushState — it shouldn't grow the browser history. */
 export function useWindowUrlPin(activeWindowId: string): void {
-  useEffect(() => {
-    const m = window.location.hash.match(/^#w=(.+)$/);
-    if (m) useStore.getState().switchWindow(decodeURIComponent(m[1]));
-  }, []);
   useEffect(() => {
     history.replaceState(null, "", `#w=${encodeURIComponent(activeWindowId)}`);
   }, [activeWindowId]);
