@@ -1,17 +1,22 @@
 import { expect, test } from "bun:test";
 import type { Session, Task } from "../src/server/schema.ts";
+import { VocabKind } from "../src/shared/types.ts";
+import type { Ghost } from "../src/web/ghosts.ts";
+import { groupGhosts } from "../src/web/ghosts.ts";
 import {
   ANY,
   DEFAULT_SESSION_FILTER,
   DEFAULT_TASK_FILTER,
-  SessionBucket,
-  TaskBucket,
+  filterGhosts,
+  matchGhost,
   matchSession,
   matchTask,
   parseScope,
+  SessionBucket,
   scopeValue,
   sessionBucket,
   sessionInScope,
+  TaskBucket,
   taskBucket,
   taskInScope,
 } from "../src/web/panes/filters.ts";
@@ -113,6 +118,56 @@ test("matchTask: starred and goal/milestone scope", () => {
   expect(matchTask(t, idx, new Set(), { ...base, goalId: 99 })).toBe(false);
   expect(matchTask(t, idx, new Set(), { ...base, milestoneId: 1 })).toBe(true);
   expect(matchTask(t, idx, new Set(), { ...base, milestoneId: 99 })).toBe(false);
+});
+
+// ── matchGhost / filterGhosts ──
+
+// A proposed-new-node ghost. `kind` + `parentId` place it (a task ghost under a milestone,
+// a milestone ghost under a goal, a goal ghost under nothing).
+const ghost = (over: Partial<Ghost> & Pick<Ghost, "kind">): Ghost =>
+  ({
+    proposalId: 1,
+    proposalTitle: "a proposal",
+    changeIndex: 0,
+    parentId: null,
+    title: "new thing",
+    phases: [],
+    ...over,
+  }) as Ghost;
+
+test("matchGhost: text search hits the ghost title; empty query matches all", () => {
+  const idx = idxOf([]);
+  const g = ghost({ kind: VocabKind.Task, parentId: 1, title: "wire the dispatcher" });
+  const base = { ...DEFAULT_TASK_FILTER, status: ANY };
+  expect(matchGhost(g, idx, base)).toBe(true); // empty query → everything shows
+  expect(matchGhost(g, idx, { ...base, search: "dispatcher" })).toBe(true);
+  expect(matchGhost(g, idx, { ...base, search: "nope" })).toBe(false);
+});
+
+test("filterGhosts: a query drops non-matching standalone ghosts, keeps phase ghosts", () => {
+  const idx = idxOf([]);
+  const match = ghost({ kind: VocabKind.Task, parentId: 1, title: "wire the dispatcher" });
+  const miss = ghost({ kind: VocabKind.Task, parentId: 1, title: "unrelated", changeIndex: 1 });
+  const phase = ghost({ kind: VocabKind.Phase, parentId: 7, title: "unrelated phase" });
+  const grouped = groupGhosts([match, miss, phase]);
+  const filtered = filterGhosts(grouped, idx, { ...DEFAULT_TASK_FILTER, search: "dispatcher" });
+  // Only the matching task ghost survives under its milestone…
+  expect(filtered.tasksByMilestone.get(1)?.map((g) => g.title)).toEqual(["wire the dispatcher"]);
+  // …and phase ghosts ride with their task card, untouched by the search.
+  expect(filtered.phasesByTask.get(7)?.map((g) => g.title)).toEqual(["unrelated phase"]);
+});
+
+test("filterGhosts: empty query is a pass-through — every ghost stays", () => {
+  const idx = idxOf([]);
+  const grouped = groupGhosts([
+    ghost({ kind: VocabKind.Task, parentId: 1, title: "t" }),
+    ghost({ kind: VocabKind.Milestone, parentId: 1, title: "m", changeIndex: 1 }),
+    ghost({ kind: VocabKind.Goal, title: "g", changeIndex: 2 }),
+  ]);
+  const filtered = filterGhosts(grouped, idx, DEFAULT_TASK_FILTER);
+  expect(filtered.tasksByMilestone.get(1)?.length).toBe(1);
+  expect(filtered.milestonesByGoal.get(1)?.length).toBe(1);
+  expect(filtered.goals.length).toBe(1);
 });
 
 // ── matchSession ──

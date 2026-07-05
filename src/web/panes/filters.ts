@@ -1,5 +1,6 @@
 import type { Session, Task } from "../../server/schema.ts";
 import { type SessionKind, SessionState, TaskStatus } from "../../shared/types.ts";
+import type { Ghost, GroupedGhosts } from "../ghosts.ts";
 import type { Indexes } from "../plan-data.ts";
 
 // Pure filter/search core for the two reframed panes (Sessions, Tasks). Both panes
@@ -148,6 +149,43 @@ export function matchTask(
     if (!s || s.kind !== f.env) return false;
   }
   return hit(f.search, [`t${task.id}`, String(task.id), task.title]);
+}
+
+// ── Proposal ghosts ──────────────────────────────────────────────────────────────
+// A ghost is a proposed NEW node (a create) previewed in place — so it's not a real,
+// stored task and most of the Tasks filter axes don't apply to it: it has no lifecycle
+// bucket, no session/env, and no starred flag. Only the two axes that DO make sense on a
+// not-yet-real node reach it: the text search (always), matched on its title the same way
+// a task matches (a ghost has no id yet, so title is the only field). Filtering happens
+// only on the STANDALONE ghosts the board renders on their own (task / milestone / goal);
+// phase ghosts ride inside their task card and are gated by that card, not here.
+
+/** True when a ghost passes the axes that apply to a proposed new node — currently just
+ *  the text search, on its title (reusing the same hit() a task matches on). */
+export function matchGhost(g: Ghost, _idx: Indexes, f: TaskFilter): boolean {
+  return hit(f.search, [g.title]);
+}
+
+/** The grouped ghosts sliced by the active filter: each standalone-ghost list (tasks under
+ *  a milestone, milestones under a goal, brand-new goals) keeps only the ghosts that match,
+ *  dropping any now-empty bucket. Phase ghosts pass through untouched — they render inside a
+ *  task card, so they ride with (and are gated by) that card, just like its edit strips. */
+export function filterGhosts(ghosts: GroupedGhosts, idx: Indexes, f: TaskFilter): GroupedGhosts {
+  const keep = (g: Ghost) => matchGhost(g, idx, f);
+  const filterMap = (m: Map<number, Ghost[]>): Map<number, Ghost[]> => {
+    const out = new Map<number, Ghost[]>();
+    for (const [k, gs] of m) {
+      const kept = gs.filter(keep);
+      if (kept.length > 0) out.set(k, kept);
+    }
+    return out;
+  };
+  return {
+    tasksByMilestone: filterMap(ghosts.tasksByMilestone),
+    milestonesByGoal: filterMap(ghosts.milestonesByGoal),
+    phasesByTask: ghosts.phasesByTask,
+    goals: ghosts.goals.filter(keep),
+  };
 }
 
 // ── Sessions ─────────────────────────────────────────────────────────────────────
