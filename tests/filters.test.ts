@@ -157,6 +157,67 @@ test("filterGhosts: a query drops non-matching standalone ghosts, keeps phase gh
   expect(filtered.phasesByTask.get(7)?.map((g) => g.title)).toEqual(["unrelated phase"]);
 });
 
+test("matchGhost: goal/milestone scope reaches through where the ghost would land", () => {
+  // g1 → m1 (from idxOf); add m2 under g1 and a second goal g2/m3 so scope has somewhere to
+  // miss. buildIndexes needs the extra rows, so build a wider index here.
+  const idx = buildIndexes(
+    [goal(1), goal(2)],
+    [milestone(1, 1), milestone(2, 1), milestone(3, 2)],
+    [task(50, 2)], // a real task under m2, so a phase ghost can hang off it
+    [],
+    [],
+    [],
+  );
+  const base = { ...DEFAULT_TASK_FILTER, status: ANY };
+  const taskGhost = ghost({ kind: VocabKind.Task, parentId: 1 }); // under m1 (goal 1)
+  const milestoneGhost = ghost({ kind: VocabKind.Milestone, parentId: 1 }); // new m under goal 1
+  const goalGhost = ghost({ kind: VocabKind.Goal });
+  const phaseGhost = ghost({ kind: VocabKind.Phase, parentId: 50 }); // under t50 → m2 → goal 1
+
+  // Milestone scope: only ghosts that resolve to that exact milestone show.
+  expect(matchGhost(taskGhost, idx, { ...base, milestoneId: 1 })).toBe(true);
+  expect(matchGhost(taskGhost, idx, { ...base, milestoneId: 2 })).toBe(false);
+  expect(matchGhost(phaseGhost, idx, { ...base, milestoneId: 2 })).toBe(true);
+  // A proposed NEW milestone/goal has no milestone id of its own → drops out of any
+  // milestone-scoped view.
+  expect(matchGhost(milestoneGhost, idx, { ...base, milestoneId: 1 })).toBe(false);
+  expect(matchGhost(goalGhost, idx, { ...base, milestoneId: 1 })).toBe(false);
+
+  // Goal scope: reaches through the milestone for a task/phase ghost, direct for a milestone
+  // ghost; a new goal drops out of any goal-scoped view.
+  expect(matchGhost(taskGhost, idx, { ...base, goalId: 1 })).toBe(true);
+  expect(matchGhost(taskGhost, idx, { ...base, goalId: 2 })).toBe(false);
+  expect(matchGhost(milestoneGhost, idx, { ...base, goalId: 1 })).toBe(true);
+  expect(matchGhost(milestoneGhost, idx, { ...base, goalId: 2 })).toBe(false);
+  expect(matchGhost(phaseGhost, idx, { ...base, goalId: 1 })).toBe(true);
+  expect(matchGhost(goalGhost, idx, { ...base, goalId: 1 })).toBe(false);
+});
+
+test("filterGhosts: scope + search compose — a ghost must pass both", () => {
+  const idx = buildIndexes([goal(1)], [milestone(1, 1), milestone(2, 1)], [], [], [], []);
+  const hit = ghost({ kind: VocabKind.Task, parentId: 1, title: "wire the dispatcher" });
+  const wrongMilestone = ghost({
+    kind: VocabKind.Task,
+    parentId: 2,
+    title: "wire the dispatcher",
+    changeIndex: 1,
+  });
+  const wrongTitle = ghost({
+    kind: VocabKind.Task,
+    parentId: 1,
+    title: "unrelated",
+    changeIndex: 2,
+  });
+  const grouped = groupGhosts([hit, wrongMilestone, wrongTitle]);
+  const filtered = filterGhosts(grouped, idx, {
+    ...DEFAULT_TASK_FILTER,
+    search: "dispatcher",
+    milestoneId: 1,
+  });
+  expect(filtered.tasksByMilestone.get(1)?.map((g) => g.title)).toEqual(["wire the dispatcher"]);
+  expect(filtered.tasksByMilestone.get(2)).toBeUndefined();
+});
+
 test("filterGhosts: empty query is a pass-through — every ghost stays", () => {
   const idx = idxOf([]);
   const grouped = groupGhosts([
