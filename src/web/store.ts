@@ -2,7 +2,7 @@ import type { SerializedDockview } from "dockview-react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Note, TaskComment } from "../server/schema.ts";
-import type { Decision, TaskKind } from "../shared/types.ts";
+import type { Decision, SyncMode, TaskKind } from "../shared/types.ts";
 import { DEFAULT_DENSITY, DEFAULT_FONT_SCALE } from "./appearance.ts";
 import { api } from "./client.ts";
 import { DEFAULT_MOTION } from "./motion.ts";
@@ -488,9 +488,7 @@ export const useStore = create<State>()(
       },
       setSyncMode: async (mode) => {
         set({ syncMode: mode }); // optimistic
-        const { error } = await api.settings.post({
-          syncMode: mode as "off" | "local" | "push",
-        });
+        const { error } = await api.settings.post({ syncMode: mode as SyncMode });
         if (error) {
           set({ error: String(error.value ?? error.status) });
           await get().loadSettings();
