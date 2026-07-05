@@ -130,3 +130,96 @@ Two existing surfaces bracket the options, and the UI plumbing for a new one is 
 
 So the lens has a clear, cheap home: an **Issues list pane** in the dock (triage inbox),
 backed by a live-synced cache table the server watcher fills — mirroring PRs end-to-end.
+
+## Issue → task
+
+### The reuse: an open issue is already a "proposed task" in disguise
+
+The follow-up machinery (`src/server/followups.ts`) already solves the general problem
+*"turn a one-line find into a task the operator approves before it joins the plan."* An
+imported issue is the same shape — a title plus a body — so triage reuses that path
+wholesale rather than inventing new machinery:
+
+- `proposeFollowup({ title, body, ... })` authors a **pending `create task` proposal**
+  (`createProposal`, `proposals.ts`) whose change-set is a single
+  `{ op:"create", kind:"task", parentId:<milestone>, fields:{ title, kind, description } }`
+  (`followups.ts:102`, `proposals.ts:47`). A `create` change's `fields` is an open
+  record validated at *apply* time against the same insert the CRUD route uses, so it
+  freely carries `repoId`, `description`, `kind` — everything an issue needs.
+- The proposal lands in the **existing decision queue** (`GET /proposals/pending`), is
+  reviewed as markdown, and on approve→apply the task joins the plan. From there the
+  **existing task machinery dispatches it**: `POST /tasks/:id/dispatch` resolves the
+  task's `repoId` to a cache clone and runs `claude --remote` there (`dispatch.ts:246`).
+  A task whose `repoId` is set dispatches into the right repo automatically — no new
+  dispatch plumbing.
+
+So the entire *triage → approve → dispatch* back half is **already built**. Issue-triage
+only has to add the *front* half: read issues, and author the `create task` proposal from
+one. Concretely, a thin `proposeIssueTriage(issue)` sits beside `proposeFollowup`,
+sharing `createProposal`.
+
+### What differs from a follow-up (the real work)
+
+Three things distinguish an issue from a worker follow-up, and each is a small, contained
+addition — not a rewrite:
+
+1. **Repo binding (the main new wiring).** A follow-up *inherits* its milestone (and thus
+   repo) from the source task the worker was on (`followups.ts:37`). An issue instead
+   **carries its own repo** — it lives in `owner/name`. So `proposeIssueTriage` must
+   resolve that repo in the **repos registry** (find-or-create by slug, the same
+   `gh`-sourced flow the repo picker uses — `vocabulary.md` § Repo) and set `repoId` on
+   the proposed task's `fields`. That's what makes "dispatch a worker at this issue" run
+   in the issue's repo. This is the one genuinely new piece.
+
+2. **Which milestone does the task hang under?** A proposal needs a parent milestone;
+   `proposeFollowup` falls back to *the first live milestone* (`followups.ts:42`). That's
+   too arbitrary for issues arriving from a specific repo. Options, cheapest first:
+   - **(a) Operator picks at approval.** Author the proposal against a best-guess
+     milestone (first live, or one whose goal/milestone default-repo matches the issue's
+     repo — `schema.ts` `repoId` cascade), and let the operator re-parent it in the plan
+     after approve. Zero new schema. ← recommended for the first slice.
+   - **(b) A per-repo "Triage / Inbox" milestone**, auto-created on first triage. Cleaner
+     home, but adds a convention and a bit of lifecycle.
+   - **(c) Pick in the triage UI** before authoring the proposal (a milestone select on
+     the Issues pane row). More UI, deferred.
+
+3. **Dedup / "already triaged" ledger.** Follow-ups dedup on the GitHub **comment**
+   databaseId (`sourceCommentId`, `followups.ts:141`) so a comment becomes a proposal
+   exactly once. Issues need the analogous guard keyed on **issue identity** — the issue
+   `number` (per repo) or its GraphQL node id — so re-polling the same open issue every
+   tick, or replaying it on a restart catch-up, never re-proposes it, and an issue the
+   operator already *rejected* stays gone. Mechanically this mirrors the follow-up dedup:
+   a provenance stamp on the proposal (`sourceIssueNumber` + `sourceRepoId`, parallel to
+   the existing `sourceCommentId`/`sourcePr`/`sourceTaskId` columns on `proposals`), and
+   a "this issue has a live/decided proposal" check before authoring. (Task **kind** also
+   differs cosmetically: a follow-up is always a phase-less `bug`; an issue can map its
+   labels → `TaskKind.Bug` when it's labelled a bug, else `TaskKind.Task`. Discovery-first
+   either way — few or no phases, per `vocabulary.md` § Kind.)
+
+### Read-only vs two-way (comment / close from PM)
+
+**Recommendation: ship read-only, and don't build close-from-PM at all — GitHub already
+does it for us.**
+
+- **Read-only (v1): pull → view → triage → dispatch.** No writes to GitHub. The operator
+  sees open issues, turns one into a proposed task, approves it, and dispatches a worker —
+  all inside PowderMonkey. This is the whole loop the brief asks for and it needs zero
+  write scope.
+- **Why not close-from-PM.** The tempting "two-way" write is *close the issue when we're
+  done*. But the dispatched worker opens a PR, and if that PR says `Closes #N`, **GitHub
+  auto-closes the issue on merge** — which reconciliation already treats as the lifecycle
+  clock (`github-watch.ts:26`). So PM owning the close would duplicate a thing GitHub does
+  correctly, and risks closing an issue *before* the work actually lands. Have the triage
+  step drop the issue number into the proposed task's description (so the worker writes
+  `Closes #N` in its PR) and the close takes care of itself.
+- **The one write worth considering later** is a *backlink comment* on the issue —
+  "triaged into PowderMonkey (task t123), dispatched" — so the GitHub side isn't a black
+  hole for anyone else watching the repo. The write seam already exists: `gh.ts`'s
+  `commentOnPr` is one generalization away from `gh issue comment` (issues and PRs share
+  the comment endpoint), exactly as `askClaude` reuses it today (`gh.ts:82`). Cheap, but
+  **out of scope for v1** — it's a nicety, not part of the triage loop, and it's the
+  natural second slice if two-way ever earns its keep.
+
+Net: **read-only is the right cut.** It delivers the entire triage-and-dispatch loop, the
+close is handled by GitHub's existing PR→issue link, and the only two-way write with real
+value (a backlink comment) is a small, additive follow-on that reuses the `gh` seam.
