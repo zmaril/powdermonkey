@@ -1,11 +1,11 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, max } from "drizzle-orm";
 import {
   type Decision,
   Decision as DecisionEnum,
   type ProposalChange,
   ProposalOp,
   ProposalStatus,
-  type VocabKind,
+  VocabKind,
 } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { getProposal, PARENT_COLUMN, repoFor } from "./proposals.ts";
@@ -83,7 +83,23 @@ async function applyChange(
       if (parentId == null) throw new Error(`create ${change.kind}: unresolved parent`);
       values[parentCol] = parentId;
     }
-    if (change.position != null) values.position = change.position;
+    // Position: honor an explicit one, else APPEND to the end of the siblings (max + 1)
+    // so an accepted ghost — which renders at the bottom of its list — stays put instead
+    // of taking the position-0 column default and jumping to the top on accept. Goals are
+    // unordered (no position column), so they skip this.
+    if (change.position != null) {
+      values.position = change.position;
+    } else if (change.kind !== VocabKind.Goal) {
+      // biome-ignore lint/suspicious/noExplicitAny: dynamic position/parent column access across the table union.
+      const t: any = table;
+      const parentVal = parentCol ? (values[parentCol] as number | undefined) : undefined;
+      const where = parentCol && parentVal != null ? eq(t[parentCol], parentVal) : undefined;
+      const [agg] = await tx
+        .select({ max: max(t.position) })
+        .from(table)
+        .where(where);
+      values.position = (agg?.max ?? -1) + 1;
+    }
     const [row] = await tx.insert(table).values(values).returning();
     if (change.ref) refs.set(change.ref, row.id);
     return row.id;
