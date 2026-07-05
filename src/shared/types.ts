@@ -106,6 +106,12 @@ export type SessionState = ValueOf<typeof SessionState>;
 export const SessionKind = { Local: "local", Remote: "remote" } as const;
 export type SessionKind = ValueOf<typeof SessionKind>;
 
+/** Where autosync lands each snapshot (see docs/backups.md, backup-sync.ts):
+ *  `off` — disabled; `local` — commit to a durable local branch only; `push` —
+ *  commit locally AND push that one branch to origin. Not a PR per change. */
+export const SyncMode = { Off: "off", Local: "local", Push: "push" } as const;
+export type SyncMode = ValueOf<typeof SyncMode>;
+
 // GitHub PR state, bounded to the values GitHub's GraphQL actually returns. Same
 // const-object-is-the-source-of-truth shape as the status enums above, so the rest
 // of the code (CloudPr, the pull_requests row, the UI badges) speaks one closed

@@ -169,6 +169,13 @@
       "when": 1783198004129,
       "tag": "0023_luxuriant_madame_hydra",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1783210652055,
+      "tag": "0024_aromatic_vanisher",
+      "breakpoints": true
     }
   ]
 }

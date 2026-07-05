@@ -129,7 +129,7 @@ export function startSessionPty(sessionId: number, cwd: string, startup: string)
   // Follow the most recently active (browser) client's size and drop the status
   // bar. Global, but scoped to our private socket — never the operator's tmux.
   tmux("set-option", "-g", "window-size", "latest");
-  tmux("set-option", "-g", "status", "off");
+  tmux("set-option", "-g", "status", "off"); // lint-allow-string: tmux option value, not SyncMode.Off
   tmux("new-session", "-d", "-s", name, "-x", "220", "-y", "50", "-c", cwd, cmd);
 }
 

@@ -2,6 +2,7 @@
 // thing that talks to the cloud.
 
 import { app } from "./app.ts";
+import { startAutosync } from "./backup-sync.ts";
 import { ready } from "./db.ts";
 import { startGithubWatch } from "./github-watch.ts";
 import { reconcile } from "./reconcile.ts";
@@ -81,6 +82,11 @@ if (RECONCILE_MS > 0) {
     }
   }, RECONCILE_MS);
 }
+
+// Autosync: on every store write, produce a snapshot and land it on the durable
+// backup branch (debounced/batched, off the write path). No-op until the operator
+// turns it on (settings.syncMode); safe to start unconditionally.
+startAutosync();
 
 // Watch GitHub for cloud workers' PRs (pm/task-*): one poll loop fans out events
 // to subscribers that set task.prUrl and wake reconcile on merge. Catches up on
