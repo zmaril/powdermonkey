@@ -1,0 +1,16 @@
+# Reinstalled / rebuilt inside the image
+node_modules
+public/assets
+dist
+
+# Local state that must never leak into the image
+data
+pm-worktrees
+*.log
+
+# VCS + native build output
+.git
+src-tauri/target
+
+# Editor / OS cruft
+.DS_Store
