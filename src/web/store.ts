@@ -44,6 +44,8 @@ export type StartInfo = {
 type PersistedUi = {
   windows: PmWindow[];
   autoRebase: boolean;
+  syncMode: string;
+  syncBranch: string;
   lastBrowserUrl: string;
   theme: string;
   density: string;
@@ -70,6 +72,11 @@ export type State = {
   // Operator toggle: whether the watcher auto-asks @claude to rebase conflicting PRs.
   // Server runtime state (not a synced table), loaded via loadSettings.
   autoRebase: boolean;
+  // Data-durability autosync: mode (off / local / push) + the durable branch. Server
+  // settings, loaded via loadSettings; the live sync *status* is polled separately
+  // (SyncControl reads /backup/status) rather than kept here.
+  syncMode: string;
+  syncBranch: string;
   error: string | null;
   // In-flight slow actions, keyed `${action}:${taskId}` (e.g. `dispatch:7`). A button
   // reads its own key to show a spinner the instant it's clicked — dispatch/start-local
@@ -191,6 +198,8 @@ export type State = {
   deletePhase: (phaseId: number) => Promise<void>;
   toggleStar: (taskId: number, starred: boolean) => Promise<void>;
   setAutoRebase: (on: boolean) => Promise<void>;
+  setSyncMode: (mode: string) => Promise<void>;
+  setSyncBranch: (branch: string) => Promise<void>;
   startLocal: (taskId: number) => Promise<void>;
   dispatch: (taskId: number) => Promise<void>;
   // Launch several backlog tasks together: ONE session works the whole batch. The
@@ -290,6 +299,8 @@ export const useStore = create<State>()(
       motion: DEFAULT_MOTION,
       setMotion: (key) => set({ motion: key }),
       autoRebase: true,
+      syncMode: "off", // lint-allow-string: default before /settings loads, not SyncMode.Off (store is enum-free)
+      syncBranch: "powdermonkey-backup",
       error: null,
       pending: {},
       lastStart: null,
@@ -373,7 +384,12 @@ export const useStore = create<State>()(
       loadSettings: async () => {
         const { data, error } = await api.settings.get();
         if (error) return;
-        set({ autoRebase: (data as { autoRebase?: boolean } | null)?.autoRebase ?? true });
+        const s = data as { autoRebase?: boolean; syncMode?: string; syncBranch?: string } | null;
+        set({
+          autoRebase: s?.autoRebase ?? true,
+          syncMode: s?.syncMode ?? "off", // lint-allow-string: fallback, not SyncMode.Off
+          syncBranch: s?.syncBranch ?? "powdermonkey-backup",
+        });
       },
       ensureScratch: () => ensureScratch((e) => set({ error: e })),
       saveNote: async (id, values) => {
@@ -468,6 +484,24 @@ export const useStore = create<State>()(
         if (error) {
           set({ error: String(error.value ?? error.status) });
           await get().loadSettings(); // revert to server truth on failure
+        }
+      },
+      setSyncMode: async (mode) => {
+        set({ syncMode: mode }); // optimistic
+        const { error } = await api.settings.post({
+          syncMode: mode as "off" | "local" | "push",
+        });
+        if (error) {
+          set({ error: String(error.value ?? error.status) });
+          await get().loadSettings();
+        }
+      },
+      setSyncBranch: async (branch) => {
+        set({ syncBranch: branch });
+        const { error } = await api.settings.post({ syncBranch: branch });
+        if (error) {
+          set({ error: String(error.value ?? error.status) });
+          await get().loadSettings();
         }
       },
       startLocal: (taskId) =>
@@ -611,6 +645,8 @@ export const useStore = create<State>()(
       partialize: (s) => ({
         windows: s.windows,
         autoRebase: s.autoRebase,
+        syncMode: s.syncMode,
+        syncBranch: s.syncBranch,
         lastBrowserUrl: s.lastBrowserUrl,
         theme: s.theme,
         density: s.density,

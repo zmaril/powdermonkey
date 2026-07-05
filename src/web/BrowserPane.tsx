@@ -94,8 +94,8 @@ export function BrowserPane({
             placeholder="localhost:3000"
             size="xs"
             spellCheck={false}
-            autoCapitalize="off"
-            autoCorrect="off"
+            autoCapitalize="off" // lint-allow-string: HTML attribute value, not SyncMode.Off
+            autoCorrect="off" // lint-allow-string: HTML attribute value, not SyncMode.Off
             styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)" } }}
           />
         </form>
