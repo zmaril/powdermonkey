@@ -132,13 +132,18 @@ case "${MODE}" in
   --uninstall-agent|uninstall-agent) uninstall_agent; exit 0 ;;
 esac
 
-# ── 1. Latest code (or the pinned ref) + dependencies ───────────────────────────
+# ── 1. Latest code (or the pinned ref) + dependencies + git hooks ───────────────
 BEFORE_HEAD="$(git rev-parse HEAD 2>/dev/null || echo none)"
 update_repo
 AFTER_HEAD="$(git rev-parse HEAD 2>/dev/null || echo none)"
 
 say "Installing dependencies (bun install)…"
 bun install
+
+# Wire up the local git hooks (pre-commit fast checks + pre-push CI mirror) so a
+# fresh clone is gated in one step. Idempotent — re-running just re-asserts them.
+say "Installing git hooks (bun run hooks:install)…"
+bun run hooks:install
 
 # ── 2. Supervisor up + on the latest code ────────────────────────────────────────
 # `serve` is idempotent: it launches the tmux serve-loop, or no-ops if it's already up.
