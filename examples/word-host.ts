@@ -2,92 +2,57 @@
 //
 // PowderMonkey's plan (src/host/powdermonkey.ts) and this document editor share ZERO
 // vocabulary — no tasks, no phases, no sessions, no git — yet both drive the exact same
-// Nervo core (FSM engine, command bus with permission + cost, undo, proposals). If Nervo
-// leaked a single plan-shaped assumption, this file couldn't compile against it. That's
-// the whole point of the seam: a domain the core has never heard of plugs straight in.
+// Nervo core (XState-backed FSM engine, command bus with permission + cost, undo,
+// proposals). If Nervo leaked a single plan-shaped assumption, this file couldn't compile
+// against it. That's the whole point of the seam: a domain the core has never heard of
+// plugs straight in.
 //
-// This is the minimal "example host" others copy to build their own. It lives under
-// examples/ (outside src/) precisely because it is NOT part of PowderMonkey — it depends
-// only on Nervo's public surface (src/nervo). Run the shared engine against it in
-// tests/nervo.test.ts.
+// This is the minimal "example host" others copy to build their own. It depends only on
+// Nervo's public surface (src/nervo) and XState — never on PowderMonkey — which the
+// boundary lint enforces (scripts/lint-boundaries.ts).
 
-import { type Change, defineHost, type HostContract, type Permit } from "../src/nervo/index.ts";
+import { createMachine } from "xstate";
+import { type Change, defineHost, type HostContract } from "../src/nervo/index.ts";
 
-// ── Entity/FSM definitions ───────────────────────────────────────────────────
+// ── Entity/FSM definitions (XState) ──────────────────────────────────────────
 
 /** A document: drafted → in review → published, sendable back to draft from review. */
-const documentFsm = {
+const documentMachine = createMachine({
   initial: "draft",
-  transitions: {
-    draft: ["in-review"],
-    "in-review": ["published", "draft"],
-    published: ["draft"],
+  states: {
+    draft: { on: { SUBMIT: "in-review" } },
+    "in-review": { on: { PUBLISH: "published", SEND_BACK: "draft" } },
+    published: { on: { UNPUBLISH: "draft" } },
   },
-};
+});
 
 /** A comment thread on the document: open ↔ resolved. */
-const commentFsm = {
+const commentMachine = createMachine({
   initial: "open",
-  transitions: {
-    open: ["resolved"],
-    resolved: ["open"],
+  states: {
+    open: { on: { RESOLVE: "resolved" } },
+    resolved: { on: { REOPEN: "open" } },
   },
-};
-
-const from =
-  (states: string[], reason: string) =>
-  ({ entity }: { entity: { state: string } }): Permit =>
-    states.includes(entity.state) ? { ok: true } : { ok: false, reason };
+});
 
 // ── The action catalog ───────────────────────────────────────────────────────
 
 export const wordHost: HostContract = defineHost({
   name: "word-document",
-  entities: { document: documentFsm, comment: commentFsm },
+  entities: { document: documentMachine, comment: commentMachine },
   actions: [
     {
       id: "submit-for-review",
       title: "Submit for review",
       entity: "document",
-      permit: from(["draft"], "only a draft can be submitted"),
+      event: "SUBMIT",
       cost: () => ({ unit: "review-round", amount: 1 }),
-      target: () => "in-review",
     },
-    {
-      id: "publish",
-      title: "Publish",
-      entity: "document",
-      permit: from(["in-review"], "a document must be reviewed before publishing"),
-      target: () => "published",
-    },
-    {
-      id: "send-back",
-      title: "Send back to author",
-      entity: "document",
-      permit: from(["in-review"], "only a document in review can be sent back"),
-      target: () => "draft",
-    },
-    {
-      id: "unpublish",
-      title: "Unpublish",
-      entity: "document",
-      permit: from(["published"], "only a published document can be unpublished"),
-      target: () => "draft",
-    },
-    {
-      id: "resolve-comment",
-      title: "Resolve comment",
-      entity: "comment",
-      permit: from(["open"], "comment is already resolved"),
-      target: () => "resolved",
-    },
-    {
-      id: "reopen-comment",
-      title: "Reopen comment",
-      entity: "comment",
-      permit: from(["resolved"], "comment is already open"),
-      target: () => "open",
-    },
+    { id: "publish", title: "Publish", entity: "document", event: "PUBLISH" },
+    { id: "send-back", title: "Send back to author", entity: "document", event: "SEND_BACK" },
+    { id: "unpublish", title: "Unpublish", entity: "document", event: "UNPUBLISH" },
+    { id: "resolve-comment", title: "Resolve comment", entity: "comment", event: "RESOLVE" },
+    { id: "reopen-comment", title: "Reopen comment", entity: "comment", event: "REOPEN" },
   ],
 });
 

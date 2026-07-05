@@ -2,25 +2,29 @@ import { describe, expect, test } from "bun:test";
 import { wordHost } from "../examples/word-host.ts";
 import { powdermonkey } from "../src/host/powdermonkey.ts";
 import {
+  accepts,
   available,
-  canTransition,
   decide,
   dispatch,
   type Entity,
   History,
+  initialState,
   isTerminal,
+  nextState,
   unitIndices,
 } from "../src/nervo/index.ts";
 
-// Nervo is exercised against BOTH hosts through the same engine — the executable proof
-// that the core is domain-agnostic. If any assertion below leaned on a PowderMonkey
-// concept, the Word host couldn't satisfy it.
+// Nervo is exercised against BOTH hosts through the same XState-backed engine — the
+// executable proof that the core is domain-agnostic. If any assertion below leaned on a
+// PowderMonkey concept, the Word host couldn't satisfy it.
 
-describe("fsm engine", () => {
-  test("canTransition and isTerminal read the host's transition map", () => {
+describe("fsm engine (XState-backed)", () => {
+  test("reads the host's machine — initial, accepted events, next state, terminal", () => {
     const task = powdermonkey.entities.task;
-    expect(canTransition(task, "pending", "dispatched")).toBe(true);
-    expect(canTransition(task, "pending", "merged")).toBe(false);
+    expect(initialState(task)).toBe("pending");
+    expect(accepts(task, "pending", "DISPATCH")).toBe(true);
+    expect(accepts(task, "pending", "REOPEN")).toBe(false);
+    expect(nextState(task, "pending", "DISPATCH")).toBe("dispatched");
     expect(isTerminal(powdermonkey.entities.session, "idle")).toBe(true);
     expect(isTerminal(powdermonkey.entities.session, "running")).toBe(false);
   });
@@ -38,11 +42,11 @@ describe("command bus — PowderMonkey host", () => {
     expect(r.tx.cost).toEqual({ unit: "cloud-run", amount: 1 });
   });
 
-  test("the permission spec refuses dispatch on a merged task", () => {
+  test("the machine refuses dispatch on a merged task", () => {
     const r = dispatch(powdermonkey, task("merged"), "dispatch");
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    expect(r.error).toMatch(/pending/);
+    expect(r.error).toMatch(/not accepted in state merged/);
   });
 
   test("an action against the wrong entity kind is refused", () => {
@@ -51,9 +55,9 @@ describe("command bus — PowderMonkey host", () => {
     expect(r.ok).toBe(false);
   });
 
-  test("available lists only the moves permitted from the current state", () => {
+  test("available lists only the moves the machine accepts from the current state", () => {
     expect(available(powdermonkey, task("pending")).sort()).toEqual(
-      ["cancel", "dispatch", "start-local"].sort(),
+      ["cancel", "complete", "dispatch", "start-local"].sort(),
     );
     expect(available(powdermonkey, task("merged"))).toEqual(["reopen"]);
   });

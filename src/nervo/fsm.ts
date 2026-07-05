@@ -1,40 +1,51 @@
-// Nervo — the finite-state-machine engine.
+// Nervo — the finite-state-machine engine, backed by XState.
 //
-// An entity kind's lifecycle is a plain transition map: each state lists the states
-// it may move to. A state with no outgoing edges is terminal. The engine is pure and
-// domain-agnostic — it knows nothing about tasks, documents, or any host vocabulary;
-// the *values* of the states are strings the host supplies (see contract.ts). This is
-// the "entity/FSM definitions" half of the host interface Nervo consumes.
+// An entity kind's lifecycle IS an XState machine (`createMachine`): states, and the
+// named events that move between them. The engine is a thin, pure wrapper over XState's
+// snapshot API — it computes the next state for an event without ever spinning up an
+// actor, so the whole core stays side-effect-free (bus.ts turns a dispatch into a plain
+// `Transaction` the caller persists). Nervo depends on XState and nothing else app-side;
+// it never reaches into Immersion or a host's schema (scripts/lint-boundaries.ts).
+//
+// The states are still just strings a host names — a host supplies the machines, Nervo
+// steps them. This is the "entity/FSM definitions" half of the host interface.
 
-/** One entity kind's state machine: `initial`, and for each state the states it may
- *  transition to. A state whose edge list is empty (or absent) is terminal. */
-export type Fsm = {
-  initial: string;
-  transitions: Record<string, readonly string[]>;
-};
+import { type AnyStateMachine, getInitialSnapshot, getNextSnapshot } from "xstate";
 
-/** Every state named in the machine (the keys of the transition map). */
-export function states(fsm: Fsm): string[] {
-  return Object.keys(fsm.transitions);
+/** An entity kind's state machine — any XState machine. Hosts build these with
+ *  `createMachine`; Nervo only ever reads state out of them. */
+export type Fsm = AnyStateMachine;
+
+/** The machine's initial state value. */
+export function initialState(fsm: Fsm): string {
+  return String(getInitialSnapshot(fsm, undefined).value);
 }
 
-/** Is `from → to` an allowed edge? Unknown states answer `false` rather than throw —
- *  the engine treats an undeclared state as having no outgoing edges. */
-export function canTransition(fsm: Fsm, from: string, to: string): boolean {
-  return (fsm.transitions[from] ?? []).includes(to);
+// The one place Nervo reaches into an XState state node's shape, to read the events a
+// state accepts. Kept in a single helper so the (version-sensitive) internal access is
+// isolated — everything else goes through XState's public snapshot API.
+function acceptedEvents(fsm: Fsm, state: string): string[] {
+  // biome-ignore lint/suspicious/noExplicitAny: StateNode.on isn't in the public types.
+  const node = (fsm as any).states?.[state];
+  return node?.on ? Object.keys(node.on) : [];
 }
 
-/** A state with no outgoing edges — the machine can't leave it. */
+/** Does `state` accept `event`? False for an unknown state or an unhandled event — the
+ *  bus uses this to refuse an illegal move before computing anything. */
+export function accepts(fsm: Fsm, state: string, event: string): boolean {
+  return acceptedEvents(fsm, state).includes(event);
+}
+
+/** The state `event` drives the machine to from `state`. Assumes the move is legal —
+ *  the bus guards with `accepts` first. */
+export function nextState(fsm: Fsm, state: string, event: string): string {
+  // Nervo's machines are context-free lifecycles; XState's snapshot type still wants a
+  // `context` key, so pass an empty one.
+  const from = fsm.resolveState({ value: state, context: undefined });
+  return String(getNextSnapshot(fsm, from, { type: event }).value);
+}
+
+/** A state that accepts no events — the machine can't leave it. */
 export function isTerminal(fsm: Fsm, state: string): boolean {
-  return (fsm.transitions[state] ?? []).length === 0;
-}
-
-/** Take an edge, or throw if it isn't allowed. Returns the destination state so it can
- *  be used inline. The command bus (bus.ts) guards with `canTransition` first, so this
- *  throwing form is for callers that have already validated the move. */
-export function transition(fsm: Fsm, from: string, to: string): string {
-  if (!canTransition(fsm, from, to)) {
-    throw new Error(`illegal transition ${from} → ${to}`);
-  }
-  return to;
+  return acceptedEvents(fsm, state).length === 0;
 }

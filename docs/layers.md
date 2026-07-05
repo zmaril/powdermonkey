@@ -4,9 +4,9 @@ PowderMonkey is being drawn as three layers with an honest, one-way seam between
 so the two general parts can eventually be reused on their own:
 
 - **Nervo** — the headless agentic core. A domain-agnostic engine: a typed action
-  protocol, a command bus, undo/history, an FSM engine, the proposals model, and (as it
-  grows) co-pilot logic and agent-runtime plugins. Knows nothing about plans, git, or the
-  DOM.
+  protocol, a command bus, undo/history, an FSM engine (built on **XState**), the
+  proposals model, and (as it grows) co-pilot logic and agent-runtime plugins. Knows
+  nothing about plans, git, or the DOM.
 - **Immersion** — the Blender-like presentation. Windows / panes / dockview, the co-pilot
   pane, proposal cards, highlights. A shell that renders whatever a host + Nervo expose.
 - **The host** — the domain. PowderMonkey's plan model, dispatch, and reconcile. The first
@@ -38,8 +38,10 @@ This is enforced from day one — before any packaging — by
 [`scripts/lint-boundaries.ts`](../scripts/lint-boundaries.ts), wired into `bun run check`
 alongside the repo's other custom lint scripts. It fails the build if anything under
 `src/nervo/**` imports `src/web` (Immersion), `src/server` / `src/shared` (the plan
-schema / host domain), or any npm dependency at all — the core stays self-contained. The
-example host is held to the same test a third party would be: it may import *only* Nervo.
+schema / host domain), or any npm dependency outside the core's small allowlist. That
+allowlist is exactly **XState** — the FSM engine Nervo is built on; nothing else. The
+example host is held to the same test a third party would be: it may import only Nervo and
+XState.
 
 The escape hatch is the same as the other lint scripts: a same-line
 `// lint-allow-boundary: <reason>`.
@@ -49,12 +51,15 @@ The escape hatch is the same as the other lint scripts: a same-line
 A host is a domain that plugs into Nervo by supplying a `HostContract`
 ([`src/nervo/contract.ts`](../src/nervo/contract.ts)) — three things:
 
-1. **Entity/FSM definitions** — a lifecycle per entity kind, as a transition map
-   ([`fsm.ts`](../src/nervo/fsm.ts)). Nervo steps these; it never hardcodes a state.
-2. **An action catalog** — named, typed moves against an entity kind. Each carries its
-   own permission and cost spec, and declares the FSM state it drives the entity to.
-3. **Cost / permission specs** — attached per action, so the command bus can refuse or
-   price a move ([`bus.ts`](../src/nervo/bus.ts)) without knowing what the move *means*.
+1. **Entity/FSM definitions** — a lifecycle per entity kind, as an **XState machine**
+   ([`fsm.ts`](../src/nervo/fsm.ts) wraps XState's pure snapshot API). Nervo steps these;
+   XState owns the transition table, so an illegal move is rejected by the machine, not a
+   hand-rolled guard.
+2. **An action catalog** — named, typed moves against an entity kind. Each sends one
+   XState *event* into the entity's machine, and carries its own cost spec.
+3. **Cost / permission specs** — attached per action, so the command bus can price a move
+   ([`bus.ts`](../src/nervo/bus.ts)) or refuse it on a non-lifecycle guard, without knowing
+   what the move *means*. Lifecycle gating itself is the machine's job.
 
 In return the host gets the core: the command bus (`dispatch` / `available`), the FSM
 engine, undo/redo (`History`), and the proposals model (`unitIndices` / `decide`).

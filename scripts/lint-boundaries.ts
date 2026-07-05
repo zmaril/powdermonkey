@@ -1,15 +1,17 @@
 #!/usr/bin/env bun
 // Lint: the three-layer boundary. Nervo (the headless agentic core, src/nervo) must
 // import neither Immersion (the shell, src/web) nor any host's schema (src/server,
-// src/shared) — nor any runtime dependency at all. The seam runs one way: hosts depend
-// inward on Nervo, never the reverse. An example host (examples/word-host.ts) is held to
-// the same test a third party would be — it may import ONLY Nervo's public surface, so
-// it proves the core stands alone. See docs/layers.md.
+// src/shared) — only itself and its one sanctioned dependency, XState (the FSM engine).
+// The seam runs one way: hosts depend inward on Nervo, never the reverse. An example host
+// (examples/word-host.ts) is held to the same test a third party would be — it may import
+// only Nervo and XState, so it proves the core stands alone. See docs/layers.md.
 //
 // Enforced as: every import in a guarded file must resolve to a path *inside* one of the
-// file's allowed roots. A bare package specifier never resolves inside a root, so it's a
-// violation too — that's what keeps the core dependency-free. This is the module-boundary
-// lint the split is gated on ("enforce before any packaging").
+// file's allowed roots, OR name a package on its small allowlist. A bare package that
+// isn't allowlisted never resolves inside a root, so it's a violation — the core's only
+// sanctioned dependency is XState (the FSM engine); it must never reach Immersion or a
+// host's schema. This is the module-boundary lint the split is gated on ("enforce before
+// any packaging").
 //
 // Why a custom script and not a lint rule: biome (the only linter here) has no
 // custom-rule support, and this is deterministic and dependency-free like the other lint
@@ -25,16 +27,24 @@ import { Glob } from "bun";
 const ROOT = join(import.meta.dir, "..");
 const ALLOW = "lint-allow-boundary";
 
-/** A guarded region: which files it covers, and the roots their imports may resolve into
- *  (paths are repo-relative, POSIX). */
-type Rule = { label: string; files: string; allowed: string[] };
+/** A guarded region: which files it covers, the roots their imports may resolve into
+ *  (paths are repo-relative, POSIX), and the packages they may import. */
+type Rule = { label: string; files: string; allowed: string[]; packages: string[] };
+
+// The core's only sanctioned dependency: the FSM engine.
+const CORE_DEPS = ["xstate"];
 
 const RULES: Rule[] = [
-  // The core is self-contained: it may only import itself. No src/web (Immersion), no
-  // src/server or src/shared (the plan schema / host domain), no npm dependency.
-  { label: "nervo core", files: "src/nervo/**/*.ts", allowed: ["src/nervo"] },
-  // The example host models a third-party host: Nervo and nothing else.
-  { label: "example host", files: "examples/word-host.ts", allowed: ["src/nervo"] },
+  // The core imports only itself and XState. No src/web (Immersion), no src/server or
+  // src/shared (the plan schema / host domain), no other npm dependency.
+  { label: "nervo core", files: "src/nervo/**/*.ts", allowed: ["src/nervo"], packages: CORE_DEPS },
+  // The example host models a third-party host: Nervo, XState, and nothing else.
+  {
+    label: "example host",
+    files: "examples/word-host.ts",
+    allowed: ["src/nervo"],
+    packages: CORE_DEPS,
+  },
 ];
 
 export type Violation = { file: string; line: number; spec: string; label: string };
@@ -55,12 +65,19 @@ function isInside(path: string, roots: string[]): boolean {
   return roots.some((r) => path === r || path.startsWith(`${r}/`));
 }
 
+/** Is `spec` an allowlisted package (exact name or a subpath import of one)? */
+function isAllowedPackage(spec: string, packages: string[]): boolean {
+  return packages.some((p) => spec === p || spec.startsWith(`${p}/`));
+}
+
 /** Flag imports in `text` (for the file at repo-relative `fileRepoRel`) that resolve
- *  outside `allowed`. Pure — exported for tests. */
+ *  outside `allowed` and aren't an allowlisted `packages` import. Pure — exported for
+ *  tests. */
 export function scanText(
   text: string,
   fileRepoRel: string,
   allowed: string[],
+  packages: string[],
   label: string,
 ): Violation[] {
   const out: Violation[] = [];
@@ -72,7 +89,10 @@ export function scanText(
     if (!m) continue;
     const spec = m[1];
     const resolved = resolveSpec(fileRepoRel, spec);
-    if (resolved === null || !isInside(resolved, allowed)) {
+    if (resolved === null) {
+      if (!isAllowedPackage(spec, packages))
+        out.push({ file: fileRepoRel, line: i + 1, spec, label });
+    } else if (!isInside(resolved, allowed)) {
       out.push({ file: fileRepoRel, line: i + 1, spec, label });
     }
   }
@@ -85,7 +105,7 @@ function lint(): Violation[] {
     for (const file of new Glob(rule.files).scanSync(ROOT)) {
       const repoRel = file.split("\\").join("/");
       const text = readFileSync(join(ROOT, file), "utf8");
-      violations.push(...scanText(text, repoRel, rule.allowed, rule.label));
+      violations.push(...scanText(text, repoRel, rule.allowed, rule.packages, rule.label));
     }
   }
   return violations;
