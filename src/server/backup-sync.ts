@@ -74,6 +74,30 @@ function commitMessage(snap: Snapshot): string {
 
 export type ExportResult = { branch: string; sha: string; rows: number; pushed: boolean };
 
+/** Land an already-dumped snapshot on `branch` from the object store, optionally
+ *  pushing. The one commit+push primitive shared by on-demand export and autosync —
+ *  callers dump the snapshot themselves (autosync needs it first for change-detection),
+ *  so this takes `snap` rather than re-dumping. Returns the new commit sha. */
+async function landSnapshot(
+  branch: string,
+  snap: Snapshot,
+  opts: { push: boolean; parentRef?: string },
+): Promise<string> {
+  const res = await commitFileToBranch({
+    branch,
+    fileName: SNAPSHOT_FILE,
+    content: serializeSnapshot(snap),
+    message: commitMessage(snap),
+    parentRef: opts.parentRef,
+  });
+  if (!res.ok) throw new Error(res.error);
+  if (opts.push) {
+    const p = await pushBranch(branch);
+    if (!p.ok) throw new Error(`push failed: ${p.output}`);
+  }
+  return res.sha;
+}
+
 /** Commit the current snapshot to `branch` from the object store. Optionally chains
  *  onto the remote tip and pushes (so `push` re-runs are appends, not clobbers). */
 export async function exportSnapshotToBranch(
@@ -81,22 +105,10 @@ export async function exportSnapshotToBranch(
   opts: { push?: boolean } = {},
 ): Promise<ExportResult> {
   const snap = await currentSnapshot();
-  const parentRef = opts.push ? await remoteParent(branch) : undefined;
-  const res = await commitFileToBranch({
-    branch,
-    fileName: SNAPSHOT_FILE,
-    content: serializeSnapshot(snap),
-    message: commitMessage(snap),
-    parentRef,
-  });
-  if (!res.ok) throw new Error(res.error);
-  let pushed = false;
-  if (opts.push) {
-    const p = await pushBranch(branch);
-    if (!p.ok) throw new Error(`push failed: ${p.output}`);
-    pushed = true;
-  }
-  return { branch, sha: res.sha, rows: rowCount(snap), pushed };
+  const push = opts.push ?? false;
+  const parentRef = push ? await remoteParent(branch) : undefined;
+  const sha = await landSnapshot(branch, snap, { push, parentRef });
+  return { branch, sha, rows: rowCount(snap), pushed: push };
 }
 
 export type PrExportResult = ExportResult & { prUrl: string | null };
@@ -231,21 +243,10 @@ export async function syncNow(): Promise<void> {
   }
   const push = mode === SyncMode.Push;
   const parentRef = push ? await remoteParent(branch) : undefined;
-  const res = await commitFileToBranch({
-    branch,
-    fileName: SNAPSHOT_FILE,
-    content: serializeSnapshot(snap),
-    message: commitMessage(snap),
-    parentRef,
-  });
-  if (!res.ok) throw new Error(res.error);
-  if (push) {
-    const p = await pushBranch(branch);
-    if (!p.ok) throw new Error(`push failed: ${p.output}`);
-  }
+  const sha = await landSnapshot(branch, snap, { push, parentRef });
   lastSyncedDataJson = dataJson;
   status.lastSyncedAt = snap.meta.takenAt;
-  status.lastCommit = res.sha;
+  status.lastCommit = sha;
   status.pushed = push;
   status.rows = rowCount(snap);
 }
