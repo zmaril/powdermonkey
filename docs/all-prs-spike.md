@@ -251,3 +251,107 @@ lets us further tint "trusted collaborator" vs "outside contributor" if wanted.)
 **Actionability summary:** Review = free now · Adopt = small · Dispatch = exists
 but must be gated behind an explicit click and, by default, scoped to our/adopted
 PRs.
+
+---
+
+## Phase 3 — Recommendation, rough design, and the first slice
+
+### Recommendation
+
+**Widen the existing pipeline in place; don't build a parallel one.** One repo,
+one poll, one store, keyed by PR number. External PRs become rows with a null
+`taskId` and empty PM enrichment; the existing `PrRow` renders them in a new PRs
+pane. Reviewing works day one. Adopt (set `taskId`) and gated Dispatch are
+follow-ups. The only genuinely new *care* is keeping external PRs out of the
+mutating side-effects.
+
+### Data model
+
+Keep the **single `pull_requests` table**, keyed by `number` — this is what makes
+dedup a non-issue. Changes:
+
+| Change | Why |
+|---|---|
+| `taskId` → **nullable** (`integer`, drop `.notNull()`) | External PRs have no task. `null` *is* the "external" discriminator (Phase 2). |
+| add `author` (`text`, nullable) | The one field the brief wants that we don't store. `null` for ghost/deleted accounts. |
+| add `authorAssociation` (`text`, nullable) — optional | Tint bot / collaborator / outside contributor. |
+| add `reviewDecision` (`text`, nullable) — optional | `APPROVED` / `CHANGES_REQUESTED` / `REVIEW_REQUIRED` for a review-state chip. |
+| (later, multi-repo) add `repoId` (`integer` FK → `repos`) | Only when the fetch fans out per repo. Single-repo v1 doesn't need it. |
+
+`CloudPr.taskId` widens to `number | null` (`events.ts`), and `rowToCloudPr` /
+`upsertPrState` stop assuming a task. A Drizzle migration under `drizzle/` alters
+`task_id` nullable and adds the columns; PGlite applies it on boot like the others.
+
+**Dedup vs the existing task-PR store — explicitly:** there is no separate store.
+The task-PR data *is* `pull_requests`, primary-keyed by `number`. An external PR
+and a PM PR can never collide because a given `number` is exactly one PR on GitHub
+→ exactly one row. "Adopt" mutates that one row's `taskId`; it never inserts a
+duplicate. So the classic "two lists to reconcile" problem doesn't arise.
+
+### Sync cadence — two tiers
+
+The mutating machinery (auto-rebase asks, follow-up ingest, reconcile-on-merge)
+must stay **exactly as urgent and as scoped as today**; the external roll-up can be
+lazier and must be side-effect-free.
+
+- **Tier 1 — PM PRs, 10s, full enrichment, drives the bus.** The current query,
+  narrowed to PM PRs where practical (`headRefName` starting `pm/task-`, plus the
+  trailer fallback), keeps `history`/`comments` and keeps emitting `pr.*` events.
+  Unchanged behaviour.
+- **Tier 2 — all open PRs, slower (~30–60s), scalars + `author` + `checks` only,
+  NO bus events.** A cheap `pullRequests(states:[OPEN], first:100)` list that
+  upserts rows for display and **does not** emit `pr.opened/updated/...`. External
+  rows are written straight to the store for the UI; they never reach
+  `maybeAskRebase` / `ingestFollowups` / `scheduleReconcile`.
+
+> **The hazard, restated as a hard rule:** external PRs must not flow through the
+> `pr.*` subscribers. Auto-rebase would post `@claude rebase` on a stranger's PR;
+> reconcile-on-merge is meaningless for a non-task PR. Enforce by construction —
+> Tier 2 writes rows without emitting events — and belt-and-braces by guarding
+> `maybeAskRebase` / `enrich` / `ingest` / `scheduleReconcile` on `taskId != null`.
+
+A pragmatic **v1 shortcut** that avoids two queries: keep the *single* existing
+query, add `author`, and just stop `continue`-ing past unresolved PRs — persist
+them with `taskId=null` and skip enrichment. Accept that `history(first:100)` still
+runs on external nodes (wasteful but correct on a small repo), and **do not emit
+bus events for `taskId==null` PRs**. This is the least code to a working board;
+tighten to true two-tier only if the poll cost bites.
+
+### The first slice to build
+
+Ship the smallest thing that puts external open PRs in front of the operator with
+a working Review button. Explicitly **out of scope for slice 1:** Adopt, Dispatch,
+multi-repo, `reviewDecision`.
+
+1. **Schema + migration** — `task_id` nullable; add `author` (and
+   `authorAssociation`) to `pull_requests`; Drizzle migration in `drizzle/`.
+2. **Server fetch** — add `author{login} authorAssociation` to the GQL node;
+   replace the `if (taskId == null) continue;` with "keep it, `taskId=null`, skip
+   enrichment"; widen `CloudPr.taskId` to `number | null`; carry `author` through
+   `CloudPr` / `upsertPrState` / `rowToCloudPr`.
+3. **No new side-effects** — in `tick`, emit `pr.*` events **only** for
+   `taskId != null` PRs (external rows are upserted for the UI but never emitted).
+   Add `taskId != null` guards to the subscribers as defence-in-depth.
+4. **UI — new PRs pane** — a `PaneButton "PRs"` in `TopBar`; a pane reading
+   `pullRequestsCollection`, filtered to open, grouped **Ours** (`taskId != null`)
+   / **Theirs** (`taskId == null`), each row via `PrRow` (external variant shows
+   `author` instead of the agent chip/narrative). Review reuses `openReview`.
+5. **Verify** — per CLAUDE.md, render it: build the web bundle, seed a couple of
+   `pull_requests` rows (one PM, one external), screenshot the new pane, confirm
+   Review opens an external PR's diff.
+
+**Slice 2+ (follow-ups):** Adopt (set `taskId` / seed a task-from-PR proposal),
+gated Dispatch (`@claude` behind an explicit confirm, our/adopted PRs only),
+`reviewDecision` chip, and multi-repo fan-out over the `repos` table (`repoId` on
+the row).
+
+### Open questions for the operator
+
+- **"Per repo" now, or single-repo first?** Single-repo is the cheap first slice;
+  multi-repo (fan out over `repos`) is a meaningfully bigger lift. Recommend
+  single-repo v1 unless you're already juggling PRs across repos day-to-day.
+- **Do you want Dispatch (`@claude` a PR) at all for *external* PRs**, or should
+  that action be hard-limited to our/adopted PRs? Default proposed: our/adopted
+  only, explicit confirm.
+- **Should closed/merged external PRs ever show** (a "recently merged" tail), or is
+  the board strictly open PRs? Default proposed: open only.
