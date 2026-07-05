@@ -150,3 +150,104 @@ The brief says "all open PRs **per repo**." Today `resolveRepo()` resolves a
 all-PRs view means fanning the fetch out over the `repos` table (one GraphQL call
 per repo) and tagging each PR row with its repo. That's a larger lift than the
 single-repo widening and is called out as a **later slice**, not the first one.
+
+---
+
+## Phase 2 — Sketch the view: where all-PRs render, and what's actionable
+
+### There is no "issues" surface to sit beside
+
+The brief says "a pane/lens next to issues." Worth stating plainly: **PowderMonkey
+has no GitHub-issues surface today.** A grep for `issue`/`Issue` across `src/`
+turns up exactly one hit — `IssueComment databaseId` in `events.ts`, i.e. PR
+*comments*, not issues. The top-level panes (from `TopBar.tsx`) are: **Sessions,
+Tasks, Shell, Browser, Scratch, Settings, About, Help.** So "next to issues" is
+aspirational; the real question is which *existing* surface all-PRs belongs on, or
+whether it's a new one.
+
+### Where PRs render today
+
+Only one place: **inside worker cards on the Sessions pane.** `plan-data.ts`
+folds `cloudPrs` into a `Map<taskId, CloudPr>` (`prByTask`); `grouping.workerPrs`
+de-dupes the PRs across a session's tasks; `PrRow.tsx` renders each — a CI/conflict
+status dot, the `#number` link, the title, a **Review** link (`openReview`), and
+the worker's agent-state chip + narrative. The whole path is **task-keyed**: no
+task ⇒ no home for the PR.
+
+### Three candidate homes (and the pick)
+
+| Option | Fit | Verdict |
+|---|---|---|
+| **A. New "PRs" pane** (PaneButton beside Sessions/Tasks) | A repo-wide board of open PRs, PM + external, grouped. Reuses `PrRow`. | ✅ **Pick.** Clean home; matches the mental model ("all PRs on the repo"). |
+| **B. A lens/filter on Sessions** | Sessions is *session*-centric — one card per live worker. External PRs have **no session**, so they'd be orphans crammed into a session view. | ❌ Poor fit. |
+| **C. A section on Tasks** | Tasks is the *plan* (Goals→…→Tasks). External PRs aren't tasks; they'd dilute the plan. | ❌ Poor fit (until/unless "adopt" turns one into a task). |
+
+**Pick A: a new top-level "PRs" pane.** It reads `pullRequestsCollection`
+directly (already live-synced to the browser — `collections.ts`), needs no
+task-keying, and reuses `PrRow` almost verbatim. Sessions keeps showing *our*
+PRs in worker context; the PRs pane is the repo-wide roll-up.
+
+### Sketch of the pane
+
+Two groups, because the operator cares about the ours/theirs split more than
+anything else:
+
+```
+┌ PRs ────────────────────────────────────────────── [⟳ synced 4s ago] ┐
+│                                                                        │
+│  Ours (PM tasks)                                                       │
+│   ● #166  archive merged sessions        working ▸   t166   [Review]   │
+│   ● #170  native windows repo-sets       blocked ▸   t170   [Review]   │
+│                                                                        │
+│  Theirs (external)                                                     │
+│   ● #171  Bump vite 5→6            dependabot[bot]  draft   [Review]    │
+│   ● #172  fix: typo in README         @acollab              [Review]   │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Status dot** — reuse `prDot()` verbatim (CI + conflicts + merged, GitHub-style).
+- **`#number` + title** — as `PrRow` does now.
+- **Review** — reuse `openReview(pr.number, pr.title)` as-is (see below).
+
+### Marking PM-driven vs external
+
+The signal is already in the row: **`taskId` presence.**
+
+- **Ours (PM):** `taskId != null`. Show the task chip (`t166`, links to the card),
+  the agent-state badge, and the agent narrative — exactly `PrRow` today.
+- **Theirs (external):** `taskId == null`. Swap the agent chip for the **author**
+  (`author.login` + a bot/human/collaborator hint from `authorAssociation`), and
+  drop the narrative (there's no PM status comment to show). A small **"external"**
+  or bot glyph reads at a glance.
+
+No new persisted flag needed — `taskId == null` *is* the discriminator. (An
+`authorAssociation` of `OWNER`/`MEMBER`/`COLLABORATOR` vs `NONE`/`CONTRIBUTOR`
+lets us further tint "trusted collaborator" vs "outside contributor" if wanted.)
+
+### Is an external PR actionable? Yes — three tiers, mostly already built
+
+1. **Open review — free today.** `openReview(number, title)` → `ReviewPane` →
+   `GET /prs/:number/review` → `pr-review.ts` → `gh api repos/{o}/{r}/pulls/{n}`.
+   **None of that path is PM-specific** — it takes a PR *number*. So the Review
+   button works on an external PR with zero new server code. This is the single
+   biggest reason the spike is cheap: the expensive surface (diff render, inline
+   comments, batched review verdict) is already number-keyed.
+2. **Adopt — small new action.** "Adopt" ties an external PR to PM: either create
+   a task *from* the PR (title/body seed a `create task` proposal) or link the PR
+   to an existing task by writing `taskId` onto its `pull_requests` row. Adoption
+   is what moves a PR from **Theirs → Ours** and, from that point, lets the normal
+   PM machinery (task card, reconcile-on-merge) engage. Because the store is keyed
+   by number, adoption is a single `UPDATE … SET task_id` — no row copy, no dedup.
+3. **Dispatch / `@claude` — exists, but gate it.** `askClaude(number, msg)` already
+   posts an `@claude …` comment on any PR (it's how auto-rebase talks to live
+   workers). We *could* dispatch a cloud worker at an external PR (e.g. "address the
+   review comments"). **But** `@claude`-ing a human contributor's PR is a different
+   social contract than nudging our own worker — so this must be an explicit,
+   confirmed operator action, never automatic, and ideally only offered on PRs we
+   own or have adopted. (This is the same hazard the data-model section flags for
+   the *auto*-rebase subscriber.)
+
+**Actionability summary:** Review = free now · Adopt = small · Dispatch = exists
+but must be gated behind an explicit click and, by default, scoped to our/adopted
+PRs.
