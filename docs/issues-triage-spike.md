@@ -9,6 +9,28 @@
 This doc is built up across the spike's three phases: **Survey** (below), **Issue → task**,
 then the **Recommendation + rough design + first slice**.
 
+## TL;DR
+
+- **Build read-only issues triage that mirrors the PR watcher end-to-end.** Almost every
+  moving part already exists; the net-new code is small.
+- **Server** — a second instance of the `github-watch` pattern: one `gh api graphql` poll
+  of `Repository.issues` per repo, `diff → upsert` into a new **`github_issues`** cache
+  table (+ a small triage ledger), reusing the existing loop, bus, and `gh` seam. Issues
+  change slower than active PRs, so poll on a slower cadence than the 10s PR tick.
+- **UI** — an **Issues list pane** in the dock (a triage inbox), backed by a **one-line
+  live-synced TanStack DB collection** over the existing `/sync` WebSocket, exactly like
+  `pull_requests`. No client polling, no bespoke fetch.
+- **Triage reuses the proposal path.** An issue is (title + body) → a pending `create
+  task` proposal (a thin `proposeIssueTriage` beside `proposeFollowup`) → the **existing**
+  decision queue → the **existing** `POST /tasks/:id/dispatch`. The only genuinely new
+  logic is **repo binding** (set the task's `repoId` from the issue's repo) and an
+  issue-identity **dedup ledger**.
+- **Read-only is the right cut.** No writes to GitHub: the dispatched worker's PR
+  `Closes #N`, and **GitHub auto-closes the issue on merge** — the close is free. The only
+  two-way write worth anything (a backlink comment) is a small additive follow-on.
+- **First slice** (bottom of this doc): the thin vertical — poll + cache table + live
+  collection + Issues pane + one "Triage" button — reusing proposals and dispatch entirely.
+
 ## Survey
 
 ### How `github-watch` pulls PRs today
@@ -223,3 +245,134 @@ does it for us.**
 Net: **read-only is the right cut.** It delivers the entire triage-and-dispatch loop, the
 close is handled by GitHub's existing PR→issue link, and the only two-way write with real
 value (a backlink comment) is a small, additive follow-on that reuses the `gh` seam.
+
+## Recommendation
+
+**Add read-only GitHub issue triage as a second instance of the existing PR-watch
+pattern, feeding the existing proposal + dispatch machinery through one new "triage"
+seam.** Concretely: a `github_issues` cache table filled by a GraphQL poll, live-synced to
+an **Issues** dock pane, with a per-row "Triage" action that authors a `create task`
+proposal from the issue. Everything downstream of the proposal — review, approve, dispatch,
+reconcile-on-merge — is untouched. This maximises reuse (the watcher shape, the bus, the
+`gh` seam, the live-sync collections, the proposal queue, the dispatcher all already
+exist) and keeps the net-new surface to: one GraphQL query, one table + store, one
+collection registration, one pane, and one `proposeIssueTriage` function.
+
+## Rough design
+
+### Data model
+
+A new `github_issues` table, modelled column-for-column on `pull_requests` (`schema.ts:214`)
+— a **cache** of polled GitHub state plus a tiny **triage ledger**, the same cache/ledger
+split whose two write paths stay separate:
+
+```
+github_issues
+  repo_id     integer   → repos.id   (which repo it came from; part of the key)
+  number      integer                (issue number, unique per repo)
+  title       text
+  url         text
+  state       text      OPEN | CLOSED
+  author      text      login
+  body        text      (for the triage view + task description)
+  labels      jsonb     [{ name, color }]        — like proposals.changes, a JSON column
+  gh_created_at text                             (issue createdAt)
+  gh_updated_at text                             (issue updatedAt — the diff/sort key)
+  comment_count integer
+  -- triage ledger (survives restarts; the poll upsert never touches these) --
+  triaged_proposal_id integer  → the proposal a triage authored (null until triaged)
+  dismissed_at        timestamp (operator hid it from the inbox without triaging)
+  ...timestamps
+```
+
+Primary key is the composite `(repo_id, number)` — an issue's identity is repo-scoped
+(so is a PR's, but the current PR table keys on `number` alone because it watches one
+repo; issues should be multi-repo-ready from the start per `vocabulary.md`). Register it as
+a live-synced collection in `collections.ts` (`syncedCollection<GithubIssue>("github_issues", …)`)
+so the pane reads it reactively with no fetch route.
+
+**Proposal provenance.** The `proposals` table already carries `sourceTaskId` / `sourcePr`
+/ `sourceCommentId` for follow-up provenance (`schema.ts:297`). Add the issue analogues —
+`sourceIssueNumber` + `sourceRepoId` (nullable, null on a normal plan-edit proposal) — so a
+triage proposal traces back to its issue and the dedup check has a key. The proposed task's
+`fields` carry `repoId` (from the issue's repo), `title`, `description` (issue body + a
+`Closes #N` hint), and `kind` (labels → `bug`/`task`).
+
+### Sync cadence
+
+Reuse the `github-watch` loop rather than a second timer where possible. Issues move slower
+than active PRs, so they don't need the 10s PR cadence:
+
+- **Simplest:** fold an issues fetch into the same tick but run it every *N*th tick (e.g.
+  every 6th → ~60s), or gate it behind its own interval
+  `PM_GITHUB_ISSUES_INTERVAL_MS` (default ~60_000; `0` disables, like the PR watcher).
+- **Cost** is ~1 GraphQL point per repo per issues-poll — negligible against the 5000/hr
+  budget even across several registered repos.
+- The multi-repo story is identical to PRs: `vocabulary.md` already anticipates "PR
+  watching polls each registered repo instead of one cached global slug" — issues ride the
+  same loop over the repos registry.
+
+### Dedup
+
+Two dedup layers, both mirroring existing code:
+
+1. **Poll dedup (don't re-emit on churn).** A `sig(issue)` over the fields we react to
+   (`state | title | labels | gh_updated_at`) and a pure `diffGithubIssues(prev, next)`,
+   copied from `sig` / `diffCloudPrs` (`github-watch.ts:320`, `:334`). Upsert changed rows;
+   leave the rest.
+2. **Triage dedup (don't re-propose).** Before authoring, check whether the issue already
+   has a live/decided triage proposal — via `triaged_proposal_id` on the issue row, or a
+   lookup on `proposals.sourceIssueNumber + sourceRepoId` (archived rows included, so a
+   *rejected* triage stays gone). This is the direct analogue of the follow-up ingest's
+   idempotency on `sourceCommentId` (`followups.ts:141`). Triage is **operator-initiated**
+   in v1 (a button), not auto-ingested, so this guard mostly prevents a double-click and a
+   re-triage of an already-handled issue — but it's the same mechanism, ready if auto-ingest
+   is ever wanted.
+
+### UI surface
+
+- **Primary: an `Issues` list pane** (the triage inbox), registered like any dock pane —
+  `dockComponents` + `PANE_TITLES` in `layout.ts`, an `IssuesPanel.tsx` wrapper, a
+  `PaneButton` in `TopBar.tsx`, and the pane under `src/web/panes/issues/`. It reads the
+  `githubIssues` collection via `useLiveQuery` and renders one row per open issue: the
+  repo's colour swatch + icon (repos already have both — `vocabulary.md` § Repo), title
+  (link to GitHub), labels (coloured chips from the `labels` jsonb), author, and a relative
+  `updatedAt` (`src/web/time.ts`). Filters mirror the existing `FilterBar` (by repo, by
+  label, by author). Each row's action is **"Triage"** → `POST /issues/:repo/:number/triage`
+  → `proposeIssueTriage` → a toast ("proposed as a task — review in Proposals"), and a
+  **"Dismiss"** to hide an issue from the inbox (`dismissed_at`).
+- **The approve step needs no new UI** — the authored proposal shows up in the existing
+  Proposals decision queue (the `ProposedStrip` / proposal review flow under
+  `src/web/panes/tasks/`), and once applied the task is dispatchable from its normal card.
+- **Optional later: an issue-detail takeover lens** for reading one issue's body +
+  comments in depth, copying the `ReviewOverlay` pattern (`store.openReview` → a
+  `position:fixed` overlay). Not needed for triage; the list row + GitHub link cover v1.
+
+## First slice
+
+The smallest end-to-end vertical that proves the loop — **poll an issue, see it in a pane,
+turn it into a dispatched task** — reusing proposals and dispatch entirely:
+
+1. **`fetchRepoIssues()`** in a new `src/server/issues.ts` (or folded into `github-watch`):
+   the GraphQL query from the Survey, returning a typed `GithubIssue[]`; `null` on failure,
+   like `fetchCloudPrs`.
+2. **`github_issues` table + `issue-store.ts`** (`upsertIssueState`, `listIssues`), and a
+   poll that `diff`s and upserts on the watch loop's slower cadence.
+3. **`githubIssuesCollection`** — one line in `collections.ts` — so the browser gets it live.
+4. **The `Issues` pane** — list rows (title, labels, author, updatedAt, repo swatch) + a
+   **Triage** button. Register it in `layout.ts` / `TopBar.tsx`.
+5. **`proposeIssueTriage(issue)`** beside `proposeFollowup` — resolve the issue's repo in
+   the registry, author a `create task` proposal with `repoId` set and `Closes #N` in the
+   description, stamp `sourceIssueNumber` / `sourceRepoId`, dedup on it. Route:
+   `POST /issues/:repoId/:number/triage`.
+
+**Deferred (explicitly out of the first slice):** the per-repo Triage/Inbox milestone (use
+the best-guess parent + operator re-parent), the issue-detail overlay, any two-way write
+(backlink comment / close), auto-ingest of issues into proposals, and pagination past 100
+open issues.
+
+**What the first slice deliberately reuses unchanged:** `createProposal` + the whole
+proposal decision/apply flow, `POST /tasks/:id/dispatch` and the repo-cache clone,
+reconciliation's PR→issue close on merge, the `/sync` collection engine, the `gh` seam, and
+the `github-watch` loop/bus. The net-new code is one query, one table + store, one
+collection line, one pane, and one `proposeIssueTriage` — the rest is wiring.
