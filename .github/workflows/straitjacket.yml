@@ -24,3 +24,5 @@ jobs:
       # job on any finding, so new slop can't land. SARIF still uploads to code scanning
       # by default. Needs >=v0.2.2 (allow-file suppresses duplication; 0.2.3 in Markdown too).
       - uses: zmaril/straitjacket@v0.2.3
+        with:
+          version: v0.2.3   # pin the scanner too; unset defaults to latest (floats)
