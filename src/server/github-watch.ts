@@ -2,6 +2,7 @@ import { inArray } from "drizzle-orm";
 import { AgentState, MergeableState, PrState } from "../shared/types.ts";
 import { taskRepo } from "./crud.ts";
 import { db } from "./db.ts";
+import { entl, entlRows, watchRepoDir } from "./entl.ts";
 import {
   type AgentStatus,
   bus,
@@ -10,7 +11,7 @@ import {
   type FollowupComment,
 } from "./events.ts";
 import { ingestFollowups } from "./followups.ts";
-import { askClaude, gh, resolveRepo } from "./gh.ts";
+import { askClaude, resolveRepo } from "./gh.ts";
 import { pullMain } from "./git.ts";
 import {
   clearRebaseAsked,
@@ -37,8 +38,9 @@ import { getAutoRebase } from "./settings.ts";
 //
 // "Realtime" is efficient polling: GitHub offers no client push for repo events
 // short of webhooks (which need a public endpoint — PowderMonkey is localhost).
-// A 10s GraphQL poll over `gh` auth costs ~1 point of a 5000/hr budget and feels
-// live enough. Live agent micro-state (needs-you / retry) is deliberately NOT
+// Each tick is one incremental entl sync (etag-gated: ~1 REST + ~6 GraphQL
+// points when idle, of a 5000/hr budget) followed by local SQL, and feels live
+// enough. Live agent micro-state (needs-you / retry) is deliberately NOT
 // tracked here — that's the Claude web/mobile app's job.
 
 const INTERVAL_MS = Number(process.env.PM_GITHUB_WATCH_INTERVAL_MS ?? 10_000);
@@ -46,77 +48,121 @@ const INTERVAL_MS = Number(process.env.PM_GITHUB_WATCH_INTERVAL_MS ?? 10_000);
 // bare `pm/task-2` form too.
 const BRANCH_RE = /^pm\/task-(\d+)(?:-|$)/;
 
-const GQL = `query($owner:String!,$name:String!){
-  repository(owner:$owner,name:$name){
-    pullRequests(first:100, orderBy:{field:UPDATED_AT, direction:DESC}){
-      nodes{
-        number title url state isDraft merged mergeable updatedAt headRefName
-        checks: commits(last:1){nodes{commit{statusCheckRollup{state}}}}
-        history: commits(first:100){nodes{commit{messageBody}}}
-        comments(last:30){nodes{databaseId url body updatedAt}}
-      }
-    }
-  }
-}`;
+// The shapes the entl queries return (JSON rows from DuckDB — timestamps are
+// ISO strings, booleans real booleans, comment ids plain numbers).
+type PrRow = {
+  number: number;
+  title: string | null;
+  state: string;
+  isDraft: boolean;
+  merged: boolean;
+  checks: string | null;
+  mergeable: string | null;
+  headRefName: string | null;
+  updatedAt: string | null;
+};
+type CommentRow = { pr: number; id: number; body: string | null; createdAt: string | null };
 
 /** Fetch the current state of every PR we can tie to a task — by branch name
  *  (`pm/task-<id>-…`) or, failing that, its commit trailers (see resolveTaskId).
- *  Returns `null` on a fetch failure (no gh, no auth, network blip, bad JSON) so
- *  the caller can leave the last-known state untouched; an empty array means the
- *  fetch succeeded and there genuinely are no matching PRs. */
+ *  One incremental entl sync (etag-gated) pulls GitHub into the local store,
+ *  then everything is SQL. Returns `null` on a sync/query failure so the caller
+ *  can leave the last-known state untouched; an empty array means the fetch
+ *  succeeded and there genuinely are no matching PRs. */
 export async function fetchCloudPrs(): Promise<CloudPr[] | null> {
-  const repo = await resolveRepo();
-  if (!repo) return null;
-  const r = await gh([
-    "api",
-    "graphql",
-    "-f",
-    `owner=${repo.owner}`,
-    "-f",
-    `name=${repo.name}`,
-    "-f",
-    `query=${GQL}`,
-  ]);
-  if (!r.ok) {
-    console.warn("github-watch: gh graphql failed:", r.stderr.trim().slice(0, 200));
-    return null;
-  }
-  // biome-ignore lint/suspicious/noExplicitAny: untyped GraphQL JSON, narrowed below.
-  let data: any;
   try {
-    data = JSON.parse(r.stdout);
-  } catch {
+    // Git first: it creates/refreshes the `repos` row (which the GitHub sync
+    // enriches with owner/name) and keeps `commits` current for the trailer
+    // join below. Incremental — sub-second when nothing moved.
+    await entl().loadGit(watchRepoDir());
+    await entl().loadGithub(watchRepoDir());
+  } catch (e) {
+    console.warn("github-watch: entl sync failed:", e instanceof Error ? e.message : e);
     return null;
   }
-  const nodes = data?.data?.repository?.pullRequests?.nodes ?? [];
-  const prs: CloudPr[] = [];
-  for (const n of nodes) {
-    const commitText = (n.history?.nodes ?? [])
-      .map((c: { commit?: { messageBody?: string } }) => c.commit?.messageBody ?? "")
-      .join("\n");
-    const taskId = await resolveTaskId(n.headRefName ?? "", commitText);
-    if (taskId == null) continue; // can't tie this PR to a task — skip it
-    const lastAgent = lastAgentComment(n.comments?.nodes ?? []);
-    prs.push({
-      taskId,
-      number: n.number,
-      title: n.title ?? "",
-      url: n.url,
-      state: n.state,
-      isDraft: !!n.isDraft,
-      merged: !!n.merged,
-      checks: n.checks?.nodes?.[0]?.commit?.statusCheckRollup?.state ?? null,
-      mergeable: n.mergeable ?? null,
-      headRefName: n.headRefName,
-      updatedAt: n.updatedAt,
-      agent: statusFromComments(n.comments?.nodes ?? []),
-      followups: followupsFromComments(n.comments?.nodes ?? []),
-      lastComment: lastAgent?.body ?? null,
-      lastCommentAt: lastAgent?.updatedAt ?? null,
-      lastCommentUrl: lastAgent?.url ?? null,
-    });
+  try {
+    // The repo slug (owner/name) — entl fills it from the forge on active syncs;
+    // PR/comment URLs are constructed from it (they're deterministic on GitHub).
+    const [slugRow] = await entlRows<{ owner: string | null; name: string | null }>(
+      "SELECT owner, name FROM repos WHERE owner IS NOT NULL LIMIT 1",
+    );
+    const slug = slugRow?.owner && slugRow?.name ? `${slugRow.owner}/${slugRow.name}` : null;
+
+    // Timestamps formatted to ISO-8601 UTC (entl stores UTC), matching what the
+    // GraphQL API used to return — downstream date parsing stays unchanged.
+    const prRows = await entlRows<PrRow>(
+      `SELECT number, title, state,
+              is_draft   AS "isDraft",
+              (state = 'MERGED' OR merged_at IS NOT NULL) AS merged,
+              checks, mergeable,
+              head_ref   AS "headRefName",
+              strftime(updated_at, '%Y-%m-%dT%H:%M:%SZ') AS "updatedAt"
+       FROM gh_pull_requests ORDER BY updated_at DESC LIMIT 100`,
+    );
+    // Oldest→newest, matching the GraphQL contract the parsers assume. Workers
+    // can't edit comments (the append-only status contract), so created_at IS
+    // the comment's update time.
+    const commentRows = await entlRows<CommentRow>(
+      `SELECT subject_number AS pr, id, body,
+              strftime(created_at, '%Y-%m-%dT%H:%M:%SZ') AS "createdAt"
+       FROM gh_comments WHERE subject_type = 'pr' ORDER BY created_at ASC`,
+    );
+    // Commit messages per PR, for the trailer fallback when the branch name
+    // carries no task id. Only commits present locally join (the supervisor
+    // repo tracks main) — the branch-name happy path doesn't need this.
+    const trailerRows = await entlRows<{ pr: number; message: string }>(
+      `SELECT pc.pr_number AS pr, c.message
+       FROM gh_pr_commits pc JOIN commits c ON c.oid = pc.commit_oid`,
+    );
+
+    const commentsByPr = new Map<
+      number,
+      { databaseId: number; url: string | undefined; body: string; updatedAt: string | undefined }[]
+    >();
+    for (const c of commentRows) {
+      const list = commentsByPr.get(c.pr) ?? [];
+      list.push({
+        databaseId: c.id,
+        url: slug ? `https://github.com/${slug}/pull/${c.pr}#issuecomment-${c.id}` : undefined,
+        body: c.body ?? "",
+        updatedAt: c.createdAt ?? undefined,
+      });
+      commentsByPr.set(c.pr, list);
+    }
+    const trailersByPr = new Map<number, string>();
+    for (const t of trailerRows)
+      trailersByPr.set(t.pr, `${trailersByPr.get(t.pr) ?? ""}${t.message}\n`);
+
+    const prs: CloudPr[] = [];
+    for (const row of prRows) {
+      const taskId = await resolveTaskId(row.headRefName ?? "", trailersByPr.get(row.number) ?? "");
+      if (taskId == null) continue; // can't tie this PR to a task — skip it
+      const comments = commentsByPr.get(row.number) ?? [];
+      const lastAgent = lastAgentComment(comments);
+      prs.push({
+        taskId,
+        number: row.number,
+        title: row.title ?? "",
+        url: slug ? `https://github.com/${slug}/pull/${row.number}` : "",
+        state: row.state as PrState,
+        isDraft: !!row.isDraft,
+        merged: !!row.merged,
+        checks: (row.checks as CloudPr["checks"]) ?? null,
+        mergeable: (row.mergeable as CloudPr["mergeable"]) ?? null,
+        headRefName: row.headRefName ?? "",
+        updatedAt: row.updatedAt ?? "",
+        agent: statusFromComments(comments),
+        followups: followupsFromComments(comments),
+        lastComment: lastAgent?.body ?? null,
+        lastCommentAt: lastAgent?.updatedAt ?? null,
+        lastCommentUrl: lastAgent?.url ?? null,
+      });
+    }
+    return prs;
+  } catch (e) {
+    console.warn("github-watch: entl query failed:", e instanceof Error ? e.message : e);
+    return null;
   }
-  return prs;
 }
 
 // The marker on a worker's status comment. Cloud workers can't edit comments — the

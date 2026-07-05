@@ -1,7 +1,12 @@
 // The supervisor pulls `main` to *know* the repo's current state before it plans
 // or reports — NOT for execution correctness (the cloud always execs against
 // main regardless). See design.md "Running".
+//
+// READS go through entl (in-process gix — no subprocess, no output parsing);
+// WRITES (pull/clone/fetch/worktree ops) stay on the git CLI — entl is
+// read-only by design.
 
+import * as entlGit from "@entl/node";
 import { spawnCapture } from "./proc.ts";
 
 export type GitResult = { ok: boolean; output: string };
@@ -21,24 +26,39 @@ export function pullMain(): Promise<GitResult> {
   return run(["pull", "--ff-only", "origin", "main"]);
 }
 
+/** The repo reads default to, mirroring `run()`'s cwd rule. */
+function readRepo(cwd?: string): string {
+  return cwd ?? process.env.PM_REPO_DIR ?? process.cwd();
+}
+
 export async function currentBranch(): Promise<string> {
-  const r = await run(["rev-parse", "--abbrev-ref", "HEAD"]);
-  return r.output;
+  try {
+    return await entlGit.currentBranch(readRepo());
+  } catch {
+    return "";
+  }
 }
 
 /**
- * Concatenated commit message bodies for every commit reachable from `branch`.
- * Reconciliation scans these for PM trailers. Returns "" if the branch is missing
- * (e.g. a fresh repo) rather than throwing.
+ * Concatenated commit message bodies for every commit reachable from `branch`
+ * (NUL-separated). Reconciliation scans these for PM trailers. entl walks from
+ * BOTH the local branch and `origin/<branch>`, so a fetched-but-unpulled merge
+ * is scanned too. Returns "" if the branch is missing rather than throwing.
  */
 export async function commitBodies(branch: string): Promise<string> {
-  const r = await run(["log", branch, "--format=%B%x00"]);
-  return r.ok ? r.output : "";
+  try {
+    return await entlGit.commitBodies(readRepo(), branch);
+  } catch {
+    return "";
+  }
 }
 
 export async function branchExists(branch: string, cwd?: string): Promise<boolean> {
-  const r = await run(["rev-parse", "--verify", "--quiet", branch], cwd);
-  return r.ok;
+  try {
+    return await entlGit.branchExists(readRepo(cwd), branch);
+  } catch {
+    return false;
+  }
 }
 
 /** Clone `url` into `dir` (a fresh cache clone). The target path is absolute, so
@@ -68,15 +88,14 @@ export async function worktreeAdd(
 
 /** List remote branch names (without the `refs/heads/` prefix) matching `pattern`,
  *  e.g. `refs/heads/pm/task-12*`. Returns [] when the remote has no match (or the
- *  call fails). Used to discover the branch a cloud worker pushed for a task. */
+ *  call fails). Used to discover the branch a cloud worker pushed for a task.
+ *  entl fetches origin first, so a just-pushed branch is visible immediately. */
 export async function lsRemoteHeads(pattern: string): Promise<string[]> {
-  const r = await run(["ls-remote", "--heads", "origin", pattern]);
-  if (!r.ok || !r.output) return [];
-  return r.output
-    .split("\n")
-    .map((line) => line.split("\t")[1])
-    .filter((ref): ref is string => Boolean(ref))
-    .map((ref) => ref.replace(/^refs\/heads\//, ""));
+  try {
+    return await entlGit.lsRemoteHeads(readRepo(), pattern);
+  } catch {
+    return [];
+  }
 }
 
 /** Add a worktree checked out to `branch`, which may exist only on the remote (the
