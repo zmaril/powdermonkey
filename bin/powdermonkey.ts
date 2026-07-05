@@ -16,7 +16,7 @@
 // there); PowderMonkey only supplies the code. `attach` doesn't even need the cwd —
 // the tmux socket is global per user — so it works from anywhere.
 
-import { mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pkg from "../package.json" with { type: "json" };
@@ -36,8 +36,14 @@ usage:
   powdermonkey alias [dir]      symlink a short \`pm\` alongside powdermonkey (opt-in)
   powdermonkey backup [file]    save a version-independent JSON snapshot of the store
                                 (from the running supervisor; default data/backups/…)
+  powdermonkey backup --branch <name> [--push]
+                                export the snapshot to a git branch (optionally push it)
+  powdermonkey backup --pr      export the snapshot to a fresh branch and open a PR
   powdermonkey restore <file>   load a snapshot into a fresh store (stop the supervisor
                                 first — restore needs the exclusive writer lock)
+  powdermonkey restore --branch <name>
+  powdermonkey restore --pr <number>
+                                restore from a snapshot on a branch / PR instead of a file
   powdermonkey --version        print the version
 
 Needs tmux and git on PATH (and, unless you run the compiled binary, bun).`;
@@ -137,8 +143,60 @@ switch (cmd) {
     break;
   case "backup": {
     // Backups go through the running supervisor — it holds the single writer lock, so a
-    // second process can't open the store. Save the /backup response to disk.
+    // second process can't open the store.
     const base = process.env.PM_URL ?? `http://localhost:${process.env.PORT ?? "4500"}`;
+
+    // `--branch`/`--pr` export the snapshot to git via /backup/export (also needs the
+    // supervisor, for the same writer-lock reason).
+    if (rest[0] === "--branch" || rest[0] === "--pr") {
+      const target = rest[0] === "--pr" ? "pr" : "branch";
+      const payload: Record<string, unknown> = { target };
+      if (target === "branch") {
+        if (!rest[1]) {
+          console.error("usage: powdermonkey backup --branch <name> [--push]");
+          process.exit(2);
+        }
+        payload.branch = rest[1];
+        payload.push = rest.includes("--push");
+      }
+      let r: Response;
+      try {
+        r = await fetch(`${base}/backup/export`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        console.error(`couldn't reach the supervisor at ${base} — is it running?`);
+        process.exit(1);
+      }
+      const out = (await r.json()) as {
+        error?: string;
+        rows: number;
+        branch: string;
+        sha: string;
+        pushed: boolean;
+        prUrl?: string | null;
+      };
+      if (!r.ok) {
+        console.error(`export failed: ${out.error ?? r.statusText}`);
+        process.exit(1);
+      }
+      if (target === "pr") {
+        console.log(
+          out.prUrl
+            ? `exported ${out.rows} rows → PR ${out.prUrl}`
+            : `exported ${out.rows} rows → branch ${out.branch} (pushed; PR not created — check gh auth)`,
+        );
+      } else {
+        console.log(
+          `exported ${out.rows} rows → branch ${out.branch}${out.pushed ? " (pushed)" : ""} @ ${out.sha.slice(0, 8)}`,
+        );
+      }
+      process.exit(0);
+    }
+
+    // Default: save the /backup response to disk.
     let res: Response;
     try {
       res = await fetch(`${base}/backup`);
@@ -167,12 +225,35 @@ switch (cmd) {
     break;
   }
   case "restore": {
-    const file = rest[0];
-    if (!file) {
-      console.error("usage: powdermonkey restore <file.json>");
-      process.exit(2);
+    // Resolve the snapshot source first — a file (default), a branch, or a PR. This is
+    // DB-free (backup-source.ts leans only on git/gh), so we read the source BEFORE
+    // opening the store below (opening it takes the writer lock).
+    let snap: import("../src/server/backup.ts").Snapshot;
+    const src = await import("../src/server/backup-source.ts");
+    try {
+      if (rest[0] === "--branch") {
+        if (!rest[1]) {
+          console.error("usage: powdermonkey restore --branch <name>");
+          process.exit(2);
+        }
+        snap = await src.readSnapshotFromBranch({ branch: rest[1] });
+      } else if (rest[0] === "--pr") {
+        const n = Number(rest[1]);
+        if (!Number.isInteger(n) || n <= 0) {
+          console.error("usage: powdermonkey restore --pr <number>");
+          process.exit(2);
+        }
+        snap = await src.readSnapshotFromPr(n);
+      } else if (rest[0]) {
+        snap = src.readSnapshotFromFile(rest[0]);
+      } else {
+        console.error("usage: powdermonkey restore <file.json> | --branch <name> | --pr <number>");
+        process.exit(2);
+      }
+    } catch (e) {
+      console.error(`couldn't read snapshot: ${e instanceof Error ? e.message : e}`);
+      process.exit(1);
     }
-    const snap = JSON.parse(readFileSync(file, "utf8"));
     // Importing db.ts opens the store and takes the exclusive writer lock — it throws if
     // the supervisor is still up, which is exactly the guard we want.
     let dbmod: typeof import("../src/server/db.ts");
@@ -187,7 +268,7 @@ switch (cmd) {
     await dbmod.ready(); // build the schema on the (expected-fresh) store
     try {
       const n = await restoreSnapshot(dbmod.pg as unknown as SqlClient, snap);
-      console.log(`restored ${n} rows from ${file}`);
+      console.log(`restored ${n} rows`);
       process.exit(0);
     } catch (e) {
       console.error(`restore failed: ${e instanceof Error ? e.message : e}`);
