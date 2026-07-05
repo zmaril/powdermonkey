@@ -1,3 +1,8 @@
+// straitjacket-allow-file:duplication  unitIndices intentionally mirrors the server's
+// apply.unitIndices while the boundary is being drawn — this is the generic, host-agnostic
+// lifting of that algorithm, and the two coexist by design until the deferred migration
+// has apply.ts delegate to Nervo (under the boundary lint). See docs/layers.md § Packaging.
+//
 // Nervo — the proposals model.
 //
 // A proposal is a pending change-set the operator decides on, one unit at a time. This
