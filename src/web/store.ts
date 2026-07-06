@@ -235,6 +235,26 @@ function errMsg(error: { value?: unknown; status?: unknown }): string {
   return String(v ?? error.status);
 }
 
+// Record a successful worker start for the StartPanel — shared by every start
+// flavor. `workspace` is where the work lives: a local worktree path, or the
+// display-only `vm:~/dir` of an exe session's clone.
+function recordStart(
+  set: (partial: Partial<State>) => void,
+  taskId: number,
+  data: { branch: string; prompt: string; trailers: string[] },
+  workspace: string,
+): void {
+  set({
+    lastStart: {
+      taskId,
+      branch: data.branch,
+      worktreePath: workspace,
+      prompt: data.prompt,
+      trailers: data.trailers,
+    },
+  });
+}
+
 // Run an action while flagging its `pending` key, so the button that triggered it can
 // show a spinner immediately and clear it once the work settles.
 async function withPending(
@@ -475,17 +495,7 @@ export const useStore = create<State>()(
         withPending(set, `start-local:${taskId}`, async () => {
           const { data, error } = await api.tasks({ id: taskId })["start-local"].post();
           if (error) return void set({ error: errMsg(error) });
-          if (data && "ok" in data && data.ok) {
-            set({
-              lastStart: {
-                taskId,
-                branch: data.branch,
-                worktreePath: data.worktreePath,
-                prompt: data.prompt,
-                trailers: data.trailers,
-              },
-            });
-          }
+          if (data && "ok" in data && data.ok) recordStart(set, taskId, data, data.worktreePath);
         }),
       dispatch: (taskId) =>
         withPending(set, `dispatch:${taskId}`, async () => {
@@ -499,17 +509,7 @@ export const useStore = create<State>()(
           .tasks({ id: primary })
           ["start-local"].post({ taskIds: rest, comment });
         if (error) return void set({ error: errMsg(error) });
-        if (data && "ok" in data && data.ok) {
-          set({
-            lastStart: {
-              taskId: primary,
-              branch: data.branch,
-              worktreePath: data.worktreePath,
-              prompt: data.prompt,
-              trailers: data.trailers,
-            },
-          });
-        }
+        if (data && "ok" in data && data.ok) recordStart(set, primary, data, data.worktreePath);
       },
       startExeMany: async (taskIds, comment) => {
         if (taskIds.length === 0) return;
@@ -519,17 +519,7 @@ export const useStore = create<State>()(
           ["start-exe"].post({ taskIds: rest, comment });
         if (error) return void set({ error: errMsg(error) });
         if (data && "ok" in data && data.ok) {
-          set({
-            lastStart: {
-              taskId: primary,
-              branch: data.branch,
-              // The workspace is the VM's clone, not a path on this machine — the
-              // start panel just displays it.
-              worktreePath: `${data.vm}:~/${data.workdir}`,
-              prompt: data.prompt,
-              trailers: data.trailers,
-            },
-          });
+          recordStart(set, primary, data, `${data.vm}:~/${data.workdir}`);
         }
       },
       dispatchMany: async (taskIds, comment) => {

@@ -1,21 +1,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
-import { CommentAuthor, SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
+import { and, asc, eq, isNull } from "drizzle-orm";
+import { CommentAuthor, SessionKind, SessionState } from "../shared/types.ts";
 import { listComments } from "./comments.ts";
 import { db } from "./db.ts";
 import { pullMain } from "./git.ts";
 import { repoDirForTask, supervisorRepoDir } from "./repo-cache.ts";
-import {
-  type Phase,
-  phases,
-  type Session,
-  sessions,
-  type Task,
-  type TaskComment,
-  tasks,
-} from "./schema.ts";
-import { linkSessionTasks } from "./session-tasks.ts";
+import { type Phase, phases, type Session, type Task, type TaskComment, tasks } from "./schema.ts";
+import { createSessionForTasks } from "./session-tasks.ts";
 
 const SHELL = process.env.SHELL || "bash";
 
@@ -180,6 +172,31 @@ export async function loadTaskPrompt(
   return { ...buildTaskPrompt(briefs, comment), tasks: briefs.map((b) => b.task) };
 }
 
+export type LaunchPrep =
+  | {
+      ok: true;
+      prompt: string;
+      trailers: string[];
+      tasks: Task[];
+      ids: number[];
+      primary: number;
+    }
+  | { ok: false; error: string };
+
+/** The shared prologue of every launch path (dispatch / start-local / start-exe):
+ *  build the combined brief and reject a selection that spans repos. `primary` is
+ *  the first task — it names branches, prompt files, and workspaces. */
+export async function prepareLaunch(
+  taskIds: number | number[],
+  comment?: string,
+): Promise<LaunchPrep> {
+  const built = await loadTaskPrompt(taskIds, comment);
+  if (!built) return { ok: false, error: `unknown task "${[taskIds].flat().join(", ")}"` };
+  if (spansRepos(built.tasks)) return { ok: false, error: CROSS_REPO_ERROR };
+  const ids = built.tasks.map((t) => t.id);
+  return { ok: true, ...built, ids, primary: ids[0] };
+}
+
 /** The dispatch command, with the prompt sourced from a file so a multi-line
  *  prompt never has to be shell-quoted. `{prompt_file}` is replaced with the path.
  *  NB: `claude --remote` (cloud) is interactive-only and rejects `--print`/`-p`;
@@ -247,13 +264,9 @@ export async function dispatchTask(
   taskIds: number | number[],
   comment?: string,
 ): Promise<DispatchResult> {
-  const built = await loadTaskPrompt(taskIds, comment);
-  if (!built) return { ok: false, error: `unknown task "${[taskIds].flat().join(", ")}"` };
-  if (spansRepos(built.tasks)) {
-    return { ok: false, error: CROSS_REPO_ERROR };
-  }
-  const ids = built.tasks.map((t) => t.id);
-  const primary = ids[0];
+  const built = await prepareLaunch(taskIds, comment);
+  if (!built.ok) return built;
+  const { ids, primary } = built;
 
   // Resolve the repo this task runs in and make its cache clone current: dispatch's
   // PTY runs with that clone as cwd, so `claude --remote` infers the right GitHub
@@ -305,22 +318,12 @@ export async function dispatchTask(
   // live in one place and "active" can be derived uniformly from a live session.
   // No worktree/branch on this side: the cloud session works against main and opens
   // its own PR, so `url` (the session) is what we hold; branch arrives via the PR.
-  // One session row, linked to every dispatched task via the session_tasks join, so
-  // each task surfaces the shared cloud run. Each task is also marked dispatched.
-  const [session] = await db
-    .insert(sessions)
-    .values({ kind: SessionKind.Remote, state: SessionState.Running, url: sessionUrl })
-    .returning();
-  await linkSessionTasks(session.id, ids);
-  await db
-    .update(tasks)
-    .set({
-      sessionUrl,
-      status: TaskStatus.Dispatched,
-      sessionState: SessionState.Running,
-      updatedAt: new Date(),
-    })
-    .where(inArray(tasks.id, ids));
+  // The tasks additionally record the cloud run's URL and state.
+  const session = await createSessionForTasks(
+    { kind: SessionKind.Remote, state: SessionState.Running, url: sessionUrl },
+    ids,
+    { sessionUrl, sessionState: SessionState.Running },
+  );
 
   return { ok: true, sessionUrl, session };
 }

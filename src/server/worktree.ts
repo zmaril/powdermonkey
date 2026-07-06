@@ -4,13 +4,13 @@ import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { match } from "ts-pattern";
 import { SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
-import { CROSS_REPO_ERROR, loadTaskPrompt, sessionStartup, spansRepos } from "./dispatch.ts";
+import { prepareLaunch, sessionStartup } from "./dispatch.ts";
 import { teardownExeWorkspace } from "./exe-session.ts";
 import { worktreeAdd, worktreeAddRemote, worktreeRemove } from "./git.ts";
 import { repoDirForTask, supervisorRepoDir } from "./repo-cache.ts";
 import { type Session, sessions, tasks } from "./schema.ts";
 import { killSessionPty, startSessionPty } from "./session-pty.ts";
-import { linkSessionTasks, taskIdsForSession } from "./session-tasks.ts";
+import { createSessionForTasks, taskIdsForSession } from "./session-tasks.ts";
 
 // A local session is the on-laptop mirror of `claude --remote`: an isolated git
 // worktree on `pm/task-<id>`, branched off main, where work happens without
@@ -80,12 +80,9 @@ export async function startLocalSession(
   taskIds: number | number[],
   opts: StartLocalOpts = {},
 ): Promise<StartLocalResult> {
-  const built = await loadTaskPrompt(taskIds, opts.comment);
-  if (!built) return { ok: false, error: `unknown task "${[taskIds].flat().join(", ")}"` };
-  if (spansRepos(built.tasks)) return { ok: false, error: CROSS_REPO_ERROR };
-  const { prompt, trailers } = built;
-  const ids = built.tasks.map((t) => t.id);
-  const primary = ids[0];
+  const prep = await prepareLaunch(taskIds, opts.comment);
+  if (!prep.ok) return prep;
+  const { prompt, trailers, ids, primary } = prep;
 
   // Resolve the repo this task's worktree is cut from: the task's cache clone (ensured
   // current), or the supervisor's own checkout for a repo-less task. The worktree is a
@@ -107,17 +104,10 @@ export async function startLocalSession(
     : await worktreeAdd(worktreePath, branch, baseRef, repoCwd);
   if (!add.ok) return { ok: false, error: "git worktree add failed", output: add.output };
 
-  // One session row for all the tasks, linked through the session_tasks join; each
-  // task is marked dispatched so the whole batch moves to Active together.
-  const [session] = await db
-    .insert(sessions)
-    .values({ kind: SessionKind.Local, state: SessionState.Running, branch, worktreePath })
-    .returning();
-  await linkSessionTasks(session.id, ids);
-  await db
-    .update(tasks)
-    .set({ status: TaskStatus.Dispatched, updatedAt: new Date() })
-    .where(inArray(tasks.id, ids));
+  const session = await createSessionForTasks(
+    { kind: SessionKind.Local, state: SessionState.Running, branch, worktreePath },
+    ids,
+  );
 
   // Stash the prompt where the startup command can reach it, then bring up the
   // session's persistent interactive PTY in the worktree. Clients attach to this

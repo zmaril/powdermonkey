@@ -1,12 +1,12 @@
-import { and, inArray, isNotNull, isNull } from "drizzle-orm";
-import { SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
+import { and, isNotNull, isNull } from "drizzle-orm";
+import { SessionKind, SessionState } from "../shared/types.ts";
 import { repoRepo } from "./crud.ts";
 import { db } from "./db.ts";
-import { CROSS_REPO_ERROR, loadTaskPrompt, sessionStartup, spansRepos } from "./dispatch.ts";
+import { prepareLaunch, sessionStartup } from "./dispatch.ts";
 import { lsVmNames, newVm, rmVm, sshVm, vmHost, writeVmFile } from "./exe.ts";
-import { type Session, sessions, tasks } from "./schema.ts";
+import { type Session, sessions } from "./schema.ts";
 import { killSessionPty, registerSessionHost, startSessionPty } from "./session-pty.ts";
-import { linkSessionTasks, taskIdsForSession } from "./session-tasks.ts";
+import { createSessionForTasks, taskIdsForSession } from "./session-tasks.ts";
 import { shq } from "./tmux.ts";
 
 // An exe session is start-local's off-box sibling: instead of cutting a git
@@ -67,17 +67,14 @@ export async function startExeSession(
   taskIds: number | number[],
   opts: { comment?: string } = {},
 ): Promise<StartExeResult> {
-  const built = await loadTaskPrompt(taskIds, opts.comment);
-  if (!built) return { ok: false, error: `unknown task "${[taskIds].flat().join(", ")}"` };
-  if (spansRepos(built.tasks)) return { ok: false, error: CROSS_REPO_ERROR };
-  const { prompt, trailers } = built;
-  const ids = built.tasks.map((t) => t.id);
-  const primary = ids[0];
+  const prep = await prepareLaunch(taskIds, opts.comment);
+  if (!prep.ok) return prep;
+  const { prompt, trailers, ids, primary } = prep;
 
   // An exe worker starts from a clone of the task's repo — there is no local
   // checkout to fall back on, so a repo-less task (the supervisor-checkout path
   // start-local supports) can't run here.
-  const repoId = built.tasks[0].repoId;
+  const repoId = prep.tasks[0].repoId;
   const repo = repoId ? await repoRepo.get(repoId) : null;
   if (!repo) {
     return { ok: false, error: "exe session needs a repo-pinned task (no repo to clone)" };
@@ -111,15 +108,10 @@ export async function startExeSession(
 
   // One session row for all the tasks, exactly like start-local — the vm column is
   // what makes teardown and the leak sweep able to find the box again.
-  const [session] = await db
-    .insert(sessions)
-    .values({ kind: SessionKind.Exe, state: SessionState.Running, branch, vm: vm.name })
-    .returning();
-  await linkSessionTasks(session.id, ids);
-  await db
-    .update(tasks)
-    .set({ status: TaskStatus.Dispatched, updatedAt: new Date() })
-    .where(inArray(tasks.id, ids));
+  const session = await createSessionForTasks(
+    { kind: SessionKind.Exe, state: SessionState.Running, branch, vm: vm.name },
+    ids,
+  );
 
   // Stash the prompt on the VM (outside the clone, so the agent never commits it),
   // then bring up the worker's durable tmux there. If the supervisor holds a Claude
