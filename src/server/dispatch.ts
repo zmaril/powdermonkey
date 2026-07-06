@@ -189,6 +189,18 @@ function dispatchCmd(promptPath: string): string {
   return tmpl.replaceAll("{prompt_file}", promptPath);
 }
 
+/** The command a worker session's PTY runs in its workspace (a local worktree, or
+ *  an exe VM's clone — the contract is identical). By default we hand the generated
+ *  prompt (task + phases + trailer block) straight to `claude` as its opening
+ *  message, so the worker knows what to build and starts immediately — no
+ *  copy/paste. The `{prompt_file}` placeholder is replaced with the absolute
+ *  prompt path; set PM_SESSION_CMD to override (e.g. PM_SESSION_CMD='claude' for a
+ *  bare session where you paste the prompt yourself). */
+export function sessionStartup(promptPath: string, override?: string): string {
+  const tmpl = override ?? process.env.PM_SESSION_CMD ?? `claude "$(cat {prompt_file})"`;
+  return tmpl.replaceAll("{prompt_file}", promptPath);
+}
+
 /** Run a command in a PTY and collect its output until it exits. `claude` needs a
  *  TTY: spawned with plain pipes it falls back to a bundled `cli.js` under whatever
  *  `node` is on PATH (which may be an unsupported version that crashes on startup).

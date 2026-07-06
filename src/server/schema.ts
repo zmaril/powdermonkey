@@ -108,8 +108,9 @@ export const phases = pgTable("phases", {
 // One run of work. Independent of the hierarchy — a session may pull work from
 // multiple goals at once. Created at runtime, never authored. A `local` session
 // executes in a git worktree on `branch`; a `remote` one is a `claude --remote`
-// run reachable at `url`. The tasks a session is working sit in the session_tasks
-// join below (a single session can be dispatched for several tasks at once).
+// run reachable at `url`; an `exe` one runs on the exe.dev worker VM named `vm`.
+// The tasks a session is working sit in the session_tasks join below (a single
+// session can be dispatched for several tasks at once).
 export const sessions = pgTable("sessions", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   kind: text("kind").$type<SessionKind>().notNull().default(SessionKind.Local),
@@ -117,6 +118,11 @@ export const sessions = pgTable("sessions", {
   branch: text("branch"),
   worktreePath: text("worktree_path"),
   url: text("url"),
+  // The exe.dev VM name this session runs on (`ssh exe.dev new` assigns it; we
+  // reach the box at `<vm>.<PM_EXE_DOMAIN>`). Null for local/remote sessions.
+  // Teardown and the leak sweep only ever `rm` VMs recorded here — a name we
+  // never wrote down is a name we never delete.
+  vm: text("vm"),
   // A local session runs an interactive `claude` PTY in its worktree. When that
   // process falls idle after producing output, it's read as "parked at a prompt,
   // waiting for the operator" and surfaced here so the UI can pull them in.

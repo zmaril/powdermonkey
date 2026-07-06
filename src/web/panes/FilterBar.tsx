@@ -16,6 +16,7 @@ import { ANY } from "./filters.ts";
 const ENV_DATA: ComboboxData = [
   { value: ANY, label: "Any env" },
   { value: SessionKind.Local, label: "Local" },
+  { value: SessionKind.Exe, label: "exe.dev" },
   { value: SessionKind.Remote, label: "Cloud" },
 ];
 

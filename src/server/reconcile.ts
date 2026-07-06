@@ -96,6 +96,15 @@ async function archiveMergedTaskSessions(): Promise<number> {
           .returning({ id: sessions.id });
         return Boolean(updated);
       })
+      // exe: landSession again — it tears down the worker's tmux and deletes its
+      // VM. Every linked task merged means the work is on a remote, so the land
+      // path's unpushed-commit guard won't (correctly) refuse; a stray dirty file
+      // just retries next tick, same as a dirty local worktree.
+      .with(SessionKind.Exe, async () => {
+        const res = await landSession(s.id);
+        if (!res.ok) console.warn(`reconcile: could not land exe session ${s.id}: ${res.error}`);
+        return res.ok;
+      })
       .exhaustive();
     if (ok) archived++;
   }

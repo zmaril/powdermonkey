@@ -102,8 +102,12 @@ export const SessionState = {
 } as const;
 export type SessionState = ValueOf<typeof SessionState>;
 
-/** Where a session executes: a local git worktree, or a cloud `claude --remote` run. */
-export const SessionKind = { Local: "local", Remote: "remote" } as const;
+/** Where a session executes: a local git worktree, a cloud `claude --remote` run,
+ *  or a disposable exe.dev worker VM (`ssh exe.dev new`) the supervisor drives over
+ *  SSH. Exe sits between the other two: supervisor-controlled like `local` (we
+ *  start/attach/stop the agent ourselves), but off-box like `remote` (no local
+ *  worktree — the whole VM is the isolation unit). */
+export const SessionKind = { Local: "local", Remote: "remote", Exe: "exe" } as const;
 export type SessionKind = ValueOf<typeof SessionKind>;
 
 // GitHub PR state, bounded to the values GitHub's GraphQL actually returns. Same

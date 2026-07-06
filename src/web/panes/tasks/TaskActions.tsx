@@ -1,14 +1,20 @@
 import { Button, Group, Tooltip } from "@mantine/core";
-import { IconCloud, IconDeviceLaptop, IconPlayerPlayFilled } from "@tabler/icons-react";
+import { IconCloud, IconDeviceLaptop, IconPlayerPlayFilled, IconServer } from "@tabler/icons-react";
 import { type ReactNode, useState } from "react";
 import { SessionKind } from "../../../shared/types.ts";
 import { useStore } from "../../store.ts";
 import { LaunchButton } from "./LaunchButton.tsx";
 
-// Icon clusters for the launch buttons: target (laptop / cloud) + a play glyph.
+// Icon clusters for the launch buttons: target (laptop / VM / cloud) + a play glyph.
 const LOCAL_ICON = (
   <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
     <IconDeviceLaptop size={15} />
+    <IconPlayerPlayFilled size={10} />
+  </span>
+);
+const EXE_ICON = (
+  <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+    <IconServer size={15} />
     <IconPlayerPlayFilled size={10} />
   </span>
 );
@@ -34,7 +40,7 @@ export function TaskActions({
   onDone?: () => void;
   blockedReason?: string;
 }) {
-  const { startLocalMany, dispatchMany, completeTask, cancelTask } = useStore();
+  const { startLocalMany, startExeMany, dispatchMany, completeTask, cancelTask } = useStore();
   const [running, setRunning] = useState<SessionKind | null>(null);
   const busy = running !== null;
   const launchBlocked = blockedReason != null;
@@ -44,6 +50,7 @@ export function TaskActions({
     setRunning(kind);
     try {
       if (kind === SessionKind.Local) await startLocalMany(ids, comment);
+      else if (kind === SessionKind.Exe) await startExeMany(ids, comment);
       else await dispatchMany(ids, comment);
       onDone?.();
     } finally {
@@ -85,6 +92,16 @@ export function TaskActions({
           loading={running === SessionKind.Local}
           disabled={busy || launchBlocked}
           onRun={(c) => launch(SessionKind.Local, c)}
+        />,
+      )}
+      {withReason(
+        <LaunchButton
+          icon={EXE_ICON}
+          label="Start on exe.dev"
+          color="teal"
+          loading={running === SessionKind.Exe}
+          disabled={busy || launchBlocked}
+          onRun={(c) => launch(SessionKind.Exe, c)}
         />,
       )}
       {withReason(

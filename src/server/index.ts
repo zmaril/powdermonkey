@@ -3,6 +3,7 @@
 
 import { app } from "./app.ts";
 import { ready } from "./db.ts";
+import { sweepExeVms } from "./exe-session.ts";
 import { startGithubWatch } from "./github-watch.ts";
 import { reconcile } from "./reconcile.ts";
 import { seedSupervisorRepo } from "./seed.ts";
@@ -80,6 +81,27 @@ if (RECONCILE_MS > 0) {
       running = false;
     }
   }, RECONCILE_MS);
+}
+
+// Backstop for exe worker VMs orphaned by a crashed teardown: periodically delete
+// VMs whose session rows are already archived. A no-op (not even an ssh) unless
+// such rows exist, so non-exe setups never touch the network. Slower cadence than
+// reconcile — VM leaks cost money, not correctness. Disable with 0.
+const EXE_SWEEP_MS = Number(process.env.PM_EXE_SWEEP_INTERVAL_MS ?? 300_000);
+if (EXE_SWEEP_MS > 0) {
+  let sweeping = false;
+  setInterval(async () => {
+    if (sweeping) return;
+    sweeping = true;
+    try {
+      const removed = await sweepExeVms();
+      if (removed > 0) console.log(`exe sweep: removed ${removed} orphaned VM(s)`);
+    } catch (e) {
+      console.warn("exe sweep failed:", e instanceof Error ? e.message : e);
+    } finally {
+      sweeping = false;
+    }
+  }, EXE_SWEEP_MS);
 }
 
 // Watch GitHub for cloud workers' PRs (pm/task-*): one poll loop fans out events

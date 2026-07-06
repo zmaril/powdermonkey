@@ -196,6 +196,7 @@ export type State = {
   // Launch several backlog tasks together: ONE session works the whole batch. The
   // first id is the primary (it names the worktree/branch); the rest ride along.
   startLocalMany: (taskIds: number[], comment?: string) => Promise<void>;
+  startExeMany: (taskIds: number[], comment?: string) => Promise<void>;
   dispatchMany: (taskIds: number[], comment?: string) => Promise<void>;
   teleport: (taskId: number) => Promise<void>;
   // Operator decisions (the non-reconciled path): mark a phase/task done by hand,
@@ -504,6 +505,27 @@ export const useStore = create<State>()(
               taskId: primary,
               branch: data.branch,
               worktreePath: data.worktreePath,
+              prompt: data.prompt,
+              trailers: data.trailers,
+            },
+          });
+        }
+      },
+      startExeMany: async (taskIds, comment) => {
+        if (taskIds.length === 0) return;
+        const [primary, ...rest] = taskIds;
+        const { data, error } = await api
+          .tasks({ id: primary })
+          ["start-exe"].post({ taskIds: rest, comment });
+        if (error) return void set({ error: errMsg(error) });
+        if (data && "ok" in data && data.ok) {
+          set({
+            lastStart: {
+              taskId: primary,
+              branch: data.branch,
+              // The workspace is the VM's clone, not a path on this machine — the
+              // start panel just displays it.
+              worktreePath: `${data.vm}:~/${data.workdir}`,
               prompt: data.prompt,
               trailers: data.trailers,
             },

@@ -9,6 +9,7 @@ import {
   Decision,
   OverrideSource,
   ProposalStatus,
+  SessionKind,
   SessionState,
 } from "../shared/types.ts";
 import { applyProposal, decideChange } from "./apply.ts";
@@ -29,6 +30,8 @@ import {
 import { pg } from "./db.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
+import { vmHost } from "./exe.ts";
+import { startExeSession } from "./exe-session.ts";
 import { fanOutTasks } from "./fanout.ts";
 import { proposeFollowup } from "./followups.ts";
 import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
@@ -63,6 +66,7 @@ import {
 } from "./schema.ts";
 import {
   attachSessionPty,
+  registerSessionHost,
   resizeSessionPty,
   SUPERVISOR_ID,
   startSupervisorPty,
@@ -221,6 +225,18 @@ const tasksGroup = resource("tasks", taskRepo, models.tasks)
       orBadRequest(
         set,
         await startLocalSession(launchIds(params.id, body), { comment: body?.comment }),
+      ),
+    { body: launchBody },
+  )
+  // Start an exe session: same worker contract as start-local, but the workspace
+  // is a disposable exe.dev VM (clone on pm/task-<id>, claude in the VM's tmux)
+  // instead of a worktree on this box. See exe-session.ts.
+  .post(
+    "/:id/start-exe",
+    async ({ params, body, set }) =>
+      orBadRequest(
+        set,
+        await startExeSession(launchIds(params.id, body), { comment: body?.comment }),
       ),
     { body: launchBody },
   )
@@ -607,6 +623,15 @@ export const app = new Elysia()
         .otherwise(() => null);
 
       if (sessionId != null) {
+        // An exe session's durable tmux lives on its worker VM; the in-memory
+        // host map that routes attach/kill there is lost on a supervisor restart,
+        // so heal it from the session row before attaching.
+        if (sessionId !== SUPERVISOR_ID) {
+          const row = await sessionRepo.get(sessionId);
+          if (row?.kind === SessionKind.Exe && row.vm) {
+            registerSessionHost(sessionId, vmHost(row.vm));
+          }
+        }
         const detach = attachSessionPty(sessionId, send, sendEnded);
         if (detach) {
           ptys.set(ws.raw, { kind: "attach", sessionId, detach });

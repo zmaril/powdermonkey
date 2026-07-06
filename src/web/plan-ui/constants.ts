@@ -1,4 +1,4 @@
-import { type Icon, IconCloud, IconDeviceLaptop } from "@tabler/icons-react";
+import { type Icon, IconCloud, IconDeviceLaptop, IconServer } from "@tabler/icons-react";
 import { SessionKind, SessionState, TaskKind, TaskStatus } from "../../shared/types.ts";
 
 // Shared lookup maps for the task/session badges rendered across the panes
@@ -35,4 +35,5 @@ export const TASK_KIND_COLOR: Record<TaskKind, string> = {
 export const KIND_ICON: Record<SessionKind, Icon> = {
   [SessionKind.Local]: IconDeviceLaptop,
   [SessionKind.Remote]: IconCloud,
+  [SessionKind.Exe]: IconServer,
 };

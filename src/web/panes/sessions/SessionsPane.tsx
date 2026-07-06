@@ -84,8 +84,10 @@ export function SessionsPane({ api }: { api?: DockviewPanelApi }) {
   const live = ordered.filter((s) => s.archivedAt == null);
   const cloudCount = live.filter((s) => s.kind === SessionKind.Remote).length;
   const localCount = live.filter((s) => s.kind === SessionKind.Local).length;
+  const exeCount = live.filter((s) => s.kind === SessionKind.Exe).length;
   const RemoteIcon = KIND_ICON[SessionKind.Remote];
   const LocalIcon = KIND_ICON[SessionKind.Local];
+  const ExeIcon = KIND_ICON[SessionKind.Exe];
 
   return (
     <Box
@@ -119,6 +121,15 @@ export function SessionsPane({ api }: { api?: DockviewPanelApi }) {
               leftSection={<LocalIcon size={12} />}
             >
               {localCount}
+            </Badge>
+            <Badge
+              size="sm"
+              variant="light"
+              color={exeCount > 0 ? "blue" : "gray"}
+              title="live exe.dev sessions"
+              leftSection={<ExeIcon size={12} />}
+            >
+              {exeCount}
             </Badge>
             <Text size="xs" c="dimmed">
               {visible.length} shown

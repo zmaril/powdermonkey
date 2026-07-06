@@ -5,14 +5,18 @@ import { SessionKind } from "../../shared/types.ts";
 import { useStore } from "../store.ts";
 
 /** Actions for a task that currently HAS a live session. A local session runs in a
- *  worktree, so it gets Shell + VS Code; a remote (cloud) session has neither — it
- *  lives on claude.ai, so it gets a link out to the session plus Teleport to pull
- *  it down. Both get Stop. `taskId` is the row's task — a session can cover
- *  several, so teleport pulls down the one the operator clicked from (its whole
- *  batch follows). */
+ *  worktree — and an exe session in a VM clone we hold a live PTY onto — so those
+ *  get Shell + an editor; a remote (cloud) session has neither — it lives on
+ *  claude.ai, so it gets a link out to the session plus Teleport to pull it down.
+ *  All get Stop. `taskId` is the row's task — a session can cover several, so
+ *  teleport pulls down the one the operator clicked from (its whole batch follows). */
 export function SessionActions({ session, taskId }: { session: Session; taskId: number }) {
   const { stop, teleport, openSessionTerminal, openEditor, pending } = useStore();
   const isRemote = session.kind === SessionKind.Remote;
+  // The editor route opens a local worktree in VS Code, but an exe session has no
+  // local checkout — the server opens its PR in github.dev instead.
+  const editorTitle =
+    session.kind === SessionKind.Exe ? "Open the PR in github.dev" : "Open worktree in VS Code";
   const teleporting = pending[`teleport:${taskId}`] ?? false;
   // No kind/branch badge here — the worker card's header already shows the kind
   // icon and running state, so repeating "remote" next to it was pure noise.
@@ -60,7 +64,7 @@ export function SessionActions({ session, taskId }: { session: Session; taskId: 
             variant="light"
             color="blue"
             onClick={() => openEditor(session.id)}
-            title="Open worktree in VS Code"
+            title={editorTitle}
           >
             VS Code
           </Button>
@@ -72,9 +76,11 @@ export function SessionActions({ session, taskId }: { session: Session; taskId: 
         color="red"
         title="Abort this session — kills the agent and re-pends the task"
         onClick={() => {
+          const workspace =
+            session.kind === SessionKind.Exe ? "its VM deleted" : "its worktree discarded";
           if (
             window.confirm(
-              "Stop this session? The agent is killed, its worktree discarded, and the task returns to pending.",
+              `Stop this session? The agent is killed, ${workspace}, and the task returns to pending.`,
             )
           )
             stop(session.id);

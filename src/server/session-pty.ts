@@ -1,8 +1,9 @@
 import { eq } from "drizzle-orm";
 import { db } from "./db.ts";
+import { sshVmSync, vmAttachCmd } from "./exe.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { sessions } from "./schema.ts";
-import { hasSession, SOCKET, shq, TMUX_BIN, tmux } from "./tmux.ts";
+import { SOCKET, shq, TMUX_BIN, tmux } from "./tmux.ts";
 
 // One long-lived `claude` per local session, run inside tmux so it OUTLIVES the
 // supervisor. The supervisor is started with `--watch`; editing PowderMonkey's own
@@ -63,6 +64,19 @@ const registry = new Map<number, Entry>();
 // session survives regardless — `attach` doesn't need it), so default safely.
 const cwdById = new Map<number, string>();
 
+// Remote host per session, for `exe` sessions whose durable tmux lives on a
+// worker VM rather than this box. Registered at start, and re-registered from
+// the session row (kind=exe → its vm) by attach/teardown callers after a
+// supervisor restart — with no host registered a session is treated as local.
+const hostById = new Map<number, string>();
+
+/** Tell session-pty a session's durable tmux lives on a remote host. Idempotent;
+ *  callers that read the session row (attach, land, stop) re-register after a
+ *  restart so the in-memory map heals lazily. */
+export function registerSessionHost(sessionId: number, host: string): void {
+  hostById.set(sessionId, host);
+}
+
 function repoDir(): string {
   return process.env.PM_REPO_DIR ?? process.cwd();
 }
@@ -71,9 +85,19 @@ function sessionName(id: number): string {
   return `pm-session-${id}`;
 }
 
+/** Run a tmux control command where this session's durable tmux actually lives:
+ *  the local private socket, or — for a session registered to a remote host — the
+ *  same-named socket on that VM over ssh. The remote side always uses plain
+ *  `tmux` (PM_TMUX points at a supervisor-machine binary, not the VM's). */
+function tmuxFor(sessionId: number, ...args: string[]): { ok: boolean } {
+  const host = hostById.get(sessionId);
+  if (!host) return tmux(...args);
+  return sshVmSync(host, `tmux -L ${SOCKET} ${args.map(shq).join(" ")}`);
+}
+
 /** True while the durable tmux session (and thus its agent) is alive. */
 export function hasSessionPty(sessionId: number): boolean {
-  return hasSession(sessionName(sessionId));
+  return tmuxFor(sessionId, "has-session", "-t", sessionName(sessionId)).ok;
 }
 
 /** Persist a needs_input transition. Deduped against the in-memory flag so we
@@ -115,22 +139,32 @@ function pushChunk(entry: Entry, bytes: Uint8Array): void {
 
 /** Bring up the durable tmux session running the agent (idempotent per id). The
  *  agent starts immediately, detached, so it's already running before anyone
- *  attaches — and keeps running across supervisor restarts. */
-export function startSessionPty(sessionId: number, cwd: string, startup: string): void {
+ *  attaches — and keeps running across supervisor restarts. Pass `host` for an
+ *  exe session: the same tmux session is created on that VM instead (where `cwd`
+ *  and the startup command are remote-side paths). */
+export function startSessionPty(
+  sessionId: number,
+  cwd: string,
+  startup: string,
+  host?: string,
+): void {
   cwdById.set(sessionId, cwd);
+  if (host) registerSessionHost(sessionId, host);
   if (hasSessionPty(sessionId)) return;
 
   const name = sessionName(sessionId);
   // Run the agent under a login shell (so PATH/profile resolve `claude`), then
-  // fall through to an interactive shell when it exits.
-  const inner = startup ? `${startup}; exec ${SHELL} -i` : `exec ${SHELL} -i`;
-  const cmd = `${SHELL} -l -c ${shq(inner)}`;
+  // fall through to an interactive shell when it exits. Remote VMs get a plain
+  // `bash` rather than the supervisor's $SHELL — it's a different machine.
+  const shell = host ? "bash" : SHELL;
+  const inner = startup ? `${startup}; exec ${shell} -i` : `exec ${shell} -i`;
+  const cmd = `${shell} -l -c ${shq(inner)}`;
 
   // Follow the most recently active (browser) client's size and drop the status
   // bar. Global, but scoped to our private socket — never the operator's tmux.
-  tmux("set-option", "-g", "window-size", "latest");
-  tmux("set-option", "-g", "status", "off");
-  tmux("new-session", "-d", "-s", name, "-x", "220", "-y", "50", "-c", cwd, cmd);
+  tmuxFor(sessionId, "set-option", "-g", "window-size", "latest");
+  tmuxFor(sessionId, "set-option", "-g", "status", "off");
+  tmuxFor(sessionId, "new-session", "-d", "-s", name, "-x", "220", "-y", "50", "-c", cwd, cmd);
 }
 
 /** Idempotently bring up the supervisor's OWN durable tmux session (reserved id
@@ -157,8 +191,15 @@ function createAttachEntry(sessionId: number): Entry {
   // `exec tmux attach` replaces the shell, so when the attach ends (we detach, or
   // the session is killed) the PTY exits cleanly. tmux redraws the current screen
   // on attach, so a freshly-created entry still shows the agent's live state.
+  // A remote (exe) session attaches through `ssh -t` to the VM's tmux instead —
+  // same PTY plumbing, the child is just ssh; its local cwd is immaterial (and a
+  // registered host means cwdById holds a REMOTE path), so it runs from repoDir.
+  const host = hostById.get(sessionId);
+  const attach = host
+    ? vmAttachCmd(host, `tmux -L ${SOCKET} attach -t ${name}`)
+    : `exec ${TMUX_BIN} -L ${SOCKET} attach -t ${name}`;
   entry.proc = spawnShell(
-    cwdById.get(sessionId) ?? repoDir(),
+    host ? repoDir() : (cwdById.get(sessionId) ?? repoDir()),
     (bytes) => {
       pushChunk(entry, bytes);
       for (const send of entry.subscribers) {
@@ -169,7 +210,7 @@ function createAttachEntry(sessionId: number): Entry {
       setNeedsInput(sessionId, false);
       armIdle(sessionId);
     },
-    `exec ${TMUX_BIN} -L ${SOCKET} attach -t ${name}`,
+    attach,
   );
   armIdle(sessionId);
   // The attach PTY exiting while it's still the registered entry means the durable
@@ -263,7 +304,8 @@ export function killSessionPty(sessionId: number): void {
   // blank on land/stop without this.
   notifyEnded(sessionId);
   detachSessionPty(sessionId);
-  if (hasSessionPty(sessionId)) tmux("kill-session", "-t", sessionName(sessionId));
+  if (hasSessionPty(sessionId)) tmuxFor(sessionId, "kill-session", "-t", sessionName(sessionId));
   cwdById.delete(sessionId);
+  hostById.delete(sessionId);
   void persistNeedsInput(sessionId, false);
 }

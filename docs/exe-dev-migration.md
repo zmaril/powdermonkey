@@ -1,6 +1,8 @@
 # Plan: exe.dev as the default hosting platform
 
-**Status: proposed — nothing in this document is built yet.**
+**Status: phases 0–1 were spiked out via the Docker path; phase 2 is implemented
+(behind the fake-able `PM_EXE_*` seams — see below) and awaits validation against
+a real exe.dev account.**
 
 This is the plan for making [exe.dev](https://exe.dev) the default place PowderMonkey
 runs: the supervisor + web UI first (replacing the Docker + Tailscale recipe in
@@ -197,81 +199,96 @@ second exe.dev VM. Document restore = provision fresh VM + `powdermonkey restore
 Phase 1 is almost entirely scripts + docs. Expected code changes: none, or a
 single `PM_PUBLIC_URL` seam if the spike surfaces a leak.
 
-## Phase 2 — agent execution on per-task exe.dev worker VMs
+## Phase 2 — agent execution on per-task exe.dev worker VMs *(implemented)*
 
-Today "local" sessions are hardwired to the supervisor's own box:
+Local sessions were hardwired to the supervisor's own box:
 `src/server/worktree.ts` cuts a worktree on the local filesystem and
-`src/server/session-pty.ts` launches `claude` in local tmux. There is no
-executor abstraction — this phase creates it. The prize: each agent session
-gets a disposable root-on-its-own-VM sandbox (an agent can `rm -rf` or wedge
-its box without touching the supervisor, its DB, or its siblings), and
-parallelism stops being bounded by one machine.
+`src/server/session-pty.ts` launches `claude` in local tmux. Phase 2 adds the
+off-box sibling. The prize: each agent session gets a disposable
+root-on-its-own-VM sandbox (an agent can `rm -rf` or wedge its box without
+touching the supervisor, its DB, or its siblings), and parallelism stops being
+bounded by one machine.
 
-### 2.1 The executor seam
+### 2.1 The executor seam (as built)
 
-Extract the current behaviour behind an interface and add a second
-implementation, selected by `PM_EXECUTOR=local|exe` (per-server default;
-possibly per-task later):
+Rather than an executor interface, the seam is what this codebase already uses
+for local-vs-remote: a **third `SessionKind` (`exe`) with exhaustive matches** —
+adding the kind forced a decision at every launch/teardown/attach/render site,
+which is the same guarantee an interface would have given, in the house style.
 
-```
-Executor
-  start(task, prompt) -> session handle     // provision + clone + branch + launch claude
-  attach(session)     -> PTY stream         // feeds the existing /pty WebSocket
-  status(session)     -> running | needs_input | exited
-  stop(session)                             // kill + teardown
-  land(session)                             // teardown after merge
-```
-
-- **LocalExecutor** — exactly today's code (`worktree.ts` + `session-pty.ts`),
-  just relocated. Behaviour-preserving refactor, shippable alone.
-- **ExeExecutor**:
-  - *Provision:* `ssh exe.dev new --json` (name `pm-task-<id>`), wait for SSH,
-    bootstrap (see 2.2), `git clone` the task's repo, `git switch -c pm/task-<id>`.
-    No worktrees needed — the whole VM is the isolation unit.
-  - *Launch:* write the prompt file over `scp`, then run the session command in
-    tmux **on the worker** so it survives SSH drops:
-    `ssh pm-task-<id>.exe.xyz tmux -L powdermonkey new-session -d 'claude "$(cat prompt.md)"'`.
-  - *Attach:* wrap `ssh -t <vm>.exe.xyz tmux attach …` in the supervisor's
-    existing Bun PTY (`src/server/pty.ts`). The `/pty` WebSocket, scrollback
-    ring buffer, and idle→`needs_input` detection in `session-pty.ts` all keep
-    working — the PTY's child is an ssh process instead of tmux directly.
-    `PM_SESSION_CMD`-style env templates (`worktree.ts:54`) already prove out
-    this "the launch command is a string seam" pattern.
-  - *Land/stop:* `ssh exe.dev rm pm-task-<id>`. Teardown must be idempotent and
-    reconcile-driven (a supervisor crash mid-session must not leak VMs — sweep
-    `ssh exe.dev ls --json` for `pm-task-*` names with no matching live session,
-    in the existing reconcile loop cadence).
+- **`src/server/exe.ts`** — the exe.dev plumbing. The externally-defined
+  contract lives in env-overridable command templates (the same seam style as
+  `PM_DISPATCH_CMD`), so a CLI drift — or a test fake — is a config change:
+  - `PM_EXE_CMD` (default `ssh exe.dev`) — the lobby: `new --json`, `ls --json`,
+    `rm <vm>`, parsed leniently.
+  - `PM_EXE_SSH_CMD` / `PM_EXE_SSH_TTY_CMD` (default `ssh [-t] -o BatchMode=yes
+    -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new {host}`) — the VM
+    control channel and the interactive attach. Files land on the VM by piping
+    ssh stdin (no scp).
+  - `PM_EXE_DOMAIN` (default `exe.xyz`) — VMs answer at `<name>.<domain>`.
+- **`src/server/exe-session.ts`** — `startExeSession`: provision (`new`),
+  bootstrap (`PM_EXE_BOOTSTRAP_CMD`, default apt-installs tmux/git and the
+  claude CLI if missing), clone the task's repo on `pm/task-<id>`
+  (`PM_EXE_CLONE_BASE`, falling back to `PM_CLONE_BASE`), write the prompt
+  outside the clone, and run the same `PM_SESSION_CMD` startup in tmux **on the
+  VM**. The lobby-assigned VM name is recorded on the session row (`sessions.vm`)
+  — teardown and the sweep only ever `rm` names we wrote down.
+- **Attach** — `session-pty.ts` is host-aware: an exe session's tmux control and
+  `attach` run over ssh (the PTY's child is an ssh process), and the `/pty`
+  WebSocket, scrollback ring, and idle→`needs_input` detection work unchanged.
+  The host map is healed from the session row after a supervisor restart.
+- **Land/stop** — land refuses to destroy unfinished work, *stricter* than
+  local: a local worktree's commits survive in the clone, but `exe rm` deletes
+  the only copy — so land refuses a dirty clone **and unpushed commits**; stop
+  razes the box. Reconcile archives merged exe sessions through the same land
+  path, and a periodic sweep (`PM_EXE_SWEEP_INTERVAL_MS`, default 5 min) deletes
+  VMs whose sessions are already archived (crashed teardowns).
+- **Launch surface** — `POST /tasks/:id/start-exe` (same body as start-local),
+  and a third launch button on the task card (laptop / **server** / cloud).
 
 The merge path is untouched: workers push `pm/task-<id>`, PRs merge to `main`,
-and the supervisor's reconcile loop (`src/server/reconcile.ts`) reads trailers
-off `main` exactly as it does for cloud-dispatched sessions. Structurally an
-exe.dev worker is *a third session type between local and `claude --remote`*:
-supervisor-controlled like local, remote like dispatch.
+and the reconcile loop reads trailers off `main` exactly as for the other two
+kinds. Structurally an exe worker is *a third session type between local and
+`claude --remote`*: supervisor-controlled like local, off-box like dispatch.
+
+Tested end-to-end against a **fake exe.dev** (`tests/fake-exe-lobby.sh` +
+`fake-exe-ssh.sh`: VMs are local directories, "ssh" runs commands in them) —
+`tests/exe-session.test.ts` covers provision/clone/launch, both land guards,
+stop, and the sweep, with no network or account.
 
 ### 2.2 Worker bootstrap and credentials
 
-- **Toolchain:** a bootstrap script (git + claude CLI + tmux) is the simple
-  start; if provisioning latency is annoying, bake a base image/snapshot
-  (exe.dev supports `new --image`) — decide from phase 0 timing data.
-- **exe.dev control:** the supervisor VM gets an SSH key authorized on the
-  exe.dev account; `new`/`ls`/`rm` are just SSH calls with
+- **Toolchain:** `PM_EXE_BOOTSTRAP_CMD` (see above) is the simple start; if
+  provisioning latency is annoying, bake a base image/snapshot (exe.dev supports
+  `new --image`) and set the bootstrap to `true`.
+- **exe.dev control:** the supervisor's SSH key is authorized on the exe.dev
+  account; `new`/`ls`/`rm` are just SSH calls with
   `-o StrictHostKeyChecking=accept-new` (their documented non-interactive-agent
   guidance).
 - **GitHub:** don't copy the operator's credentials onto disposable boxes. Use
-  short-lived per-clone tokens or a fine-grained PAT scoped to the target repos,
-  injected at provision time (`PM_CLONE_BASE` in `repo-cache.ts` already lets us
-  form token URLs). Workers need push, nothing else.
-- **Claude:** `CLAUDE_CODE_OAUTH_TOKEN` injected into the worker's session env,
-  never written to its disk. This is the sharpest open question in the whole
-  plan — headless `claude` auth on N machines under one subscription (rate
-  limits, device counts) needs a deliberate answer from the spike, and is the
-  most likely reason to run phase 2 behind a flag for a while.
+  short-lived per-clone tokens or a fine-grained PAT scoped to the target repos
+  via `PM_EXE_CLONE_BASE` (e.g. `https://x-access-token:<token>@github.com/`).
+  Workers need push, nothing else.
+- **Claude:** when the supervisor holds `CLAUDE_CODE_OAUTH_TOKEN`, it's handed
+  to the worker via a 0600 env file sourced by the startup command. This is
+  still the sharpest open question — headless `claude` auth on N machines under
+  one subscription (rate limits, device counts) needs the real-account spike —
+  and is the main reason exe stays an explicit per-launch choice for now.
 
-### 2.3 Rollout
+### 2.3 Validation against a real account (remaining)
 
-`PM_EXECUTOR=local` stays the default while `exe` stabilizes; flip the default
-once a real multi-session week has gone through it. LocalExecutor is kept
-permanently — it's the laptop/dev story and the fallback.
+The `PM_EXE_*` defaults encode assumptions the fake can't verify: the exact
+`new --json` / `ls --json` output shapes, `rm` semantics, VM boot latency,
+whether the stock image needs the bootstrap, and interactive-attach latency
+over their network. One session run against a real account pins these down —
+any drift is an env-var fix, not a code change.
+
+### 2.4 Rollout
+
+Local stays the default launch while exe stabilizes; flip the button order (and
+the docs' recommendation) once a real multi-session week has gone through it.
+The local executor is kept permanently — it's the laptop/dev story and the
+fallback.
 
 ## Phase 3 — polish (as needed, unordered)
 
@@ -298,10 +315,10 @@ permanently — it's the laptop/dev story and the fallback.
 
 ## Sequencing summary
 
-1. **Phase 0** — spike on a throwaway VM; write findings into this doc. Small.
+1. **Phase 0** — spiked out (with phase 1) via the Docker path.
 2. **Phase 1** — provision script, systemd unit, backup timer, `docs/exe-dev.md`,
    README/docs updates, cutover. Small-medium; ~no app code.
-3. **Phase 2** — executor interface refactor (behaviour-preserving, ships
-   alone), then ExeExecutor behind `PM_EXECUTOR`, then default flip. Medium-large;
-   the only real engineering in the plan.
+3. **Phase 2** — **implemented**: the `exe` session kind, `start-exe`, host-aware
+   attach, land/stop/reconcile/sweep, and the fake-backed test suite. Remaining:
+   validation against a real exe.dev account (§2.3), then the default flip (§2.4).
 4. **Phase 3** — polish, driven by usage.

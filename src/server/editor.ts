@@ -43,9 +43,10 @@ export async function openSessionEditor(sessionId: number): Promise<OpenEditorRe
         spawnDetached([CODE_BIN, session.worktreePath]);
         return { ok: true, target: session.worktreePath };
       })
-      // remote: open the PR in github.dev (web VS Code). A session can cover several
-      // tasks; open the first linked task that has a PR.
-      .with(SessionKind.Remote, async (): Promise<OpenEditorResult> => {
+      // remote & exe: no local checkout on this machine (the work lives in the
+      // cloud run / on the worker VM), so open the PR in github.dev (web VS Code).
+      // A session can cover several tasks; open the first linked task with a PR.
+      .with(SessionKind.Remote, SessionKind.Exe, async (): Promise<OpenEditorResult> => {
         const taskIds = await taskIdsForSession(sessionId);
         const linked = taskIds.length
           ? await db.select().from(tasks).where(inArray(tasks.id, taskIds))
