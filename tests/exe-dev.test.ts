@@ -18,6 +18,8 @@ const {
   provisionWorker,
   teardownWorker,
   teardownRemoteWorker,
+  parseWorkerList,
+  selectOrphans,
 } = await import("../src/server/exe-dev.ts");
 
 const CFG = {
@@ -76,4 +78,32 @@ test("teardownRemoteWorker is a no-op for non-exe.dev sessions", async () => {
   await teardownRemoteWorker({ kind: "remote", vmName: null });
   await teardownRemoteWorker({ kind: "local", vmName: "pm-x-1-1" });
   expect(true).toBe(true);
+});
+
+test("parseWorkerList keeps only pm-worker VMs and parses their creation time", () => {
+  const json = JSON.stringify({
+    vms: [
+      { vm_name: "pm-widget-7-123", tags: ["pm-worker", "pm-task-7"], created_at: "2026-07-06T20:00:00Z" },
+      { vm_name: "powdermonkey", tags: [], created_at: "2026-07-01T00:00:00Z" }, // the template — untagged
+      { vm_name: "someone-else", created_at: "2026-07-06T20:00:00Z" }, // no tags field at all
+    ],
+  });
+  const workers = parseWorkerList(json);
+  expect(workers.map((w) => w.vmName)).toEqual(["pm-widget-7-123"]);
+  expect(workers[0].createdAtMs).toBe(Date.parse("2026-07-06T20:00:00Z"));
+  // Malformed / unexpected input degrades to [].
+  expect(parseWorkerList("not json")).toEqual([]);
+  expect(parseWorkerList("{}")).toEqual([]);
+});
+
+test("selectOrphans skips live and too-young workers", () => {
+  const now = Date.parse("2026-07-06T21:00:00Z");
+  const grace = 5 * 60_000;
+  const workers = [
+    { vmName: "pm-a-1-1", tags: ["pm-worker"], createdAtMs: now - 60 * 60_000 }, // old, not live → orphan
+    { vmName: "pm-b-2-2", tags: ["pm-worker"], createdAtMs: now - 60 * 60_000 }, // old, BUT live → keep
+    { vmName: "pm-c-3-3", tags: ["pm-worker"], createdAtMs: now - 60_000 }, // 1 min old → within grace, keep
+  ];
+  const live = new Set(["pm-b-2-2"]);
+  expect(selectOrphans(workers, live, now, grace)).toEqual(["pm-a-1-1"]);
 });
