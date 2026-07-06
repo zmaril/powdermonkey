@@ -1,13 +1,12 @@
 import { NumberInput, SegmentedControl, Stack, Switch, Text, TextInput } from "@mantine/core";
-import { useEffect, useState } from "react";
 import { DispatchBackend } from "../../../shared/types.ts";
 import { useStore } from "../../store.ts";
 
 // Cloud-dispatch settings: what "Dispatch remote" launches, and how the exe.dev VM
 // backend is configured. Persisted server-side (via setDispatchSettings → POST
-// /settings); text/number fields buffer locally and commit on blur so we don't POST
-// per keystroke, while the toggle/segmented commit immediately (mirrors the
-// autoRebase Switch idiom).
+// /settings). Text/number fields are uncontrolled — `defaultValue` seeds them and a
+// `key` bound to the server value remounts (re-seeds) them on load / revert, so they
+// commit on blur without a local-state effect; the toggle/switch commit immediately.
 export function DispatchControl() {
   const backend = useStore((s) => s.dispatchBackend);
   const template = useStore((s) => s.exeTemplate);
@@ -15,14 +14,6 @@ export function DispatchControl() {
   const claudeFlags = useStore((s) => s.exeClaudeFlags);
   const autoTeardown = useStore((s) => s.exeAutoTeardown);
   const save = useStore((s) => s.setDispatchSettings);
-
-  const [tpl, setTpl] = useState(template);
-  const [flags, setFlags] = useState(claudeFlags);
-  const [port, setPort] = useState<number | string>(ttydPort);
-  // Re-seed the buffers when the server truth changes (initial load / revert-on-error).
-  useEffect(() => setTpl(template), [template]);
-  useEffect(() => setFlags(claudeFlags), [claudeFlags]);
-  useEffect(() => setPort(ttydPort), [ttydPort]);
 
   const isExe = backend === DispatchBackend.ExeDev;
 
@@ -50,35 +41,38 @@ export function DispatchControl() {
       {isExe && (
         <Stack gap="xs">
           <TextInput
+            key={template}
             size="xs"
             label="Template VM"
             description="An already-authed exe.dev VM (claude + gh) copied for each worker."
-            value={tpl}
-            onChange={(e) => setTpl(e.currentTarget.value)}
-            onBlur={() => {
-              const v = tpl.trim();
+            defaultValue={template}
+            onBlur={(e) => {
+              const v = e.currentTarget.value.trim();
               if (v && v !== template) save({ exeTemplate: v });
             }}
           />
           <TextInput
+            key={claudeFlags}
             size="xs"
             label="Claude flags"
             description="Passed to claude on the worker. Skip-permissions runs the task unattended."
-            value={flags}
-            onChange={(e) => setFlags(e.currentTarget.value)}
-            onBlur={() => flags !== claudeFlags && save({ exeClaudeFlags: flags })}
+            defaultValue={claudeFlags}
+            onBlur={(e) => {
+              const v = e.currentTarget.value;
+              if (v !== claudeFlags) save({ exeClaudeFlags: v });
+            }}
           />
           <NumberInput
+            key={ttydPort}
             size="xs"
             label="ttyd port"
             description="Port the worker's terminal is served on — becomes the session URL."
             min={1}
             max={65535}
             allowDecimal={false}
-            value={port}
-            onChange={setPort}
-            onBlur={() => {
-              const n = Number(port);
+            defaultValue={ttydPort}
+            onBlur={(e) => {
+              const n = Number(e.currentTarget.value);
               if (Number.isInteger(n) && n >= 1 && n <= 65535 && n !== ttydPort) {
                 save({ exeTtydPort: n });
               }
