@@ -1,6 +1,9 @@
 import { basename } from "node:path";
+import { and, isNotNull, isNull } from "drizzle-orm";
 import { SessionKind } from "../shared/types.ts";
+import { db } from "./db.ts";
 import { spawnCapture } from "./proc.ts";
+import { sessions } from "./schema.ts";
 import { type ExeDevConfig, getExeDevConfig } from "./settings.ts";
 import { shq } from "./tmux.ts";
 
@@ -200,4 +203,98 @@ export async function teardownRemoteWorker(session: {
   if (!getExeDevConfig().autoTeardown) return;
   const r = await teardownWorker(session.vmName);
   if (!r.ok) console.warn(`exe-dev: rm ${session.vmName} (non-fatal): ${r.output}`);
+}
+
+// ── Orphaned-worker GC ───────────────────────────────────────────────────────────
+// A safety net for teardown misses (a supervisor crash mid-dispatch, an error path, a
+// session that never reaches a terminal state): periodically delete pm-worker VMs that
+// no live session is backing. Every worker is tagged `pm-worker` at provision time, so
+// the sweep can find them without guessing from names, and an age grace keeps an
+// in-flight dispatch (whose session row isn't written yet) from being swept.
+
+const WORKER_TAG = "pm-worker";
+const GC_GRACE_MS = Number(process.env.PM_EXE_GC_GRACE_MS ?? 5 * 60_000);
+
+export type Worker = { vmName: string; tags: string[]; createdAtMs: number };
+
+/** Parse `exe.dev ls --json`, keeping only PowderMonkey worker VMs (tagged pm-worker).
+ *  Malformed JSON or unexpected shape → [] (degrade cleanly). Pure. */
+export function parseWorkerList(jsonText: string): Worker[] {
+  let data: unknown;
+  try {
+    data = JSON.parse(jsonText);
+  } catch {
+    return [];
+  }
+  const vms = (data as { vms?: unknown }).vms;
+  if (!Array.isArray(vms)) return [];
+  const out: Worker[] = [];
+  for (const vm of vms) {
+    const v = vm as { vm_name?: unknown; tags?: unknown; created_at?: unknown };
+    const tags = Array.isArray(v.tags)
+      ? v.tags.filter((t): t is string => typeof t === "string")
+      : [];
+    if (typeof v.vm_name !== "string" || !tags.includes(WORKER_TAG)) continue;
+    const t = typeof v.created_at === "string" ? Date.parse(v.created_at) : Number.NaN;
+    out.push({ vmName: v.vm_name, tags, createdAtMs: Number.isNaN(t) ? 0 : t });
+  }
+  return out;
+}
+
+/** Which workers are orphaned: not backed by a live session AND older than the grace
+ *  period (so a just-provisioned VM whose session row isn't committed yet is never
+ *  swept). Pure. */
+export function selectOrphans(
+  workers: Worker[],
+  liveVmNames: Set<string>,
+  nowMs: number,
+  graceMs: number = GC_GRACE_MS,
+): string[] {
+  return workers
+    .filter((w) => !liveVmNames.has(w.vmName) && nowMs - w.createdAtMs > graceMs)
+    .map((w) => w.vmName);
+}
+
+/** List PowderMonkey worker VMs (tagged pm-worker) currently on exe.dev. */
+export async function listWorkers(): Promise<Worker[]> {
+  if (DRY_RUN) return [];
+  const r = await sshControl(["ls", "--json"]);
+  if (!r.ok) {
+    console.warn(`exe-dev: ls --json (non-fatal): ${r.output}`);
+    return [];
+  }
+  return parseWorkerList(r.output);
+}
+
+/** Garbage-collect leaked worker VMs. No-op when auto-teardown is off or this
+ *  supervisor has never provisioned a worker (so a pure claude-remote/local user never
+ *  pings exe.dev). Returns the number removed. */
+export async function gcOrphanedWorkers(nowMs: number = Date.now()): Promise<number> {
+  if (!getExeDevConfig().autoTeardown) return 0;
+  // Never used exe.dev on this supervisor? Skip the ssh entirely.
+  const [ever] = await db
+    .select({ vmName: sessions.vmName })
+    .from(sessions)
+    .where(isNotNull(sessions.vmName))
+    .limit(1);
+  if (!ever) return 0;
+
+  const workers = await listWorkers();
+  if (workers.length === 0) return 0;
+
+  const rows = await db
+    .select({ vmName: sessions.vmName })
+    .from(sessions)
+    .where(and(isNull(sessions.archivedAt), isNotNull(sessions.vmName)));
+  const live = new Set(rows.map((r) => r.vmName).filter((n): n is string => n != null));
+
+  const orphans = selectOrphans(workers, live, nowMs);
+  let removed = 0;
+  for (const vm of orphans) {
+    const r = await teardownWorker(vm);
+    if (r.ok) removed++;
+    else console.warn(`exe-dev: gc rm ${vm} (non-fatal): ${r.output}`);
+  }
+  if (removed > 0) console.log(`exe-dev: garbage-collected ${removed} orphaned worker VM(s)`);
+  return removed;
 }
