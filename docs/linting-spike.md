@@ -106,4 +106,120 @@ are exactly the family that would have flagged an unhandled `fetch` promise, and
 biome can't see them. We also **publish the package** (`prepublishOnly`, `files`,
 `bin` in `package.json`) with no publish-time validation.
 
-*(Phases 2 and 3 below record the candidate trials and the recommendation.)*
+---
+
+## Phase 2 — candidate trials (run on this repo)
+
+Every tool below was run against the actual tree (via `bunx`, in a scratch dir —
+nothing committed). Timings are wall-clock on the 19k-LOC `src/` + `tests/`.
+
+### oxlint — fast, but type-blind
+
+`oxlint@0.44` (Rust). **~0.6s** on the whole tree.
+
+- **Default (`correctness` only):** 2 low-value warnings (`no-new-array`,
+  `no-control-regex`). Quiet.
+- **All plugins + `pedantic`:** floods. `react-in-jsx-scope` fires ~40× — a *false*
+  alarm under React 19's automatic JSX runtime (we don't import React); plus pure
+  style noise (`max-lines-per-function`, `no-inline-comments`, `max-dependencies`).
+  So the usable surface is `correctness` + a hand-picked slice of `suspicious`, not
+  the broad categories.
+- **Overlap:** heavy with biome `recommended` — both catch the correctness basics.
+  oxlint is faster and has a few rules biome lacks, but biome is already our
+  formatter+linter, so *replacing* it isn't worth it.
+- **The decisive limitation:** oxlint is **type-agnostic by design** (it skips the
+  type-aware rules for speed). So it does **not** have `no-floating-promises` /
+  `no-misused-promises` — i.e. **it would not catch the unhandled-`fetch` bug
+  class.** That's the rule we most wanted from it, and it isn't there.
+
+### knip — real signal after config (phantom deps + dead files)
+
+`knip@5`. **~1–3.6s**.
+
+- **Zero-config: mostly false positives** — it flags all 47 `tests/*.test.ts` +
+  `scripts/*.ts` as "unused files" because it doesn't know they're entry points.
+- **With a small config** (entry = `bin` + `src/server/index.ts` + `src/web/main.tsx`
+  + `tests/**/*.test.ts` + `scripts/*.ts`), the noise collapses and what's left is
+  **genuine**:
+  - **Unlisted (phantom) dependencies** — `@dnd-kit/utilities` is imported in two
+    web files but is *not* in `package.json` (only `@dnd-kit/core` + `/sortable`
+    are); it resolves only transitively today. `dockview-core/dist/styles/*.css` is
+    imported directly but only `dockview-react` is declared. **Both are real latent
+    bugs** — a transitive-dep bump could break the build. *Verified by hand.*
+  - **Dead file** — `src/web/plan-md-diff.ts` is imported nowhere in `src`/`tests`/
+    `scripts`. *Verified: genuinely unreferenced.*
+  - **Unused exports (56):** the noisy category — inflated by the `plan-ui/index.ts`
+    barrel (re-exports counted as unused) and test-only exports. Needs scoping
+    (`--include files,dependencies`) or curation before it's trustworthy.
+- **Verdict:** real value in the `files` + `dependencies` scope; run it there,
+  non-gating first.
+
+### ast-grep — the best fit for our custom-rule gaps
+
+`ast-grep@0.44`. **Instant.** This is the tool that maps directly onto our
+hand-rolled scanners.
+
+- A 6-line YAML rule (`pattern: window.open($$$)`, `language: typescript`) run via
+  `ast-grep scan` cleanly flags **all three** `window.open` sites — the two in the
+  `openExternal` wrapper and the one in `window-bridge.ts`. Excluding the wrapper is
+  a one-line `ignores` glob or an inline `// ast-grep-ignore` comment — the **same
+  escape-hatch shape** as our existing `// lint-allow-*` comments.
+- **`ts` and `tsx` are separate languages** in ast-grep — a rule needs to target
+  each (two short rules, or list both), a minor gotcha worth knowing.
+- **It can absorb two of the three hand-rolled scripts.** `lint-dock-theme.ts` (a
+  banned import) and `lint-spacing.ts` (a banned prop-value shape) are both fixed
+  patterns — a few lines of YAML each. It **cannot** replace `lint-strings.ts`: that
+  one *reads the vocabulary dynamically out of `types.ts`* and cross-references, so
+  it's data-driven, not a fixed pattern — hardcoding the enum values into a rule
+  would defeat the single-source-of-truth. Keep `lint-strings.ts` as-is.
+- **On unhandled `fetch`:** ast-grep can enforce *syntactic* shapes (e.g. a banned
+  `fetch(...).then()` without `.catch()`), but the true "floating promise" is a
+  *type-aware* property — ast-grep can't see that a bare `await fetch()` in a
+  handler with no `try/catch` is unguarded across control flow. Partial coverage
+  only.
+
+### type-coverage — low marginal signal, `strict` already on
+
+`type-coverage@2 --strict`. **~15.5s** (slow). Reports **98.80%**; nearly every
+untyped spot is an `as` cast in a **test fixture** (`{ ... } as Session`). With
+`strict: true` already in `tsconfig`, the marginal signal is small and it's mostly
+test scaffolding. **Skip.**
+
+### publint / attw — we publish, but we ship a CLI, not a types library
+
+- **publint@0.3:** one real suggestion — *"does not specify the `license` field but
+  a LICENSE file was detected."* A one-line fix, and publint would also catch future
+  `files`/`bin` publish mistakes. Minor but real; worth a periodic/prepublish run.
+- **attw (`@arethetypeswrong/cli`):** reports `Resolution failed` on every target —
+  **expected and not a bug.** attw checks a library's *type exports* across module
+  resolutions; powdermonkey ships a **CLI** (`bin`, no `main`/`exports`/`types`), so
+  there's nothing for it to resolve. **Wrong tool for us — skip.**
+
+### dependency-cruiser / semgrep — not a fit here
+
+- **dependency-cruiser:** `--no-config` cruised **0 modules** — it needs a real
+  config (tsconfig resolution, extensions) before it does anything. Its unique value
+  (import cycles, layer-boundary rules) overlaps knip's orphan detection + biome, and
+  the import graph in a 19k-LOC single-app repo is small. Setup cost > payoff today;
+  revisit if the graph grows.
+- **semgrep:** *not trialed hands-on* — it's a Python/binary install, heavier than
+  everything above, and its sweet spot (cross-language taint/security patterns) is
+  aimed at a different problem than our TS-convention rules. For the custom-rule need
+  ast-grep covers the same ground with a fraction of the setup, and semgrep's OSS
+  registry is mostly server-security rules that don't apply to a localhost,
+  no-auth-by-design, single-operator tool. Skip for this repo.
+
+### At a glance
+
+| Tool | Speed | Signal on *this* repo | Noise | Overlap | Fit |
+|---|---|---|---|---|---|
+| **oxlint** | 0.6s | correctness basics; **no type-aware rules** | high past `correctness` | biome | Try (supplement, won't fix our bugs) |
+| **knip** | 1–3.6s | phantom deps + dead file (real) | high w/o config | — | **Try** (scope to files+deps) |
+| **ast-grep** | instant | banned-call rules (`window.open`, dock, spacing) | low | our lint scripts | **Adopt** (small ruleset) |
+| **type-coverage** | 15.5s | 98.8%, mostly test casts | low | tsc strict | Skip |
+| **publint** | ~2s | missing `license` field | low | — | Optional (prepublish) |
+| **attw** | ~3s | N/A — we ship a CLI | — | — | Skip |
+| **dependency-cruiser** | needs config | cycles/layers (none found) | — | knip/biome | Skip |
+| **semgrep** | (not run) | security taint (wrong problem) | — | ast-grep | Skip |
+
+*(Phase 3 below: the shortlist and the bug-class → rule mapping.)*
