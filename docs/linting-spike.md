@@ -18,12 +18,19 @@
 - **Try (behind a flag, non-gating first):** **knip** (finds dead exports/files/deps
   — real signal on this repo, see below) and **oxlint** (a fast typed-lint-ish pass
   that catches floating promises / no-explicit-any beyond biome's recommended set).
-- **Skip / not yet:** **semgrep** (heavier than ast-grep for the same custom-rule
-  job here, slower CI, OSS ruleset is mostly server-security noise for a
-  localhost tool), **dependency-cruiser** (overlaps knip + biome; the import graph
-  here is small), **type-coverage** (strict is already on; low marginal signal),
-  **publint/attw** (we publish, so a *periodic* check is worth it, but the package
-  is Bun-run source not a compiled dual-format lib, so the payoff is small).
+- **Optional:** **publint** at prepublish (caught a missing `license` field; guards
+  future `bin`/`files` mistakes since we do publish).
+- **Skip:** **semgrep** (heavier than ast-grep for the same custom-rule job here,
+  slower CI, OSS ruleset is mostly server-security noise for a localhost tool),
+  **dependency-cruiser** (overlaps knip + biome; the import graph here is small),
+  **type-coverage** (strict is already on; low marginal signal), **attw** (we ship a
+  CLI, not a types-exporting library — nothing for it to resolve).
+
+- **The one operator call:** unhandled `fetch` is the only bug class no *lightweight*
+  tool cleanly closes — true floating-promise detection is type-aware
+  (typescript-eslint), which is the heavy eslint stack the repo has deliberately
+  avoided. Recommendation is an ast-grep syntactic proxy first; details in Phase 3,
+  flagged on the PR thread.
 
 ---
 
@@ -222,4 +229,113 @@ test scaffolding. **Skip.**
 | **dependency-cruiser** | needs config | cycles/layers (none found) | — | knip/biome | Skip |
 | **semgrep** | (not run) | security taint (wrong problem) | — | ast-grep | Skip |
 
-*(Phase 3 below: the shortlist and the bug-class → rule mapping.)*
+---
+
+## Phase 3 — recommendation
+
+### The bug classes → what actually catches each
+
+This is the crux: map the three real incidents to the rule that would have caught
+them. The answer is **not "adopt one big linter"** — it's three different, small
+moves, and one of them isn't a linter at all.
+
+| Real bug | What catches it | Tool | New dep? |
+|---|---|---|---|
+| **`tsc`-not-run-locally** (PR #90's 82 errors; the `goals.position` TS2339) | Running the `tsc` we *already have*, **before the push** | a `pre-push` git hook / `bun run` step calling `bun run typecheck` | **none** |
+| **desktop web API** (`window.open` bypassing `openExternal`) | banned-call rule | **ast-grep** `no-raw-window-open` | ast-grep |
+| **unhandled `fetch`** (floating promise / missing `res.ok`) | type-aware `no-floating-promises` / `no-misused-promises` — **or** a syntactic proxy | typescript-eslint (heavy) *or* ast-grep (partial) | see note |
+
+**Bug class 1 is the highest-value and needs no new tool.** It's the most frequent
+failure mode (an agent gets green `bun test` on type-broken code because `bun run`
+strips types) and the fix is purely process: run the existing `tsc` locally. A
+`pre-push` hook is enough:
+
+```sh
+# .git/hooks/pre-push  (or wire into go_dev.sh / a bun script)
+bun run typecheck || { echo "tsc failed — fix before pushing"; exit 1; }
+```
+
+**Bug class 2 is a clean ast-grep win.** The rule that would have prevented the
+`window.open` regression, verified against the tree in Phase 2:
+
+```yaml
+# ast-grep rule — flags window.open outside the openExternal wrapper.
+# (needs a twin with language: tsx for .tsx files)
+id: no-raw-window-open
+language: typescript
+severity: error
+message: Route external links through openExternal() so they open in the OS
+  browser on desktop. Deliberate in-app windows add `// ast-grep-ignore`.
+rule:
+  pattern: window.open($$$)
+ignores:
+  - "src/web/open-external.ts"      # the wrapper itself
+  - "src/web/window-bridge.ts"      # deliberate in-app window spawn
+```
+
+**Bug class 3 is the one genuine judgement call.** True floating-promise detection
+is *type-aware*, and the only tools that do it well are typescript-eslint's
+`no-floating-promises` / `no-misused-promises`. But standing up typescript-eslint is
+exactly the *"eslint + type-aware-parser stack … more machinery than the check is
+worth"* that `lint-strings.ts` explicitly rejected — and oxlint, the fast
+alternative, deliberately omits type-aware rules. So the three honest options:
+
+- **(a) ast-grep syntactic proxy** — flag `fetch(...)` not immediately `await`ed/
+  `return`ed, or `.json()` reached without a preceding `res.ok`. Cheap, same engine
+  as bug class 2, but *approximate* (misses some, may false-positive). 7 `fetch`
+  sites total, so the blast radius is tiny either way.
+- **(b) typescript-eslint, scoped to just the two promise rules** — correct and
+  complete, but pulls in the eslint stack the repo has so far avoided, and adds a
+  slow (type-aware) lint pass.
+- **(c) leave it as convention** — the 7 sites all handle failure correctly today;
+  a code-review checklist item + the small site count may be enough.
+
+**Recommendation for class 3: (a) start with the ast-grep syntactic proxy**, and
+only reach for (b) if unhandled-fetch bugs actually recur. Flagged for the operator
+on the PR thread.
+
+### Adopt / Try / Skip
+
+**Adopt (now):**
+
+1. **A local `tsc` gate** (`pre-push` hook or `bun run` wrapper). Zero new deps,
+   closes the most frequent bug class. *This is the single highest-value change in
+   the spike.*
+2. **A tiny ast-grep ruleset** (~4 rules): `no-raw-window-open` (the missing desktop
+   guard) plus, optionally, ports of `lint-dock-theme` and `lint-spacing`. Wire
+   `ast-grep scan` into `bun run check` next to the existing scripts.
+
+**Try (non-gating first, behind the `check` script or a separate CI job):**
+
+3. **knip**, scoped to `--include files,dependencies` with a config declaring entry
+   points. It already found a real phantom dep (`@dnd-kit/utilities`) and a dead
+   file (`plan-md-diff.ts`) — fix those regardless of whether knip is adopted.
+4. **oxlint** as a fast supplementary `correctness`/`suspicious` pass — *not* as a
+   biome replacement, and knowing it won't touch the fetch bug class.
+5. **publint** at prepublish — one-line `license` fix now; guards future `bin`/
+   `files` mistakes since we do publish.
+
+**Skip:** type-coverage (strict already on; slow; test-cast noise), attw (we ship a
+CLI, not a types library), dependency-cruiser (setup > payoff on this graph),
+semgrep (wrong problem shape; ast-grep covers the custom-rule need).
+
+### Which hand-rolled scripts a tool could replace
+
+| Script | Replaceable by | Verdict |
+|---|---|---|
+| `lint-dock-theme.ts` | ast-grep (banned import from `dockview-react`) | **Yes** — a few lines of YAML. |
+| `lint-spacing.ts` | ast-grep (banned numeric spacing prop) | **Yes** — a few lines of YAML. |
+| `lint-strings.ts` | — | **No.** It reads the vocabulary *dynamically* out of `types.ts` and cross-references; hardcoding the enum values into a static rule would defeat the single-source-of-truth. Keep it. |
+
+Consolidating the two replaceable scripts into ast-grep isn't urgent — they work and
+are unit-tested — but doing it *alongside* adding the `window.open` guard means one
+engine, one escape-hatch convention (`// ast-grep-ignore`), and one place for future
+banned-construct rules, rather than a new bespoke scanner per rule. That, plus the
+`tsc` pre-push gate, is the whole recommendation.
+
+### Concrete follow-ups worth filing regardless
+
+- Add `@dnd-kit/utilities` to `package.json` dependencies (currently phantom/transitive).
+- Add `dockview-core` (or stop importing its CSS path directly) — currently relied on transitively.
+- Delete or wire up `src/web/plan-md-diff.ts` (dead).
+- Add the `"license"` field to `package.json` (publint).
