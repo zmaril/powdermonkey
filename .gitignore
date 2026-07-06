@@ -5,3 +5,5 @@ public/assets/
 *.log
 .DS_Store
 dist/
+.env
+.env.local
