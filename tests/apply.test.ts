@@ -136,3 +136,47 @@ test("apply requires approval and is idempotent on re-apply", async () => {
   }
   expect((await goalRepo.get(goal.id))?.objective).toBe("done");
 });
+
+test("an accepted create-task with no position appends to the end of its milestone (no jump)", async () => {
+  // A ghost renders at the BOTTOM of its milestone; accepting it must land the real task
+  // there too — not at the position-0 default, which would jump it to the top.
+  await loadPlan(
+    parsePlan({
+      goals: [{ title: "GA", milestones: [{ title: "MA", tasks: [{ title: "existing" }] }] }],
+    }),
+  );
+  const milestone = (await milestoneRepo.list()).find((m) => m.title === "MA");
+  if (!milestone) throw new Error("seed failed");
+  const existing = (await taskRepo.list()).find(
+    (t) => t.title === "existing" && t.milestoneId === milestone.id,
+  );
+  if (!existing) throw new Error("seed failed");
+
+  const proposal = await createProposal({
+    title: "add without a position",
+    changes: [{ op: "create", kind: "task", parentId: milestone.id, fields: { title: "appended-MA" } }],
+  });
+  await decideProposal(proposal.id, "approved");
+  const r = await applyProposal(proposal.id);
+  expect(r.ok).toBe(true);
+
+  const added = (await taskRepo.list()).find((t) => t.title === "appended-MA");
+  // Appended right after the existing task — not the position-0 default.
+  expect(added?.position).toBe(existing.position + 1);
+  expect(added?.position).toBeGreaterThan(existing.position);
+});
+
+test("first task created in an empty milestone lands at position 0", async () => {
+  await loadPlan(parsePlan({ goals: [{ title: "GB", milestones: [{ title: "MB" }] }] }));
+  const milestone = (await milestoneRepo.list()).find((m) => m.title === "MB");
+  if (!milestone) throw new Error("seed failed");
+
+  const proposal = await createProposal({
+    changes: [{ op: "create", kind: "task", parentId: milestone.id, fields: { title: "first-MB" } }],
+  });
+  await decideProposal(proposal.id, "approved");
+  await applyProposal(proposal.id);
+
+  const added = (await taskRepo.list()).find((t) => t.title === "first-MB");
+  expect(added?.position).toBe(0);
+});

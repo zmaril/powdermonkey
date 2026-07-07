@@ -1,0 +1,62 @@
+name: powdermonkey
+
+# Two containers: PowderMonkey behind Tailscale. PowderMonkey has NO auth (by
+# design), so it is never published to the host or the internet -- its only
+# network identity is a node on your tailnet, and the tailnet is the security
+# boundary. Copy .env.example -> .env and fill it in before `docker compose up`.
+
+services:
+  # The network boundary. This node joins your tailnet and, via Tailscale Serve,
+  # fronts the supervisor on HTTPS at https://<TS_HOSTNAME>.<your-tailnet>.ts.net
+  # (MagicDNS + HTTPS certs must be enabled for your tailnet).
+  tailscale:
+    image: tailscale/tailscale:latest
+    hostname: ${TS_HOSTNAME:-powdermonkey}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?set TS_AUTHKEY in .env — see docs/docker.md}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./docker/tailscale-serve.json:/config/serve.json:ro
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    restart: unless-stopped
+
+  powdermonkey:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    # Share the tailscale container's network namespace: the supervisor's only
+    # network identity IS the tailnet node above. No ports are published here, so
+    # the port is never reachable except over the tailnet.
+    network_mode: service:tailscale
+    depends_on:
+      tailscale:
+        condition: service_started
+    environment:
+      PM_DATA_DIR: /data/pgdata
+      PM_WORKTREE_DIR: /data/worktrees
+      PM_REPO_DIR: /workspace/repo
+      PORT: "4500"
+      # Uncomment to exercise dispatch wiring without touching the cloud:
+      # PM_DISPATCH_DRY_RUN: "1"
+    volumes:
+      # PGlite plan store + worktrees. Lose this volume and you lose your plans.
+      - pm-data:/data
+      # The project PowderMonkey drives. Point REPO_PATH at your checkout on the
+      # host; the supervisor cuts worktrees of it under /data/worktrees.
+      - ${REPO_PATH:?set REPO_PATH in .env}:/workspace/repo
+      # Claude login/config so `claude --remote` dispatch is authenticated.
+      - ${CLAUDE_CONFIG_DIR:-~/.claude}:/root/.claude
+      # git identity for commits/pushes from worktrees.
+      - ${GIT_CONFIG:-~/.gitconfig}:/root/.gitconfig:ro
+    restart: unless-stopped
+
+volumes:
+  pm-data:
+  tailscale-state:

@@ -19,3 +19,10 @@ export const PROPOSED_TEXT_COLOR =
 // The dashed teal edge on a ghost (proposed) card — the goal/milestone/task-ghost
 // blocks all share it, so it lives with the color it's built from.
 export const GHOST_BORDER = `1px dashed ${GHOST_BORDER_COLOR}`;
+
+// The wash behind a field the review preview shows in its proposed after-state (a new
+// title, an added description, a spliced-in phase). Scheme-aware like the teal above: a
+// pale teal tint on light themes, a translucent teal on dark — enough to read as
+// "this is the change" without shouting. Paired with PROPOSED_TEXT_COLOR for the text.
+export const PROPOSED_HIGHLIGHT_BG =
+  "light-dark(var(--mantine-color-teal-1), color-mix(in srgb, var(--mantine-color-teal-5) 22%, transparent))";

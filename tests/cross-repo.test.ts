@@ -3,7 +3,8 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setupTestDb, tmp } from "./db-harness.ts";
 
-process.env.PM_DISPATCH_DRY_RUN = "1"; // never touch the cloud from the same-repo path
+process.env.PM_EXE_DRY_RUN = "1"; // exe.dev backend (default): never provision a real VM
+process.env.PM_DISPATCH_DRY_RUN = "1"; // claude --remote backend: never touch the cloud
 // Dispatch ensures a cache clone of the task's pinned repo before the dry-run
 // branch, so the repos referenced below must be cloneable. Point the cache and
 // clone base at scratch dirs and build local bare remotes — no network.
