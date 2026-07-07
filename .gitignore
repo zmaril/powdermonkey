@@ -12,3 +12,5 @@ storybook-static/
 # Lost Pixel: baselines (.lostpixel/baseline) are committed; these are throwaway.
 .lostpixel/current/
 .lostpixel/difference/
+.env
+.env.local

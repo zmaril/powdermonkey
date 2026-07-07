@@ -22,6 +22,7 @@ beforeAll(async () => {
               tasks: [
                 {
                   title: "build the thing",
+                  description: "the thing is load-bearing; don't break the old callers",
                   phases: [{ name: "write tests" }, { name: "implement" }],
                 },
                 {
@@ -49,6 +50,8 @@ test("GET /tasks/:id/prompt returns the prompt + phase trailers", async () => {
 
   const body = (await res.json()) as { prompt: string; trailers: string[] };
   expect(body.prompt).toContain("Task: build the thing");
+  // The task's description rides along, framing the phases below it.
+  expect(body.prompt).toContain("the thing is load-bearing; don't break the old callers");
   expect(body.prompt).toContain("write tests");
   expect(body.prompt).toContain("PM-Phase:");
   // one trailer per phase, each naming its phase
@@ -75,11 +78,48 @@ test("loadTaskPrompt combines several tasks into one brief", async () => {
   // Trailers are the flat union across all tasks (2 + 1 phases).
   expect(built.trailers).toHaveLength(3);
   expect(built.prompt).toContain("refactor");
-  // The resolved tasks come back in the requested order.
-  expect(built.tasks.map((t) => t.id)).toEqual(ids);
+  // The described task carries its narrative; the description-less one doesn't
+  // sprout a stray line — its section jumps straight from title to "Phases:".
+  expect(built.prompt).toContain("the thing is load-bearing; don't break the old callers");
+  expect(built.prompt).toContain("Task: polish the thing\n\nPhases:");
 });
 
 test("loadTaskPrompt returns null if any task in the list is unknown", async () => {
   const [task] = await taskRepo.list();
   expect(await loadTaskPrompt([task.id, 99999])).toBeNull();
+});
+
+test("the brief includes the task's diary lines, attributed by author", async () => {
+  const [task] = (await taskRepo.list()).sort((a, b) => a.id - b.id);
+  // Muttered onto the task in order: an operator line then a supervisor line.
+  await fetch(`${base}/tasks/${task.id}/comments`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ body: "not sure the FK belongs here" }),
+  });
+  await fetch(`${base}/tasks/${task.id}/comments`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ body: "split this out per the proposal", author: "supervisor" }),
+  });
+
+  const built = await loadTaskPrompt(task.id);
+  if (!built) throw new Error("no prompt");
+  expect(built.prompt).toContain("Diary");
+  // Operator lines read bare; supervisor lines are attributed.
+  expect(built.prompt).toContain("- not sure the FK belongs here");
+  expect(built.prompt).toContain("- (supervisor) split this out per the proposal");
+  // Oldest first — the operator line comes before the supervisor line.
+  expect(built.prompt.indexOf("not sure the FK")).toBeLessThan(
+    built.prompt.indexOf("split this out"),
+  );
+});
+
+test("a task with no diary gets no Diary block", async () => {
+  // The second task ("polish the thing") has no comments.
+  const tasks = (await taskRepo.list()).sort((a, b) => a.id - b.id);
+  const built = await loadTaskPrompt(tasks[1].id);
+  if (!built) throw new Error("no prompt");
+  expect(built.prompt).toContain("Task: polish the thing");
+  expect(built.prompt).not.toContain("Diary");
 });

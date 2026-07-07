@@ -168,17 +168,11 @@ worktree session is the open question.
 ## Verifying
 
 - `bun test tests/diff.test.ts` — the parser.
-- Render with fixtures, no network:
-  ```sh
-  bun run build:web
-  PM_PR_FIXTURE_DIR=/path/to/fixtures PORT=4500 \
-    PM_DATA_DIR="$(mktemp -d)/pg" PM_TMUX_SOCKET=pm-demo \
-    PM_SUPERVISOR_CMD=true PM_RECONCILE_INTERVAL_MS=0 PM_GITHUB_WATCH_INTERVAL_MS=0 \
-    bun run src/server/index.ts &
-  curl -s localhost:4500/prs/17/review | head -c 400
-  ```
-  then drive headless Chromium (see `CLAUDE.md`) — open Backlog → Review on a task
-  whose `prUrl` points at the fixture PR.
+- Render against fixtures with no network: boot a scratch server per the
+  [frontend-verify recipe](../CLAUDE.md#verify-frontend-changes-by-actually-rendering-them),
+  adding `PM_PR_FIXTURE_DIR=/path/to/fixtures` and `PM_GITHUB_WATCH_INTERVAL_MS=0`, then
+  `curl -s localhost:4500/prs/17/review | head -c 400` and drive headless Chromium — open
+  Backlog → Review on a task whose `prUrl` points at the fixture PR.
 
 > Note: the **write path** (posting a comment) shells out to `gh` and was exercised
 > against fixtures (which reject writes) and by reading the constructed `gh api`

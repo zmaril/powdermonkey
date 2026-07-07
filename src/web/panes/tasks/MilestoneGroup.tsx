@@ -4,20 +4,20 @@ import { CSS } from "@dnd-kit/utilities";
 import { Button, Group, Stack, Title } from "@mantine/core";
 import { useState } from "react";
 import type { Milestone, Task } from "../../../server/schema.ts";
-import { ProposalOp, VocabKind } from "../../../shared/types.ts";
-import { type EntityEdit, entityKey, type GroupedGhosts, taskProposalProps } from "../../ghosts.ts";
-import type { Indexes } from "../../plan-data.ts";
+import { VocabKind } from "../../../shared/types.ts";
+import { type EntityEdit, entityKey, type GroupedGhosts } from "../../ghosts.ts";
 import { IdTag } from "../../plan-ui";
 import { useStore } from "../../store.ts";
 import { BacklogCard } from "./BacklogCard.tsx";
 import { CardEditor } from "./CardEditor.tsx";
 import { Caret } from "./Caret.tsx";
+import { DecideControls } from "./DecideControls.tsx";
 import { DragHandle } from "./DragHandle.tsx";
 import { useReveal } from "./new-task.ts";
-import { EditStrips } from "./proposal-strips.tsx";
+import { headerPreview, previewTaskOrder } from "./preview.ts";
+import { Rename } from "./Rename.tsx";
 import { cId, mId, tId } from "./reorder.ts";
 import { SortableCard } from "./SortableCard.tsx";
-import type { Selection } from "./types.ts";
 
 /** A milestone and its backlog cards. The header drag-handle reorders the milestone within
  *  its goal; each card drags to reorder within the milestone or move to another. Pending
@@ -29,15 +29,11 @@ import type { Selection } from "./types.ts";
 export function MilestoneGroup({
   milestone,
   tasks,
-  idx,
-  selection,
   ghosts,
   edits,
 }: {
   milestone: Milestone;
   tasks: Task[];
-  idx: Indexes;
-  selection: Selection;
   ghosts: GroupedGhosts;
   edits: Map<string, EntityEdit[]>;
 }) {
@@ -54,8 +50,14 @@ export function MilestoneGroup({
   // no backlog cards.
   const { setNodeRef: dropRef, isOver } = useDroppable({ id: cId(milestone.id) });
   const milestoneEdits = edits.get(entityKey(VocabKind.Milestone, milestone.id)) ?? [];
-  const archiveProposed = milestoneEdits.some((e) => e.op === ProposalOp.Archive);
+  // The milestone header as it WILL be: title rename old → new, a proposed delete striking
+  // it — with the milestone-level changes decided in place.
+  const preview = headerPreview({ title: milestone.title }, milestoneEdits);
+  const archiveProposed = preview.archived;
   const taskGhosts = ghosts.tasksByMilestone.get(milestone.id) ?? [];
+  // A pending reorder shows the card at its NEW spot: overlay the proposed positions onto
+  // the live task order so a to-be-moved card renders where it would land.
+  const orderedTasks = previewTaskOrder(tasks, milestone.id, edits);
 
   return (
     <Stack
@@ -81,14 +83,22 @@ export function MilestoneGroup({
           c={archiveProposed ? "dimmed" : undefined}
           td={archiveProposed ? "line-through" : undefined}
         >
-          {milestone.title}
+          {!archiveProposed && preview.title.changed ? (
+            <Rename before={preview.title.before} after={preview.title.after} />
+          ) : (
+            milestone.title
+          )}
         </Title>
       </Group>
-      <EditStrips edits={milestoneEdits} />
+      {preview.changes.length > 0 && (
+        <Group>
+          <DecideControls changes={preview.changes} showConflict />
+        </Group>
+      )}
       {!collapsed && (
         <Stack gap="xs">
           <SortableContext
-            items={tasks.map((t) => tId(t.id))}
+            items={orderedTasks.map((t) => tId(t.id))}
             strategy={verticalListSortingStrategy}
           >
             <Stack
@@ -100,13 +110,8 @@ export function MilestoneGroup({
                 outline: isOver ? "1px dashed var(--pm-accent)" : undefined,
               }}
             >
-              {tasks.map((t) => (
-                <SortableCard
-                  key={t.id}
-                  task={t}
-                  selection={selection}
-                  {...taskProposalProps(t, idx, ghosts, edits)}
-                />
+              {orderedTasks.map((t) => (
+                <SortableCard key={t.id} task={t} />
               ))}
             </Stack>
           </SortableContext>

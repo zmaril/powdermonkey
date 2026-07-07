@@ -83,6 +83,16 @@ An author-defined sub-step within a Task. **The grain at which progress is measu
 in the task's description. Discovery-first tasks (bugs, spikes) legitimately start with
 none and gain phases as the work is understood.
 
+### Task comment
+A one-liner muttered onto a Task — the task's **diary**. Typed straight into the card
+(Enter appends, auto-timestamped); after capture a line is an ordinary row — click it to
+edit in place (fix the typo), × to archive it (the soft delete every entity uses). Two
+voices, recorded in `author`: the **operator** (the card's composer) and the
+**supervisor** (via the API, rendered with the robot glyph). Comments are capture, not
+documentation — no title, no fields, no formatting — and they never affect progress. The
+supervisor reads a task's diary as intent/mood context ("operator was unsure here")
+before authoring proposals about it.
+
 ### Repo
 A **GitHub git repo** (`owner/repo`, a default branch), in a **flat global list** you
 configure. **Cloud-first**: the repo of record is on GitHub. PowderMonkey never treats it
@@ -112,7 +122,7 @@ scannable at a glance:
   inside them, so a pre-clone icon never makes `git clone` fail on a non-empty dir —
   and served at `/repos/:id/icon`.
 
-Task cards, session panes, and the Windows rail all render a repo's color + icon.
+Task cards, session panes, and a window's repo tab strip all render a repo's color + icon.
 
 ### Session
 One run of work, independent of the hierarchy: `local` (a git worktree) or `remote`
@@ -198,7 +208,9 @@ milestone, `t41` a task, `#137` a phase, `r4` a repo.
 4. **Windows are Firefox windows, not Layouts.** A *Layout* implies a re-applyable template;
    people rarely want templates. A window is a live, disposable view you keep only as long
    as it's useful, and it bundles both its panel arrangement **and** which repos it shows.
-   Session-restored, usually unnamed, lives in an always-open left rail.
+   Session-restored and usually unnamed. Each window is a **real native OS window**
+   (`Cmd/Ctrl-N` opens another) — not an in-app view swapped from a rail; see
+   [windows.md](windows.md).
 
 5. **Cloud-first repos.** A repo is its GitHub identity (`owner/repo`), not a local checkout.
    PowderMonkey keeps only transient cache clones under `~/.powdermonkey/`, cloned on demand

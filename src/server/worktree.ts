@@ -4,6 +4,7 @@ import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { CROSS_REPO_ERROR, loadTaskPrompt, spansRepos } from "./dispatch.ts";
+import { teardownRemoteWorker } from "./exe-dev.ts";
 import { worktreeAdd, worktreeAddRemote, worktreeRemove } from "./git.ts";
 import { repoDirForTask, supervisorRepoDir } from "./repo-cache.ts";
 import { type Session, sessions, tasks } from "./schema.ts";
@@ -163,6 +164,9 @@ export async function landSession(sessionId: number): Promise<LandResult> {
     }
   }
 
+  // Remote exe.dev worker (no worktree): delete its VM. No-op for local / claude --remote.
+  await teardownRemoteWorker(session);
+
   const [updated] = await db
     .update(sessions)
     .set({ state: SessionState.Idle, archivedAt: new Date(), updatedAt: new Date() })
@@ -206,6 +210,9 @@ export async function stopSession(sessionId: number): Promise<StopResult> {
       if (!rm.ok) console.warn(`stop: worktree remove (non-fatal): ${rm.output}`);
     }
   }
+
+  // Remote exe.dev worker: delete its VM (best-effort). No-op for local / claude --remote.
+  await teardownRemoteWorker(session);
 
   const [updated] = await db
     .update(sessions)

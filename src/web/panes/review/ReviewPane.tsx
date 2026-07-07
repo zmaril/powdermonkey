@@ -4,6 +4,7 @@ import { DockviewReact, type DockviewReadyEvent } from "dockview-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PrReview, ReviewEvent } from "../../../server/pr-review.ts";
 import { api } from "../../client.ts";
+import { openExternal } from "../../open-external.ts";
 import { useActiveTheme } from "../../store.ts";
 import { useRunEffect } from "../../use-run-effect.ts";
 import { ReviewCtx, type ReviewCtxValue } from "./context.ts";
@@ -252,6 +253,10 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
             <Anchor
               href={review.url}
               target="_blank"
+              onClick={(e) => {
+                e.preventDefault();
+                openExternal(review.url);
+              }}
               c="dimmed"
               style={{ flexShrink: 0, display: "inline-flex", lineHeight: 1 }}
             >

@@ -1,48 +1,51 @@
-import { Box, Group, Text } from "@mantine/core";
+import { Badge, Box, Group, Text } from "@mantine/core";
 import type { Task } from "../../../server/schema.ts";
-import { ProposalOp } from "../../../shared/types.ts";
-import type { EntityEdit, Ghost } from "../../ghosts.ts";
+import { type Ghost, taskProposalProps } from "../../ghosts.ts";
 import type { Indexes } from "../../plan-data.ts";
-import { IdTag, KindBadge, ProgressPill, RepoBadge, StarToggle, useRepo } from "../../plan-ui";
+import { IdTag, ProgressPill, RepoBadge, StarToggle, useRepo } from "../../plan-ui";
+import { useBoardData } from "./board-data-context.ts";
 import { GHOST_BORDER_COLOR, SELECTED_SHADOW } from "./constants.ts";
+import { DecideControls } from "./DecideControls.tsx";
+import { GhostStrip } from "./GhostStrip.tsx";
+import { KindDiff } from "./KindDiff.tsx";
 import { useHighlighted } from "./new-task.ts";
-import { GhostStrip, TaskProposalStrips } from "./proposal-strips.tsx";
+import { PreviewPhaseList } from "./PreviewPhaseList.tsx";
+import { previewPhases, taskPreview } from "./preview.ts";
+import { Rename } from "./Rename.tsx";
+import { shiftSelectHandlers, useSelection } from "./selection-context.ts";
 import { TaskActions } from "./TaskActions.tsx";
 import { TaskOutcome } from "./TaskOutcome.tsx";
 import { isTerminal } from "./task-status.ts";
-import type { Selection } from "./types.ts";
 
 const ROW_BORDER = "1px solid var(--pm-hairline)";
 const GHOST_BORDER = `2px solid ${GHOST_BORDER_COLOR}`;
 
 /** One dense backlog row for the flat view: star · id · title · context on the left, the
- *  same actions on the right; pending proposal changes on it or its phases show as strips
- *  below. When `ghost` is set it's a proposed new task row instead (teal-edged, with the
- *  standard accept/reject strip). Shift-click selects; selected rows get the glow. */
+ *  same actions on the right. Pending proposal changes render in place as the row's
+ *  proposed after-state — title old → new, kind retagged, a proposed delete striking it —
+ *  with per-change accept/reject; any phase-level changes show as diff rows below. When
+ *  `ghost` is set it's a proposed new task row instead (teal-edged, with accept/reject).
+ *  Shift-click selects; selected rows get the glow. */
 export function BacklogRow({
   task,
   idx,
   context,
-  selection,
   ghost,
-  edits = [],
-  phaseGhosts = [],
-  phaseEdits = [],
 }: {
   task?: Task;
   idx: Indexes;
   context?: string;
-  selection: Selection;
   ghost?: Ghost;
-  edits?: EntityEdit[];
-  phaseGhosts?: Ghost[];
-  phaseEdits?: EntityEdit[];
 }) {
   // Glows while this is a freshly-added task you haven't seen yet (-1 never matches, for the
   // ghost render path below). Hook stays above the early returns.
   const highlight = useHighlighted(task?.id ?? -1);
   // The task's repo identity (color + icon); undefined for repo-less tasks.
   const repo = useRepo(task?.repoId);
+  // Multi-select state comes from context (provided at the TasksPane root).
+  const selection = useSelection();
+  // The board-wide maps this row's phases + proposal edits derive from (see BoardDataContext).
+  const { ghosts, edits } = useBoardData();
 
   if (ghost) {
     return (
@@ -56,11 +59,20 @@ export function BacklogRow({
   }
 
   if (!task) return null;
-  const phases = idx.phasesByTask.get(task.id) ?? [];
+  // This row's phases + every pending change on the task and its phases.
+  const {
+    phases,
+    edits: taskEdits = [],
+    phaseGhosts = [],
+    phaseEdits,
+  } = taskProposalProps(task, idx, ghosts, edits);
+  const preview = taskPreview(task, taskEdits);
+  // Only the changed phases surface in the dense row (the full checklist lives on the card).
+  const changedPhases = previewPhases(phases, phaseEdits, phaseGhosts).filter((r) => r.change);
   const checked = selection.selected.has(task.id);
-  const archiveProposed = edits.some((e) => e.op === ProposalOp.Archive);
-  // A finished / won't-do / archived task shows its outcome (badge + reopen + links)
-  // in place of the launch actions — the old Archive row, folded in.
+  const struck = preview.archived;
+  // A finished / won't-do / archived task shows its outcome (badge + reopen + links) in
+  // place of the launch actions — the old Archive row, folded in.
   const terminal = isTerminal(task);
   return (
     <Box
@@ -74,31 +86,39 @@ export function BacklogRow({
         background: checked ? "var(--pm-surface)" : undefined,
         boxShadow: checked ? SELECTED_SHADOW : undefined,
       }}
-      onMouseDown={(e) => {
-        if (e.shiftKey) e.preventDefault();
-      }}
-      onClick={(e) => {
-        if (e.shiftKey) {
-          e.preventDefault();
-          selection.toggle(task.id);
-        }
-      }}
+      {...shiftSelectHandlers(selection, task.id)}
     >
       <Group gap="sm" wrap="nowrap" align="center">
         <StarToggle task={task} />
         <Box style={{ flex: 1, minWidth: 0 }}>
           <Group gap="snug" wrap="nowrap">
             <IdTag prefix="t" id={task.id} />
-            <KindBadge kind={task.kind} />
+            {struck ? null : (
+              <KindDiff
+                before={preview.kind.before}
+                after={preview.kind.after}
+                changed={preview.kind.changed}
+              />
+            )}
             <Text
               size="sm"
               fw={500}
-              truncate
-              c={archiveProposed ? "dimmed" : undefined}
-              td={archiveProposed ? "line-through" : undefined}
+              truncate={!preview.title.changed}
+              c={struck ? "dimmed" : undefined}
+              td={struck ? "line-through" : undefined}
+              style={{ minWidth: 0 }}
             >
-              {task.title}
+              {!struck && preview.title.changed ? (
+                <Rename before={preview.title.before} after={preview.title.after} />
+              ) : (
+                task.title
+              )}
             </Text>
+            {preview.reordered && !struck && (
+              <Badge color="teal" variant="light" style={{ flexShrink: 0 }}>
+                ↕ moved
+              </Badge>
+            )}
           </Group>
           {context && (
             <Text size="xs" c="dimmed" truncate>
@@ -111,12 +131,17 @@ export function BacklogRow({
         {!selection.active &&
           (terminal ? <TaskOutcome task={task} /> : <TaskActions ids={[task.id]} />)}
       </Group>
-      <TaskProposalStrips
-        edits={edits}
-        phaseGhosts={phaseGhosts}
-        phaseEdits={phaseEdits}
-        phases={phases}
-      />
+      {/* Phase-level changes as diff rows, and the task-level accept/reject beneath. */}
+      {changedPhases.length > 0 && (
+        <Box mt="tight">
+          <PreviewPhaseList rows={changedPhases} />
+        </Box>
+      )}
+      {preview.changes.length > 0 && (
+        <Group justify="flex-end" mt="tight">
+          <DecideControls changes={preview.changes} compact />
+        </Group>
+      )}
     </Box>
   );
 }

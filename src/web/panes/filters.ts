@@ -1,5 +1,6 @@
 import type { Session, Task } from "../../server/schema.ts";
-import { type SessionKind, SessionState, TaskStatus } from "../../shared/types.ts";
+import { type SessionKind, SessionState, TaskStatus, VocabKind } from "../../shared/types.ts";
+import type { Ghost, GroupedGhosts } from "../ghosts.ts";
 import type { Indexes } from "../plan-data.ts";
 
 // Pure filter/search core for the two reframed panes (Sessions, Tasks). Both panes
@@ -54,6 +55,26 @@ export function scopeValue(f: { goalId: number | null; milestoneId: number | nul
   if (f.milestoneId != null) return `m:${f.milestoneId}`;
   if (f.goalId != null) return `g:${f.goalId}`;
   return ANY;
+}
+
+// ── Window repo scope ────────────────────────────────────────────────────────────
+// The active window's ambient scope (windows.ts, docs/windows.md), layered UNDER the
+// FilterBar: the panes only ever see plan rows whose repo is on one of the window's
+// tabs, and the FilterBar refines within that. Empty = an unscoped window — it sees
+// everything. Union semantics: a window watching three repos shows all three at once.
+
+/** True when a task is on one of the window's repo tabs. Nothing is repo-less by
+ *  policy (the boot seed backfills), but a null repoId that slips through is out of
+ *  every scoped window — it's on no tab. */
+export function taskInScope(task: Task, repoIds: number[]): boolean {
+  return repoIds.length === 0 || (task.repoId != null && repoIds.includes(task.repoId));
+}
+
+/** A session reaches the scope through its tasks (it has no repo of its own — one
+ *  session runs one repo, via its task). `tasks` are the session's own, from
+ *  idx.tasksBySession. A task-less session only shows in an unscoped window. */
+export function sessionInScope(tasks: Task[], repoIds: number[]): boolean {
+  return repoIds.length === 0 || tasks.some((t) => taskInScope(t, repoIds));
 }
 
 // ── Tasks ──────────────────────────────────────────────────────────────────────
@@ -128,6 +149,76 @@ export function matchTask(
     if (!s || s.kind !== f.env) return false;
   }
   return hit(f.search, [`t${task.id}`, String(task.id), task.title]);
+}
+
+// ── Proposal ghosts ──────────────────────────────────────────────────────────────
+// A ghost is a proposed NEW node (a create) previewed in place — so it's not a real,
+// stored task and most of the Tasks filter axes don't apply to it: it has no lifecycle
+// bucket, no session/env, and no starred flag. Only the two axes that DO make sense on a
+// not-yet-real node reach it: the text search (always), matched on its title the same way
+// a task matches (a ghost has no id yet, so title is the only field), and the goal/milestone
+// scope, matched through where the ghost would land. Filtering happens only on the STANDALONE
+// ghosts the board renders on their own (task / milestone / goal); phase ghosts ride inside
+// their task card and are gated by that card, not here.
+
+/** Where a ghost sits in the goal → milestone tree, for the scope filter. A task ghost lands
+ *  under an existing milestone (its goal via the index); a milestone ghost under an existing
+ *  goal (it IS a new milestone, so it has no milestone id of its own); a phase ghost under an
+ *  existing task (its milestone/goal via the index); a goal ghost under nothing. A `null`
+ *  axis can never satisfy a filter on that axis — so a proposed new milestone/goal drops out
+ *  of a milestone-scoped view, matching how narrowing scope hides everything but that slice. */
+function ghostScope(g: Ghost, idx: Indexes): { goalId: number | null; milestoneId: number | null } {
+  switch (g.kind) {
+    case VocabKind.Task: {
+      const m = g.parentId != null ? idx.milestoneById.get(g.parentId) : undefined;
+      return { milestoneId: g.parentId, goalId: m?.goalId ?? null };
+    }
+    case VocabKind.Milestone:
+      return { milestoneId: null, goalId: g.parentId };
+    case VocabKind.Phase: {
+      const t = g.parentId != null ? idx.taskById.get(g.parentId) : undefined;
+      const m = t ? idx.milestoneById.get(t.milestoneId) : undefined;
+      return { milestoneId: t?.milestoneId ?? null, goalId: m?.goalId ?? null };
+    }
+    default: // Goal — under nothing
+      return { milestoneId: null, goalId: null };
+  }
+}
+
+/** True when a ghost passes the axes that apply to a proposed new node — the text search on
+ *  its title (reusing the same hit() a task matches on) and the goal/milestone scope, resolved
+ *  through where the ghost would land. The scope block mirrors matchTask's: milestone wins,
+ *  else goal. */
+export function matchGhost(g: Ghost, idx: Indexes, f: TaskFilter): boolean {
+  const scope = ghostScope(g, idx);
+  if (f.milestoneId != null) {
+    if (scope.milestoneId !== f.milestoneId) return false;
+  } else if (f.goalId != null) {
+    if (scope.goalId !== f.goalId) return false;
+  }
+  return hit(f.search, [g.title]);
+}
+
+/** The grouped ghosts sliced by the active filter: each standalone-ghost list (tasks under
+ *  a milestone, milestones under a goal, brand-new goals) keeps only the ghosts that match,
+ *  dropping any now-empty bucket. Phase ghosts pass through untouched — they render inside a
+ *  task card, so they ride with (and are gated by) that card, just like its edit strips. */
+export function filterGhosts(ghosts: GroupedGhosts, idx: Indexes, f: TaskFilter): GroupedGhosts {
+  const keep = (g: Ghost) => matchGhost(g, idx, f);
+  const filterMap = (m: Map<number, Ghost[]>): Map<number, Ghost[]> => {
+    const out = new Map<number, Ghost[]>();
+    for (const [k, gs] of m) {
+      const kept = gs.filter(keep);
+      if (kept.length > 0) out.set(k, kept);
+    }
+    return out;
+  };
+  return {
+    tasksByMilestone: filterMap(ghosts.tasksByMilestone),
+    milestonesByGoal: filterMap(ghosts.milestonesByGoal),
+    phasesByTask: ghosts.phasesByTask,
+    goals: ghosts.goals.filter(keep),
+  };
 }
 
 // ── Sessions ─────────────────────────────────────────────────────────────────────

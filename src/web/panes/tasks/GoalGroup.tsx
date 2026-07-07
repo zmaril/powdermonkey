@@ -1,27 +1,29 @@
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { Group, Stack, Text, Title } from "@mantine/core";
+import { Group, Stack, Title } from "@mantine/core";
 import { useState } from "react";
 import type { Goal, Milestone, Task } from "../../../server/schema.ts";
-import { ProposalOp, VocabKind } from "../../../shared/types.ts";
+import { VocabKind } from "../../../shared/types.ts";
 import { type EntityEdit, entityKey, type GroupedGhosts } from "../../ghosts.ts";
 import type { Indexes } from "../../plan-data.ts";
 import { IdTag } from "../../plan-ui";
 import { Caret } from "./Caret.tsx";
+import { DecideControls } from "./DecideControls.tsx";
 import { GhostHeader } from "./GhostHeader.tsx";
 import { MilestoneGroup } from "./MilestoneGroup.tsx";
-import { EditStrips } from "./proposal-strips.tsx";
+import { ProsePreview } from "./ProsePreview.tsx";
+import { headerPreview } from "./preview.ts";
+import { Rename } from "./Rename.tsx";
 import { mId, type Reorder } from "./reorder.ts";
-import type { Selection } from "./types.ts";
 
 /** A goal and its milestones. A caret collapses the whole goal. Edits on the goal itself
- *  (rename / delete) show as strips on its header; proposed new milestones render as ghost
- *  blocks. A milestone shows when it has backlog tasks, task-ghosts, or its own edits; a
- *  goal with nothing to show renders nothing. */
+ *  render in place as its proposed after-state — the title rename shown old → new, the
+ *  objective diffed, a proposed delete striking the header — each decided on the header;
+ *  proposed new milestones render as ghost blocks. A milestone shows when it has backlog
+ *  tasks, task-ghosts, or its own edits; a goal with nothing to show renders nothing. */
 export function GoalGroup({
   goal,
   idx,
   backlog,
-  selection,
   ghosts,
   edits,
   reorder,
@@ -29,14 +31,16 @@ export function GoalGroup({
   goal: Goal;
   idx: Indexes;
   backlog: Set<number>;
-  selection: Selection;
   ghosts: GroupedGhosts;
   edits: Map<string, EntityEdit[]>;
   reorder: Reorder;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const goalEdits = edits.get(entityKey(VocabKind.Goal, goal.id)) ?? [];
-  const goalArchive = goalEdits.some((e) => e.op === ProposalOp.Archive);
+  // The goal header as it WILL be: title rename shown old → new, objective diffed, a
+  // proposed delete striking it — with the goal-level changes decided in place.
+  const preview = headerPreview({ title: goal.title, objective: goal.objective }, goalEdits);
+  const goalArchive = preview.archived;
   const ghostMilestones = ghosts.milestonesByGoal.get(goal.id) ?? [];
 
   // Order milestones (and each milestone's tasks) by the live drag order — pure
@@ -84,20 +88,29 @@ export function GoalGroup({
             c={goalArchive ? "dimmed" : undefined}
             td={goalArchive ? "line-through" : undefined}
           >
-            {goal.title}
+            {!goalArchive && preview.title.changed ? (
+              <Rename before={preview.title.before} after={preview.title.after} />
+            ) : (
+              goal.title
+            )}
           </Title>
         </Group>
-        {!collapsed && goal.objective && (
-          <Text
-            c="dimmed"
-            size="sm"
-            mt="tight"
-            ml={26} // lint-allow-spacing: alignment offset under the caret + id, not a density step
+        {!collapsed && (
+          <div
+            style={{ marginLeft: 26 }} // lint-allow-spacing: alignment offset under the caret + id
           >
-            {goal.objective}
-          </Text>
+            <ProsePreview
+              diff={preview.objective}
+              archived={goalArchive}
+              spacing={{ mt: "tight" }}
+            />
+          </div>
         )}
-        <EditStrips edits={goalEdits} />
+        {preview.changes.length > 0 && (
+          <Group mt="tight">
+            <DecideControls changes={preview.changes} showConflict />
+          </Group>
+        )}
       </div>
 
       {!collapsed && (
@@ -106,15 +119,7 @@ export function GoalGroup({
           strategy={verticalListSortingStrategy}
         >
           {milestones.map(({ m, tasks }) => (
-            <MilestoneGroup
-              key={m.id}
-              milestone={m}
-              tasks={tasks}
-              idx={idx}
-              selection={selection}
-              ghosts={ghosts}
-              edits={edits}
-            />
+            <MilestoneGroup key={m.id} milestone={m} tasks={tasks} ghosts={ghosts} edits={edits} />
           ))}
         </SortableContext>
       )}

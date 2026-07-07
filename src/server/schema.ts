@@ -2,7 +2,9 @@ import { bigint, boolean, integer, jsonb, pgTable, text, timestamp } from "drizz
 import {
   type AgentState,
   type CheckRollupState,
+  CommentAuthor,
   type DecisionSource,
+  DispatchBackend,
   type MergeableState,
   PhaseStatus,
   type ProposalChange,
@@ -116,6 +118,10 @@ export const sessions = pgTable("sessions", {
   branch: text("branch"),
   worktreePath: text("worktree_path"),
   url: text("url"),
+  // The exe.dev worker VM backing this session (only set when the remote dispatch
+  // backend is exe.dev). Held so teardown can `exe.dev rm` it when the session ends;
+  // `url` is the ttyd view, not a stable VM handle. Null for local + `claude --remote`.
+  vmName: text("vm_name"),
   // A local session runs an interactive `claude` PTY in its worktree. When that
   // process falls idle after producing output, it's read as "parked at a prompt,
   // waiting for the operator" and surfaced here so the UI can pull them in.
@@ -137,6 +143,22 @@ export const sessionTasks = pgTable("session_tasks", {
     .notNull()
     .references(() => tasks.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// A task's diary: one-line comments muttered onto a task — by the operator (the
+// card's composer) or the supervisor agent (via the API). Capture stays
+// zero-ceremony (one line, auto-timestamped), but a line is an ordinary row after
+// that: it can be edited in place (fix the typo) and archived (soft delete, like
+// every other entity), carrying the shared timestamps.
+export const taskComments = pgTable("task_comments", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  taskId: integer("task_id")
+    .notNull()
+    .references(() => tasks.id),
+  // Who wrote the line — operator or supervisor (see CommentAuthor).
+  author: text("author").$type<CommentAuthor>().notNull().default(CommentAuthor.Operator),
+  body: text("body").notNull(),
+  ...timestamps,
 });
 
 // The repo registry: a flat, global list of the GitHub repos the operator drives.
@@ -241,11 +263,23 @@ export const pullRequests = pgTable("pull_requests", {
 });
 
 // Operator runtime settings — a single-row table (id always 1) of toggles that
-// should survive a restart. Starts with just `autoRebase` (whether the watcher
-// auto-asks @claude to rebase a conflicting PR); add columns as more settings appear.
+// should survive a restart. `autoRebase` gates the watcher's rebase nudge; the
+// `dispatch*`/`exe*` columns configure the cloud-dispatch backend (see
+// DispatchBackend + src/server/exe-dev.ts). Add columns as more settings appear.
 export const settings = pgTable("settings", {
   id: integer("id").primaryKey().default(1),
   autoRebase: boolean("auto_rebase").notNull().default(true),
+  // Which backend a "Dispatch remote" launch uses: "exe-dev" (a per-task exe.dev VM)
+  // or "claude-remote" (Anthropic-cloud `claude --remote`).
+  dispatchBackend: text("dispatch_backend")
+    .$type<DispatchBackend>()
+    .notNull()
+    .default(DispatchBackend.ExeDev),
+  // exe.dev backend options (ignored when the backend is claude-remote).
+  exeTemplate: text("exe_template").notNull().default("powdermonkey"),
+  exeTtydPort: integer("exe_ttyd_port").notNull().default(3456),
+  exeClaudeFlags: text("exe_claude_flags").notNull().default("--dangerously-skip-permissions"),
+  exeAutoTeardown: boolean("exe_auto_teardown").notNull().default(true),
   ...timestamps,
 });
 
@@ -293,6 +327,7 @@ export type Task = typeof tasks.$inferSelect;
 export type Phase = typeof phases.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type SessionTask = typeof sessionTasks.$inferSelect;
+export type TaskComment = typeof taskComments.$inferSelect;
 export type Repo = typeof repos.$inferSelect;
 export type Note = typeof notes.$inferSelect;
 export type PullRequestRow = typeof pullRequests.$inferSelect;

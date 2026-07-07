@@ -1,7 +1,9 @@
-import { Divider, Group, Text } from "@mantine/core";
+import { ActionIcon, Divider, Group, Text, Tooltip } from "@mantine/core";
+import { IconPlus } from "@tabler/icons-react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { tasksCollection } from "../collections.ts";
 import { useStore } from "../store.ts";
+import { openNewWindow } from "../window-bridge.ts";
 import { PaneButton } from "./PaneButton.tsx";
 import { AgentsCluster } from "./status/AgentsCluster.tsx";
 import { ClaudeUsageCluster } from "./status/ClaudeUsageCluster.tsx";
@@ -51,6 +53,21 @@ export function TopBar() {
         </Group>
         <Group gap="hair" wrap="nowrap" align="center">
           <ClaudeUsageCluster usage={usage} />
+          <Divider orientation="vertical" my="tight" />
+          {/* Open a real new OS window (Tauri WebviewWindow / browser window), the
+              cross-platform affordance for Cmd/Ctrl-N. Opens unscoped; scope it from
+              the new window's repo tab strip. */}
+          <Tooltip label="New window (⌘N)" withArrow>
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size="md"
+              onClick={() => openNewWindow()}
+              aria-label="New window"
+            >
+              <IconPlus size={16} />
+            </ActionIcon>
+          </Tooltip>
           <Divider orientation="vertical" my="tight" />
           <PaneButton label="Sessions" onClick={() => openPane("sessions")} />
           <PaneButton label="Tasks" onClick={() => openPane("tasks")} />

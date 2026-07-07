@@ -4,11 +4,13 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    - cron: "0 7 * * 1"  # weekly drift check: dead links, stale PRs, settings flips
+    - cron: "0 7 * * 1"
+  workflow_dispatch:  # weekly drift check: dead links, stale PRs, settings flips
 
 jobs:
   housekeeping:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: zmaril/housekeeping@v1
+      - uses: actions/checkout@v7
+      - uses: zmaril/housekeeping@v0.15.0   # pin the full version, not the moving @v1

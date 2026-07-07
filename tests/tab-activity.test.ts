@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Session, Task } from "../src/server/schema.ts";
+import type { Proposal, Session, Task } from "../src/server/schema.ts";
 import {
   PANE_SESSIONS,
   PANE_TASKS,
@@ -14,6 +14,8 @@ const session = (id: number, needsInput = false) =>
   ({ id, kind: "local", state: "running", needsInput }) as Session;
 const task = (id: number, status: Task["status"]) =>
   ({ id, milestoneId: 1, title: `t${id}`, status }) as Task;
+const proposal = (id: number, status: Proposal["status"] = "pending") =>
+  ({ id, title: `p${id}`, status }) as Proposal;
 
 test("a new live session lights up Sessions", () => {
   const prev = snapshotActivity([], []);
@@ -53,5 +55,23 @@ test("a task rolled back to pending lights up Tasks", () => {
 test("a brand-new task (absent from prev) is not a status-change edge", () => {
   const prev = snapshotActivity([], []);
   const next = snapshotActivity([], [task(9, "pending")]);
+  expect(paneActivity(prev, next).size).toBe(0);
+});
+
+test("a new pending proposal lights up Tasks", () => {
+  const prev = snapshotActivity([], [], []);
+  const next = snapshotActivity([], [], [proposal(1)]);
+  expect([...paneActivity(prev, next)]).toEqual([PANE_TASKS]);
+});
+
+test("an already-pending, unchanged proposal lights up nothing", () => {
+  const prev = snapshotActivity([], [], [proposal(1)]);
+  const next = snapshotActivity([], [], [proposal(1)]);
+  expect(paneActivity(prev, next).size).toBe(0);
+});
+
+test("a proposal leaving the queue (decided) is not a trigger", () => {
+  const prev = snapshotActivity([], [], [proposal(1)]);
+  const next = snapshotActivity([], [], [proposal(1, "approved")]);
   expect(paneActivity(prev, next).size).toBe(0);
 });

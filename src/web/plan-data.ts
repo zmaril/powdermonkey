@@ -2,6 +2,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { useMemo } from "react";
 import type { CloudPr } from "../server/events.ts";
 import type { Goal, Milestone, Phase, Session, Task } from "../server/schema.ts";
+import { ProposalStatus } from "../shared/types.ts";
 import { activeTaskIds, type SessionLink } from "./active.ts";
 import {
   goalsCollection,
@@ -54,6 +55,10 @@ export type Indexes = {
   // Goal/milestone a task hangs under — handy for the flat (ungrouped) views.
   milestoneById: Map<number, Milestone>;
   goalById: Map<number, Goal>;
+  // Every task by id — the fresh, server-truth row. Callers that hold an optimistic
+  // order (the drag reorder) resolve card CONTENT through this so a field edit renders
+  // live even while the sequence is held.
+  taskById: Map<number, Task>;
 };
 
 export function phasesUnder(tasks: Task[], idx: Indexes): Phase[] {
@@ -123,6 +128,7 @@ export function buildIndexes(
     prByTask,
     milestoneById,
     goalById,
+    taskById,
   };
 }
 
@@ -203,6 +209,22 @@ export function useProposalGhosts(): GroupedGhosts {
 export function useProposalEdits(): Map<string, EntityEdit[]> {
   const proposals = useLiveQuery(() => proposalsCollection);
   return useMemo(() => proposalEditsByEntity(proposals.data ?? []), [proposals.data]);
+}
+
+/** The ids of every PENDING proposal — the surface new-proposal detection diffs against
+ *  (a proposal that lands as pending is "new"; one that's been approved/rejected drops
+ *  out), and the count the glanceable badge shows. `ready` flips true once the collection
+ *  has delivered its first snapshot, so detection can seed an empty seen-set on a board that
+ *  loads with no pending proposals (the common case) and still light up the first arrival.
+ *  Live off the synced collection. */
+export function usePendingProposalIds(): { ids: Set<number>; ready: boolean } {
+  const proposals = useLiveQuery(() => proposalsCollection);
+  const ids = useMemo(() => {
+    const out = new Set<number>();
+    for (const p of proposals.data ?? []) if (p.status === ProposalStatus.Pending) out.add(p.id);
+    return out;
+  }, [proposals.data]);
+  return { ids, ready: !proposals.isLoading };
 }
 
 export type FullData = {

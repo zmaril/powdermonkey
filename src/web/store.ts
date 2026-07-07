@@ -1,13 +1,37 @@
 import type { SerializedDockview } from "dockview-react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Note } from "../server/schema.ts";
-import type { Decision, TaskKind } from "../shared/types.ts";
+import type { Note, TaskComment } from "../server/schema.ts";
+import { type Decision, DispatchBackend, type TaskKind } from "../shared/types.ts";
+
+/** The editable cloud-dispatch settings (mirrors the server's DispatchSettings). */
+export type DispatchSettingsPatch = {
+  dispatchBackend: DispatchBackend;
+  exeTemplate: string;
+  exeTtydPort: number;
+  exeClaudeFlags: string;
+  exeAutoTeardown: boolean;
+};
+
 import { DEFAULT_DENSITY, DEFAULT_FONT_SCALE } from "./appearance.ts";
 import { api } from "./client.ts";
 import { DEFAULT_MOTION } from "./motion.ts";
 import type { PmKind } from "./pm-ids.ts";
 import { DEFAULT_THEME, type EditorTheme, getTheme } from "./themes.ts";
+import {
+  dropWindow,
+  fromLegacyLayout,
+  newWindow,
+  type PmWindow,
+  resolveActive,
+  type ScratchCursor,
+  updateWindow,
+} from "./windows.ts";
+
+// The registry (windows) is persisted and shared across every native window / browser
+// tab on the origin; `activeWindowId` is NOT — it's which registry entry THIS webview
+// renders, seeded from the `#w=<id>` URL hash on boot (window-bridge.bootWindow).
+// Persisting it would make every webview rehydrate some other webview's window.
 
 // UI + action store. All *plan/session data* now lives in TanStack DB collections
 // (collections.ts), synced live from PGlite — so this store no longer holds or
@@ -24,7 +48,20 @@ export type StartInfo = {
   trailers: string[];
 };
 
-type State = {
+// The slice `partialize` writes to localStorage — the device's windows plus the
+// appearance/toggle state that should rehydrate synchronously. `migrate` returns
+// this shape too (it's what a v0 blob is upgraded into).
+type PersistedUi = {
+  windows: PmWindow[];
+  autoRebase: boolean;
+  lastBrowserUrl: string;
+  theme: string;
+  density: string;
+  fontScale: string;
+  motion: string;
+};
+
+export type State = {
   // The selected code-editor theme (a key into themes.ts THEMES). Drives the whole
   // app — the Mantine palette, the dockview chrome, the terminal — and is read
   // app-wide (useActiveTheme / the `--pm-*` CSS vars). Persisted so it sticks.
@@ -43,6 +80,15 @@ type State = {
   // Operator toggle: whether the watcher auto-asks @claude to rebase conflicting PRs.
   // Server runtime state (not a synced table), loaded via loadSettings.
   autoRebase: boolean;
+  // Cloud-dispatch backend config — server settings loaded via loadSettings, edited in
+  // the Settings pane. `dispatchBackend` picks exe.dev vs claude --remote; the `exe*`
+  // fields configure the exe.dev worker VMs.
+  dispatchBackend: DispatchBackend;
+  exeTemplate: string;
+  exeTtydPort: number;
+  exeClaudeFlags: string;
+  exeAutoTeardown: boolean;
+  setDispatchSettings: (next: Partial<DispatchSettingsPatch>) => Promise<void>;
   error: string | null;
   // In-flight slow actions, keyed `${action}:${taskId}` (e.g. `dispatch:7`). A button
   // reads its own key to show a spinner the instant it's clicked — dispatch/start-local
@@ -84,12 +130,33 @@ type State = {
   // The PR currently under review, shown as a full-window takeover overlay (not a
   // dockview panel — review is a focused activity). null = no overlay.
   review: { number: number; title: string } | null;
-  // The serialized dockview layout (api.toJSON()). Persisted so a reload — notably
-  // the disconnect→refresh recovery — restores your panes; null means "lay out the
-  // default". This is the single source of truth for the dock; layout-changing
-  // buttons set it here and App reflects it onto the dockview api.
-  layout: SerializedDockview | null;
+  // The registry (windows.ts, docs/windows.md): every currently-open PM window, each a
+  // set of repo tabs + a dockview layout + a cursor into Scratch. Persisted per-device
+  // and shared across every native window / browser tab on the origin. `activeWindowId`
+  // is which entry THIS webview renders — seeded from the `#w=<id>` hash on boot, NOT
+  // persisted (see the note up top). A reload (notably the disconnect→refresh recovery)
+  // comes back on the same window via its hash. This is the source of truth for the
+  // dock; layout-changing buttons write this window's layout here and App reflects it
+  // onto the dockview api.
+  windows: PmWindow[];
+  activeWindowId: string;
+  // Write THIS webview's window's dock layout (api.toJSON()); null = "lay out the
+  // default on next show".
   setLayout: (layout: SerializedDockview | null) => void;
+  // Window surgery. Create just registers a new PM window in the shared registry and
+  // returns its id — it does NOT switch this webview to it: a real OS window is
+  // spawned for it (window-bridge.ts), and this webview keeps showing its own window.
+  createWindow: (repoIds?: number[]) => string;
+  // Boot: make THIS webview render `win`, registering it first if the shared registry
+  // doesn't already hold it (a spawned/bookmarked window this webview hasn't seen).
+  // Called once from window-bridge.bootWindow off the `#w=<id>` hash.
+  adoptWindow: (win: PmWindow) => void;
+  // Drop a window from the shared registry when its OS window closes (Cmd/Ctrl-W or the
+  // native close button; window-bridge). Disposable — no synthetic replacement.
+  removeWindow: (id: string) => void;
+  renameWindow: (id: string, name: string | null) => void;
+  setWindowRepos: (id: string, repoIds: number[]) => void;
+  setScratchCursor: (id: string, cursor: ScratchCursor | null) => void;
   openTerminal: (cwd?: string) => void;
   openSessionTerminal: (sessionId: number, title: string) => void;
   openBrowser: (url?: string) => void;
@@ -132,6 +199,12 @@ type State = {
       repoId?: number | null;
     },
   ) => Promise<void>;
+  // The task's diary: append a line, edit one in place, or archive it (the same
+  // soft delete as everything else). Append returns the created row so the composer
+  // can reconcile its optimistic echo against the synced insert; null on failure.
+  appendComment: (taskId: number, body: string) => Promise<TaskComment | null>;
+  updateComment: (taskId: number, commentId: number, body: string) => Promise<void>;
+  archiveComment: (taskId: number, commentId: number) => Promise<void>;
   createPhase: (taskId: number, name: string, position?: number) => Promise<void>;
   updatePhase: (phaseId: number, fields: { name?: string }) => Promise<void>;
   deletePhase: (phaseId: number) => Promise<void>;
@@ -236,6 +309,11 @@ export const useStore = create<State>()(
       motion: DEFAULT_MOTION,
       setMotion: (key) => set({ motion: key }),
       autoRebase: true,
+      dispatchBackend: DispatchBackend.ExeDev,
+      exeTemplate: "powdermonkey",
+      exeTtydPort: 3456,
+      exeClaudeFlags: "--dangerously-skip-permissions",
+      exeAutoTeardown: true,
       error: null,
       pending: {},
       lastStart: null,
@@ -260,8 +338,36 @@ export const useStore = create<State>()(
           return { tabActivity: rest };
         }),
       review: null,
-      layout: null,
-      setLayout: (layout) => set({ layout }),
+      ...(() => {
+        // The pre-rehydrate default: one fresh unscoped window. persist overwrites
+        // this the moment a device has saved state.
+        const w = newWindow();
+        return { windows: [w], activeWindowId: w.id };
+      })(),
+      setLayout: (layout) =>
+        set((s) => {
+          const active = resolveActive(s.windows, s.activeWindowId);
+          if (!active) return {};
+          return { windows: updateWindow(s.windows, active.id, { layout }) };
+        }),
+      createWindow: (repoIds = []) => {
+        const w = newWindow(repoIds);
+        // Register only — no activeWindowId change. The bridge spawns a real OS window
+        // for `w.id`; that window's webview adopts it via its `#w=` hash on boot.
+        set((s) => ({ windows: [...s.windows, w] }));
+        return w.id;
+      },
+      adoptWindow: (win) =>
+        set((s) => ({
+          windows: s.windows.some((w) => w.id === win.id) ? s.windows : [...s.windows, win],
+          activeWindowId: win.id,
+        })),
+      removeWindow: (id) => set((s) => ({ windows: dropWindow(s.windows, id) })),
+      renameWindow: (id, name) => set((s) => ({ windows: updateWindow(s.windows, id, { name }) })),
+      setWindowRepos: (id, repoIds) =>
+        set((s) => ({ windows: updateWindow(s.windows, id, { repoIds }) })),
+      setScratchCursor: (id, cursor) =>
+        set((s) => ({ windows: updateWindow(s.windows, id, { scratchCursor: cursor }) })),
       openTerminal: (cwd = "") =>
         set((s) => ({
           shellReq: {
@@ -290,8 +396,16 @@ export const useStore = create<State>()(
       closeReview: () => set({ review: null }),
       loadSettings: async () => {
         const { data, error } = await api.settings.get();
-        if (error) return;
-        set({ autoRebase: (data as { autoRebase?: boolean } | null)?.autoRebase ?? true });
+        if (error || !data) return;
+        const d = data as Partial<DispatchSettingsPatch> & { autoRebase?: boolean };
+        set({
+          autoRebase: d.autoRebase ?? true,
+          dispatchBackend: d.dispatchBackend ?? DispatchBackend.ExeDev,
+          exeTemplate: d.exeTemplate ?? "powdermonkey",
+          exeTtydPort: d.exeTtydPort ?? 3456,
+          exeClaudeFlags: d.exeClaudeFlags ?? "--dangerously-skip-permissions",
+          exeAutoTeardown: d.exeAutoTeardown ?? true,
+        });
       },
       ensureScratch: () => ensureScratch((e) => set({ error: e })),
       saveNote: async (id, values) => {
@@ -348,6 +462,22 @@ export const useStore = create<State>()(
         const { error } = await api.tasks({ id: taskId }).patch(fields);
         if (error) set({ error: errMsg(error) });
       },
+      appendComment: async (taskId, body) => {
+        const { data, error } = await api.tasks({ id: taskId }).comments.post({ body });
+        if (error) {
+          set({ error: errMsg(error) });
+          return null;
+        }
+        return data && "id" in data ? data : null;
+      },
+      updateComment: async (taskId, commentId, body) => {
+        const { error } = await api.tasks({ id: taskId }).comments({ commentId }).patch({ body });
+        if (error) set({ error: errMsg(error) });
+      },
+      archiveComment: async (taskId, commentId) => {
+        const { error } = await api.tasks({ id: taskId }).comments({ commentId }).delete();
+        if (error) set({ error: errMsg(error) });
+      },
       createPhase: async (taskId, name, position) => {
         const { error } = await api.phases.post({
           taskId,
@@ -367,6 +497,14 @@ export const useStore = create<State>()(
       setAutoRebase: async (on) => {
         set({ autoRebase: on }); // optimistic — this is store state, not a synced table
         const { error } = await api.settings.post({ autoRebase: on });
+        if (error) {
+          set({ error: String(error.value ?? error.status) });
+          await get().loadSettings(); // revert to server truth on failure
+        }
+      },
+      setDispatchSettings: async (next) => {
+        set(next); // optimistic — server settings, not a synced table
+        const { error } = await api.settings.post(next);
         if (error) {
           set({ error: String(error.value ?? error.status) });
           await get().loadSettings(); // revert to server truth on failure
@@ -479,14 +617,39 @@ export const useStore = create<State>()(
       setError: (error) => set({ error }),
     }),
     {
-      // Persist only the dock layout — collections re-sync, and actions / transient
-      // request signals must never be rehydrated from storage.
+      // Persist only device-scoped UI state — collections re-sync, and actions /
+      // transient request signals must never be rehydrated from storage.
       name: "pm-ui",
-      // Persist the dock layout and the auto-rebase toggle so they rehydrate
-      // synchronously on load — the toggle renders in its last position instead of
-      // flipping from the default once the server value arrives.
+      // v1: the single dock `layout` became the window list (windows.ts). The
+      // migration folds a v0 device's layout into "window 1" so it comes up
+      // exactly as it was, now inside a window. v2: scratch content went global
+      // (the server note) — a window keeps only a CURSOR into it, so the v1
+      // per-window `scratch` body is dropped and `scratchCursor` starts null.
+      // The casts are honest: only the migration's own output claims the v2 shape.
+      version: 2,
+      migrate: (persisted, version) => {
+        let s = (persisted ?? {}) as Record<string, unknown> & {
+          layout?: SerializedDockview | null;
+          windows?: (PmWindow & { scratch?: string })[];
+        };
+        if (version === 0) {
+          const w = fromLegacyLayout(s.layout ?? null);
+          const { layout: _legacy, ...rest } = s;
+          s = { ...rest, windows: [w], activeWindowId: w.id };
+        }
+        if (version <= 1) {
+          s.windows = (s.windows ?? []).map(({ scratch: _dropped, ...w }) => ({
+            ...w,
+            scratchCursor: w.scratchCursor ?? null,
+          }));
+        }
+        return s as PersistedUi;
+      },
+      // The windows (layouts, repo tabs, scratch cursors) plus the toggles that
+      // should render in their last position synchronously on load — the auto-rebase
+      // toggle would otherwise flip from the default once the server value arrives.
       partialize: (s) => ({
-        layout: s.layout,
+        windows: s.windows,
         autoRebase: s.autoRebase,
         lastBrowserUrl: s.lastBrowserUrl,
         theme: s.theme,
@@ -504,4 +667,12 @@ export const useStore = create<State>()(
 // which this same selection already drives.
 export function useActiveTheme(): EditorTheme {
   return getTheme(useStore((s) => s.theme));
+}
+
+// The window the dock is currently showing — never null in practice (the list is
+// never empty and a stale active id falls back to the first window).
+export function useActiveWindow(): PmWindow | null {
+  const windows = useStore((s) => s.windows);
+  const activeId = useStore((s) => s.activeWindowId);
+  return resolveActive(windows, activeId);
 }
