@@ -1,5 +1,5 @@
 {
-  "id": "04513c90-66cb-42f9-9376-932f5d834cf1",
+  "id": "c67ba5aa-3a41-4b4c-bb12-7984c6d6bd45",
   "prevId": "7a8fa1c2-4926-4a54-8b5e-8542f09677d4",
   "version": "7",
   "dialect": "postgresql",
@@ -467,16 +467,10 @@
       "name": "pull_requests",
       "schema": "",
       "columns": {
-        "repo": {
-          "name": "repo",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "number": {
           "name": "number",
           "type": "integer",
-          "primaryKey": false,
+          "primaryKey": true,
           "notNull": true
         },
         "task_id": {
@@ -625,15 +619,7 @@
       },
       "indexes": {},
       "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "pull_requests_repo_number_pk": {
-          "name": "pull_requests_repo_number_pk",
-          "columns": [
-            "repo",
-            "number"
-          ]
-        }
-      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -867,6 +853,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "vm_name": {
+          "name": "vm_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "needs_input": {
           "name": "needs_input",
           "type": "boolean",
@@ -916,6 +908,41 @@
         },
         "auto_rebase": {
           "name": "auto_rebase",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "dispatch_backend": {
+          "name": "dispatch_backend",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'exe-dev'"
+        },
+        "exe_template": {
+          "name": "exe_template",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'powdermonkey'"
+        },
+        "exe_ttyd_port": {
+          "name": "exe_ttyd_port",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 3456
+        },
+        "exe_claude_flags": {
+          "name": "exe_claude_flags",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'--dangerously-skip-permissions'"
+        },
+        "exe_auto_teardown": {
+          "name": "exe_auto_teardown",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,

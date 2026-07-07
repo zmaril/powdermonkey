@@ -106,6 +106,16 @@ export type SessionState = ValueOf<typeof SessionState>;
 export const SessionKind = { Local: "local", Remote: "remote" } as const;
 export type SessionKind = ValueOf<typeof SessionKind>;
 
+/**
+ * Which backend a cloud ("Dispatch remote") launch uses. `ClaudeRemote` is a
+ * `claude --remote` run in Anthropic's cloud; `ExeDev` provisions a per-task VM on
+ * exe.dev (copy an authed template → clone the repo → run claude in tmux, exposed
+ * over ttyd). Chosen in Settings and read by `dispatchTask`; both produce a
+ * `SessionKind.Remote` session (the exe.dev one also carries a `vmName` for teardown).
+ */
+export const DispatchBackend = { ClaudeRemote: "claude-remote", ExeDev: "exe-dev" } as const;
+export type DispatchBackend = ValueOf<typeof DispatchBackend>;
+
 // GitHub PR state, bounded to the values GitHub's GraphQL actually returns. Same
 // const-object-is-the-source-of-truth shape as the status enums above, so the rest
 // of the code (CloudPr, the pull_requests row, the UI badges) speaks one closed

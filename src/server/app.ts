@@ -7,6 +7,7 @@ import { match, P } from "ts-pattern";
 import {
   CommentAuthor,
   Decision,
+  DispatchBackend,
   OverrideSource,
   ProposalStatus,
   SessionState,
@@ -69,7 +70,12 @@ import {
   writeSessionPty,
 } from "./session-pty.ts";
 import { listSessionTasks } from "./session-tasks.ts";
-import { getAutoRebase, setAutoRebase } from "./settings.ts";
+import {
+  getAutoRebase,
+  getDispatchSettings,
+  setAutoRebase,
+  setDispatchSettings,
+} from "./settings.ts";
 import { teleportTask } from "./teleport.ts";
 import { landSession, startLocalSession, stopSession } from "./worktree.ts";
 
@@ -440,16 +446,29 @@ export const app = new Elysia()
   // `available: false` with a reason when there's no login / the API is down, never
   // an error. The global status bar polls this. See docs/claude-usage-spike.md.
   .get("/claude/usage", () => getClaudeUsage())
-  // Runtime operator settings (in-memory, reset on restart). `autoRebase` gates the
-  // watcher's auto @claude-rebase ask, so the Active pane can pause/resume it.
-  .get("/settings", () => ({ autoRebase: getAutoRebase() }))
+  // Operator settings (single-row, survives restart). `autoRebase` gates the
+  // watcher's auto @claude-rebase ask; `dispatchBackend` + `exe*` pick and configure
+  // the cloud-dispatch backend. POST is a partial — only the fields present change.
+  .get("/settings", () => ({ autoRebase: getAutoRebase(), ...getDispatchSettings() }))
   .post(
     "/settings",
     async ({ body }) => {
-      await setAutoRebase(body.autoRebase);
-      return { autoRebase: getAutoRebase() };
+      if (body.autoRebase !== undefined) await setAutoRebase(body.autoRebase);
+      await setDispatchSettings(body);
+      return { autoRebase: getAutoRebase(), ...getDispatchSettings() };
     },
-    { body: t.Object({ autoRebase: t.Boolean() }) },
+    {
+      body: t.Object({
+        autoRebase: t.Optional(t.Boolean()),
+        dispatchBackend: t.Optional(
+          t.Union([t.Literal(DispatchBackend.ExeDev), t.Literal(DispatchBackend.ClaudeRemote)]),
+        ),
+        exeTemplate: t.Optional(t.String()),
+        exeTtydPort: t.Optional(t.Integer({ minimum: 1, maximum: 65535 })),
+        exeClaudeFlags: t.Optional(t.String()),
+        exeAutoTeardown: t.Optional(t.Boolean()),
+      }),
+    },
   )
   // In-app PR review: a PR's diff (raw patch per file) + its inline review comments,
   // so review happens here instead of bouncing to github.com. Backed by `gh api`

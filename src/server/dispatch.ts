@@ -1,10 +1,19 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
-import { CommentAuthor, SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
+import {
+  CommentAuthor,
+  DispatchBackend,
+  SessionKind,
+  SessionState,
+  TaskStatus,
+} from "../shared/types.ts";
 import { listComments } from "./comments.ts";
+import { repoRepo } from "./crud.ts";
 import { db } from "./db.ts";
+import { provisionWorker } from "./exe-dev.ts";
 import { pullMain } from "./git.ts";
+import { spawnCapture } from "./proc.ts";
 import { repoDirForTask, supervisorRepoDir } from "./repo-cache.ts";
 import {
   type Phase,
@@ -16,20 +25,18 @@ import {
   tasks,
 } from "./schema.ts";
 import { linkSessionTasks } from "./session-tasks.ts";
+import { getDispatchBackend, getExeDevConfig } from "./settings.ts";
 
 const SHELL = process.env.SHELL || "bash";
 
-// Dispatches a Task as a `claude --remote` session against main.
+// Dispatches a Task as a cloud session against main. The backend is operator-chosen
+// in Settings (getDispatchBackend): an exe.dev worker VM (src/server/exe-dev.ts) or a
+// `claude --remote` run in Anthropic's cloud. Both persist a SessionKind.Remote row;
+// the exe.dev one also carries a vmName for teardown.
 //
-// ┌─ SEAM: confirm against your spike ──────────────────────────────────────┐
-// │ Two things here are the externally-defined contract that the spike       │
-// │ pinned down, not something this code can verify on its own:              │
-// │   1. the exact argv that starts a remote session with a prompt           │
-// │   2. how the session URL appears in the command's output                 │
-// │ Both are overridable via env so the defaults can be corrected without    │
-// │ touching code. Set PM_DISPATCH_DRY_RUN=1 to exercise the orchestration   │
-// │ (pull → spawn → parse → persist) without touching the cloud.             │
-// └──────────────────────────────────────────────────────────────────────────┘
+// Test seams (no user config): PM_DISPATCH_DRY_RUN fabricates the claude --remote
+// session URL; PM_EXE_DRY_RUN (exe-dev.ts) fabricates the worker — so the whole
+// orchestration (pull → dispatch → parse → persist) runs without touching any cloud.
 
 /** A task paired with its live, ordered phases and its diary — the unit
  *  `buildTaskPrompt` stitches into one worker brief. `comments` is the task's
@@ -180,13 +187,30 @@ export async function loadTaskPrompt(
   return { ...buildTaskPrompt(briefs, comment), tasks: briefs.map((b) => b.task) };
 }
 
-/** The dispatch command, with the prompt sourced from a file so a multi-line
- *  prompt never has to be shell-quoted. `{prompt_file}` is replaced with the path.
+/** The `claude --remote` command for the Anthropic-cloud backend, with the prompt
+ *  sourced from a file so a multi-line prompt never has to be shell-quoted.
  *  NB: `claude --remote` (cloud) is interactive-only and rejects `--print`/`-p`;
  *  run without it and it creates the session, prints a `View:` URL, and exits. */
 function dispatchCmd(promptPath: string): string {
-  const tmpl = process.env.PM_DISPATCH_CMD ?? `claude --remote "$(cat {prompt_file})"`;
-  return tmpl.replaceAll("{prompt_file}", promptPath);
+  return `claude --remote "$(cat ${promptPath})"`;
+}
+
+/** The GitHub slug (`owner/name`) an exe.dev worker should clone for a task. Prefers
+ *  the task's pinned repo; falls back to the origin remote of its run dir (the
+ *  repo-less/supervisor-checkout path). Null when neither yields a GitHub repo. */
+async function slugForTask(taskId: number, runDir: string): Promise<string | null> {
+  const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId));
+  if (task?.repoId) {
+    const repo = await repoRepo.get(task.repoId);
+    if (repo?.slug) return repo.slug;
+  }
+  const gitRemote = ["git", "remote", "get-url", "origin"]; // lint-allow-string: git subcommand, not SessionKind
+  const r = await spawnCapture(gitRemote, { cwd: runDir });
+  if (r.code === 0) {
+    const m = r.stdout.trim().match(/github\.com[:/]+(.+?)(?:\.git)?$/);
+    if (m) return m[1];
+  }
+  return null;
 }
 
 /** Run a command in a PTY and collect its output until it exits. `claude` needs a
@@ -267,27 +291,53 @@ export async function dispatchTask(
   }
 
   const { prompt } = built;
-  let output: string;
 
-  if (process.env.PM_DISPATCH_DRY_RUN) {
-    output = `Created cloud session\nView: https://claude.ai/code/dry-run-${primary}`;
+  // Stash the prompt in a file so a multi-line prompt never has to survive shell
+  // quoting. It lives under the supervisor's own data dir — never inside the cache
+  // clone — so it can't dirty the clone. Both backends read it by absolute path.
+  const promptDir = join(supervisorRepoDir(), "data", "prompts");
+  mkdirSync(promptDir, { recursive: true });
+  const promptPath = join(promptDir, `dispatch-${primary}.md`);
+  writeFileSync(promptPath, `${prompt}\n`);
+
+  // The remote dispatch backend is operator-configured (Settings). Both backends
+  // produce a `SessionKind.Remote` session; the exe.dev one also yields a `vmName`
+  // the session carries so teardown can `exe.dev rm` it when the work ends.
+  let sessionUrl: string;
+  let vmName: string | null = null;
+
+  if (getDispatchBackend() === DispatchBackend.ExeDev) {
+    const slug = await slugForTask(primary, runDir);
+    if (!slug) {
+      return {
+        ok: false,
+        error: "exe.dev dispatch needs a GitHub repo, but none was found for this task",
+      };
+    }
+    const res = await provisionWorker({
+      slug,
+      taskId: primary,
+      promptPath,
+      cfg: getExeDevConfig(),
+    });
+    if (!res.ok) return { ok: false, error: res.error, output: res.output };
+    sessionUrl = res.url;
+    vmName = res.vmName;
   } else {
-    // Stash the prompt in a file so a multi-line prompt never has to survive shell
-    // quoting, then run the dispatch command in a PTY (claude needs a TTY) with the
-    // task's cache clone as cwd. The prompt file lives under the supervisor's own data
-    // dir — never inside the cache clone — so it can't dirty the clone. Its absolute
-    // path is fed to `cat`, so cwd being the clone doesn't matter for reading it.
-    const dir = join(supervisorRepoDir(), "data", "prompts");
-    mkdirSync(dir, { recursive: true });
-    const promptPath = join(dir, `dispatch-${primary}.md`);
-    writeFileSync(promptPath, `${prompt}\n`);
-    const { code, output: out } = await runInPty(dispatchCmd(promptPath), runDir);
-    output = out;
-    if (code !== 0) return { ok: false, error: `dispatch exited ${code}`, output };
+    // claude --remote (Anthropic cloud): run in a PTY (claude needs a TTY) with the
+    // task's cache clone as cwd, so it infers the GitHub repo from the clone's remote.
+    let output: string;
+    if (process.env.PM_DISPATCH_DRY_RUN) {
+      output = `Created cloud session\nView: https://claude.ai/code/dry-run-${primary}`;
+    } else {
+      const { code, output: out } = await runInPty(dispatchCmd(promptPath), runDir);
+      output = out;
+      if (code !== 0) return { ok: false, error: `dispatch exited ${code}`, output };
+    }
+    const parsed = parseSessionUrl(output);
+    if (!parsed) return { ok: false, error: "no session URL in output", output };
+    sessionUrl = parsed;
   }
-
-  const sessionUrl = parseSessionUrl(output);
-  if (!sessionUrl) return { ok: false, error: "no session URL in output", output };
 
   // A remote session gets a sessions row too — same as a local one — so both kinds
   // live in one place and "active" can be derived uniformly from a live session.
@@ -297,7 +347,7 @@ export async function dispatchTask(
   // each task surfaces the shared cloud run. Each task is also marked dispatched.
   const [session] = await db
     .insert(sessions)
-    .values({ kind: SessionKind.Remote, state: SessionState.Running, url: sessionUrl })
+    .values({ kind: SessionKind.Remote, state: SessionState.Running, url: sessionUrl, vmName })
     .returning();
   await linkSessionTasks(session.id, ids);
   await db
