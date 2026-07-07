@@ -98,6 +98,9 @@ jobs:
       - run: bun install --frozen-lockfile
       # build:compile runs build:web first, so both bundles are exercised.
       - run: bun run build:compile
+      # Also compile the dev-only react-scan bundle so it can't break silently
+      # (a separate entry, main.scan.tsx, that CI otherwise never builds).
+      - run: bun run build:web:scan
 
   desktop-check:
     name: Desktop compile check (cargo check on src-tauri)
