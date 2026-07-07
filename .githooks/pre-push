@@ -1,0 +1,12 @@
+#!/bin/sh
+# The heavy CI legs, run before a push so failures surface locally instead of in
+# remote CI. These live here rather than in pre-commit because `bun run test`
+# shells out to `git worktree add`, which fails while a commit holds
+# .git/index.lock — pre-push runs with no such lock.
+# Bypass with `git push --no-verify`. Activate with:
+#   git config core.hooksPath .githooks
+set -e
+run() { printf '\n\033[1m▶ %s\033[0m\n' "$*"; "$@"; }
+
+run bun run test
+run bun run build:compile

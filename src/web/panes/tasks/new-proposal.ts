@@ -22,6 +22,10 @@ const ProposalHighlightContext = createContext<ReadonlySet<number>>(new Set());
 export const ProposalHighlightProvider = ProposalHighlightContext.Provider;
 export const useProposalHighlighted = (proposalId: number): boolean =>
   useContext(ProposalHighlightContext).has(proposalId);
+// The whole glowing set, for a spot that decides several proposals at once (the inline
+// accept/reject controls, one ✓/✗ per change) and can't call the per-id hook in a loop.
+export const useProposalHighlights = (): ReadonlySet<number> =>
+  useContext(ProposalHighlightContext);
 
 // Ghost cards and edit strips carry their proposal id on `data-pm-proposal` — the handle the
 // seen-reveal engine observes to clear the glow once a piece has been on screen.
