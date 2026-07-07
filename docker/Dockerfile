@@ -12,10 +12,19 @@ FROM oven/bun:1-debian
 
 # tmux + git are hard runtime deps: the supervisor drives tmux on a private socket
 # and cuts git worktrees to run work. curl + ca-certificates are for the health
-# check and the optional claude install below.
+# check and the optional claude install below. gh is how the supervisor reads
+# GitHub (reconcile's PR/branch watch, repo metadata) and authenticates pushes.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
-       git tmux ca-certificates curl \
+       git tmux ca-certificates curl gnupg \
+  && mkdir -p -m 755 /etc/apt/keyrings \
+  && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+       | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null \
+  && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+       > /etc/apt/sources.list.d/github-cli.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends gh \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

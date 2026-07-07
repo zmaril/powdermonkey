@@ -3,6 +3,7 @@ import { DENSITY, FONT_SCALE } from "../../appearance.ts";
 import { MOTION } from "../../motion.ts";
 import { PaneShell } from "../../PaneShell.tsx";
 import { CommandRow } from "./CommandRow.tsx";
+import { DispatchControl } from "./DispatchControl.tsx";
 import { NotifyControl } from "./NotifyControl.tsx";
 import { SegmentedSetting } from "./SegmentedSetting.tsx";
 import { ServerControl } from "./ServerControl.tsx";
@@ -15,6 +16,8 @@ export function SettingsPane() {
   return (
     <PaneShell title="SETTINGS" bodyGap="lg">
       <ServerControl />
+      <Divider />
+      <DispatchControl />
       <Divider />
       <Stack gap="snug">
         <Text size="sm" fw={600}>

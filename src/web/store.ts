@@ -2,7 +2,17 @@ import type { SerializedDockview } from "dockview-react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Note, TaskComment } from "../server/schema.ts";
-import type { Decision, TaskKind } from "../shared/types.ts";
+import { type Decision, DispatchBackend, type TaskKind } from "../shared/types.ts";
+
+/** The editable cloud-dispatch settings (mirrors the server's DispatchSettings). */
+export type DispatchSettingsPatch = {
+  dispatchBackend: DispatchBackend;
+  exeTemplate: string;
+  exeTtydPort: number;
+  exeClaudeFlags: string;
+  exeAutoTeardown: boolean;
+};
+
 import { DEFAULT_DENSITY, DEFAULT_FONT_SCALE } from "./appearance.ts";
 import { api } from "./client.ts";
 import { DEFAULT_MOTION } from "./motion.ts";
@@ -70,6 +80,15 @@ export type State = {
   // Operator toggle: whether the watcher auto-asks @claude to rebase conflicting PRs.
   // Server runtime state (not a synced table), loaded via loadSettings.
   autoRebase: boolean;
+  // Cloud-dispatch backend config — server settings loaded via loadSettings, edited in
+  // the Settings pane. `dispatchBackend` picks exe.dev vs claude --remote; the `exe*`
+  // fields configure the exe.dev worker VMs.
+  dispatchBackend: DispatchBackend;
+  exeTemplate: string;
+  exeTtydPort: number;
+  exeClaudeFlags: string;
+  exeAutoTeardown: boolean;
+  setDispatchSettings: (next: Partial<DispatchSettingsPatch>) => Promise<void>;
   error: string | null;
   // In-flight slow actions, keyed `${action}:${taskId}` (e.g. `dispatch:7`). A button
   // reads its own key to show a spinner the instant it's clicked — dispatch/start-local
@@ -290,6 +309,11 @@ export const useStore = create<State>()(
       motion: DEFAULT_MOTION,
       setMotion: (key) => set({ motion: key }),
       autoRebase: true,
+      dispatchBackend: DispatchBackend.ExeDev,
+      exeTemplate: "powdermonkey",
+      exeTtydPort: 3456,
+      exeClaudeFlags: "--dangerously-skip-permissions",
+      exeAutoTeardown: true,
       error: null,
       pending: {},
       lastStart: null,
@@ -372,8 +396,16 @@ export const useStore = create<State>()(
       closeReview: () => set({ review: null }),
       loadSettings: async () => {
         const { data, error } = await api.settings.get();
-        if (error) return;
-        set({ autoRebase: (data as { autoRebase?: boolean } | null)?.autoRebase ?? true });
+        if (error || !data) return;
+        const d = data as Partial<DispatchSettingsPatch> & { autoRebase?: boolean };
+        set({
+          autoRebase: d.autoRebase ?? true,
+          dispatchBackend: d.dispatchBackend ?? DispatchBackend.ExeDev,
+          exeTemplate: d.exeTemplate ?? "powdermonkey",
+          exeTtydPort: d.exeTtydPort ?? 3456,
+          exeClaudeFlags: d.exeClaudeFlags ?? "--dangerously-skip-permissions",
+          exeAutoTeardown: d.exeAutoTeardown ?? true,
+        });
       },
       ensureScratch: () => ensureScratch((e) => set({ error: e })),
       saveNote: async (id, values) => {
@@ -465,6 +497,14 @@ export const useStore = create<State>()(
       setAutoRebase: async (on) => {
         set({ autoRebase: on }); // optimistic — this is store state, not a synced table
         const { error } = await api.settings.post({ autoRebase: on });
+        if (error) {
+          set({ error: String(error.value ?? error.status) });
+          await get().loadSettings(); // revert to server truth on failure
+        }
+      },
+      setDispatchSettings: async (next) => {
+        set(next); // optimistic — server settings, not a synced table
+        const { error } = await api.settings.post(next);
         if (error) {
           set({ error: String(error.value ?? error.status) });
           await get().loadSettings(); // revert to server truth on failure
