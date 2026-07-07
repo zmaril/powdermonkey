@@ -12,6 +12,7 @@ jobs:
   scan:
     name: straitjacket
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # v0.2.0 uploads findings to code scanning (SARIF) by default; that needs
     # security-events: write. Without it the scan still runs, just no annotations.
     permissions:
