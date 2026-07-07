@@ -2,7 +2,17 @@ import type { SerializedDockview } from "dockview-react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Note, TaskComment } from "../server/schema.ts";
-import type { Decision, SyncMode, TaskKind } from "../shared/types.ts";
+import { type Decision, DispatchBackend, type SyncMode, type TaskKind } from "../shared/types.ts";
+
+/** The editable cloud-dispatch settings (mirrors the server's DispatchSettings). */
+export type DispatchSettingsPatch = {
+  dispatchBackend: DispatchBackend;
+  exeTemplate: string;
+  exeTtydPort: number;
+  exeClaudeFlags: string;
+  exeAutoTeardown: boolean;
+};
+
 import { DEFAULT_DENSITY, DEFAULT_FONT_SCALE } from "./appearance.ts";
 import { api } from "./client.ts";
 import { DEFAULT_MOTION } from "./motion.ts";
@@ -77,6 +87,15 @@ export type State = {
   // (SyncControl reads /backup/status) rather than kept here.
   syncMode: string;
   syncBranch: string;
+  // Cloud-dispatch backend config — server settings loaded via loadSettings, edited in
+  // the Settings pane. `dispatchBackend` picks exe.dev vs claude --remote; the `exe*`
+  // fields configure the exe.dev worker VMs.
+  dispatchBackend: DispatchBackend;
+  exeTemplate: string;
+  exeTtydPort: number;
+  exeClaudeFlags: string;
+  exeAutoTeardown: boolean;
+  setDispatchSettings: (next: Partial<DispatchSettingsPatch>) => Promise<void>;
   error: string | null;
   // In-flight slow actions, keyed `${action}:${taskId}` (e.g. `dispatch:7`). A button
   // reads its own key to show a spinner the instant it's clicked — dispatch/start-local
@@ -301,6 +320,11 @@ export const useStore = create<State>()(
       autoRebase: true,
       syncMode: "off", // lint-allow-string: default before /settings loads, not SyncMode.Off (store is enum-free)
       syncBranch: "powdermonkey-backup",
+      dispatchBackend: DispatchBackend.ExeDev,
+      exeTemplate: "powdermonkey",
+      exeTtydPort: 3456,
+      exeClaudeFlags: "--dangerously-skip-permissions",
+      exeAutoTeardown: true,
       error: null,
       pending: {},
       lastStart: null,
@@ -383,12 +407,21 @@ export const useStore = create<State>()(
       closeReview: () => set({ review: null }),
       loadSettings: async () => {
         const { data, error } = await api.settings.get();
-        if (error) return;
-        const s = data as { autoRebase?: boolean; syncMode?: string; syncBranch?: string } | null;
+        if (error || !data) return;
+        const d = data as Partial<DispatchSettingsPatch> & {
+          autoRebase?: boolean;
+          syncMode?: string;
+          syncBranch?: string;
+        };
         set({
-          autoRebase: s?.autoRebase ?? true,
-          syncMode: s?.syncMode ?? "off", // lint-allow-string: fallback, not SyncMode.Off
-          syncBranch: s?.syncBranch ?? "powdermonkey-backup",
+          autoRebase: d.autoRebase ?? true,
+          syncMode: d.syncMode ?? "off", // lint-allow-string: fallback, not SyncMode.Off
+          syncBranch: d.syncBranch ?? "powdermonkey-backup",
+          dispatchBackend: d.dispatchBackend ?? DispatchBackend.ExeDev,
+          exeTemplate: d.exeTemplate ?? "powdermonkey",
+          exeTtydPort: d.exeTtydPort ?? 3456,
+          exeClaudeFlags: d.exeClaudeFlags ?? "--dangerously-skip-permissions",
+          exeAutoTeardown: d.exeAutoTeardown ?? true,
         });
       },
       ensureScratch: () => ensureScratch((e) => set({ error: e })),
@@ -500,6 +533,14 @@ export const useStore = create<State>()(
         if (error) {
           set({ error: String(error.value ?? error.status) });
           await get().loadSettings();
+        }
+      },
+      setDispatchSettings: async (next) => {
+        set(next); // optimistic — server settings, not a synced table
+        const { error } = await api.settings.post(next);
+        if (error) {
+          set({ error: String(error.value ?? error.status) });
+          await get().loadSettings(); // revert to server truth on failure
         }
       },
       startLocal: (taskId) =>

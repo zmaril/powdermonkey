@@ -7,6 +7,7 @@ import { match, P } from "ts-pattern";
 import {
   CommentAuthor,
   Decision,
+  DispatchBackend,
   OverrideSource,
   ProposalStatus,
   SessionState,
@@ -458,10 +459,11 @@ export const app = new Elysia()
   // `available: false` with a reason when there's no login / the API is down, never
   // an error. The global status bar polls this. See docs/claude-usage-spike.md.
   .get("/claude/usage", () => getClaudeUsage())
-  // Persisted operator settings. `autoRebase` gates the watcher's auto @claude-rebase
-  // ask; `syncMode`/`syncBranch` configure data-durability autosync. A partial POST
-  // patches only the keys it carries. Turning autosync on (mode → non-off) kicks an
-  // immediate sync so the durable branch is seeded without waiting for the next write.
+  // Persisted operator settings (single-row, survives restart). `autoRebase` gates the
+  // watcher's auto @claude-rebase ask; `syncMode`/`syncBranch` configure data-durability
+  // autosync; `dispatchBackend` + `exe*` pick and configure the cloud-dispatch backend.
+  // A partial POST patches only the keys it carries. Turning autosync on (mode → non-off)
+  // kicks an immediate sync so the durable branch is seeded without waiting for a write.
   .get("/settings", () => getSettings())
   .post(
     "/settings",
@@ -477,6 +479,13 @@ export const app = new Elysia()
           t.Union([t.Literal(SyncMode.Off), t.Literal(SyncMode.Local), t.Literal(SyncMode.Push)]),
         ),
         syncBranch: t.Optional(t.String()),
+        dispatchBackend: t.Optional(
+          t.Union([t.Literal(DispatchBackend.ExeDev), t.Literal(DispatchBackend.ClaudeRemote)]),
+        ),
+        exeTemplate: t.Optional(t.String()),
+        exeTtydPort: t.Optional(t.Integer({ minimum: 1, maximum: 65535 })),
+        exeClaudeFlags: t.Optional(t.String()),
+        exeAutoTeardown: t.Optional(t.Boolean()),
       }),
     },
   )

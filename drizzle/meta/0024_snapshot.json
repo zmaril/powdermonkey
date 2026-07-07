@@ -1,5 +1,5 @@
 {
-  "id": "bfe29755-16ad-4028-89f8-baf6e927796b",
+  "id": "c67ba5aa-3a41-4b4c-bb12-7984c6d6bd45",
   "prevId": "7a8fa1c2-4926-4a54-8b5e-8542f09677d4",
   "version": "7",
   "dialect": "postgresql",
@@ -853,6 +853,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "vm_name": {
+          "name": "vm_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "needs_input": {
           "name": "needs_input",
           "type": "boolean",
@@ -907,19 +913,40 @@
           "notNull": true,
           "default": true
         },
-        "sync_mode": {
-          "name": "sync_mode",
+        "dispatch_backend": {
+          "name": "dispatch_backend",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'off'"
+          "default": "'exe-dev'"
         },
-        "sync_branch": {
-          "name": "sync_branch",
+        "exe_template": {
+          "name": "exe_template",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'powdermonkey-backup'"
+          "default": "'powdermonkey'"
+        },
+        "exe_ttyd_port": {
+          "name": "exe_ttyd_port",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 3456
+        },
+        "exe_claude_flags": {
+          "name": "exe_claude_flags",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'--dangerously-skip-permissions'"
+        },
+        "exe_auto_teardown": {
+          "name": "exe_auto_teardown",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
         },
         "created_at": {
           "name": "created_at",

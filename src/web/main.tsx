@@ -13,6 +13,7 @@ import { useLayoutEffect, useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App.tsx";
 import { applyFontScale, densityOption } from "./appearance.ts";
+import { ConfirmHost } from "./confirm.tsx";
 import { applyMotionVars } from "./motion.ts";
 import { useStore } from "./store.ts";
 import { buildTheme } from "./theme.ts";
@@ -59,6 +60,9 @@ function ThemedRoot() {
   return (
     <MantineProvider forceColorScheme={editor.scheme} theme={mantineTheme}>
       <App />
+      {/* One in-app confirm() modal host for the whole app — a cross-env stand-in
+          for window.confirm, which no-ops in the Tauri desktop webview. */}
+      <ConfirmHost />
     </MantineProvider>
   );
 }
