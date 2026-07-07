@@ -1,3 +1,4 @@
+// straitjacket-allow-file:one-component  a Storybook stories file exports several Story objects (Prose, WithControls) by design — that's the story catalog, not multiple React components crammed in one file
 import { Button, Group, Text } from "@mantine/core";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { PaneShell } from "./PaneShell.tsx";
