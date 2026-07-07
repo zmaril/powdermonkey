@@ -1,5 +1,5 @@
 {
-  "id": "4357945a-3004-43d9-affd-eb6f0cda9370",
+  "id": "c67ba5aa-3a41-4b4c-bb12-7984c6d6bd45",
   "prevId": "7a8fa1c2-4926-4a54-8b5e-8542f09677d4",
   "version": "7",
   "dialect": "postgresql",
@@ -434,12 +434,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "source_note_key": {
-          "name": "source_note_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -859,6 +853,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "vm_name": {
+          "name": "vm_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "needs_input": {
           "name": "needs_input",
           "type": "boolean",
@@ -908,6 +908,41 @@
         },
         "auto_rebase": {
           "name": "auto_rebase",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "dispatch_backend": {
+          "name": "dispatch_backend",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'exe-dev'"
+        },
+        "exe_template": {
+          "name": "exe_template",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'powdermonkey'"
+        },
+        "exe_ttyd_port": {
+          "name": "exe_ttyd_port",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 3456
+        },
+        "exe_claude_flags": {
+          "name": "exe_claude_flags",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'--dangerously-skip-permissions'"
+        },
+        "exe_auto_teardown": {
+          "name": "exe_auto_teardown",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,

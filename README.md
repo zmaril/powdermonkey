@@ -70,6 +70,11 @@ it's the same single-machine setup as before. See **[docs/desktop.md](docs/deskt
 for the model, the build steps (`bun run desktop:dev` / `desktop:build`), and the
 network/auth notes.
 
+To run the supervisor headless on an always-on host so it keeps working after you
+close your laptop, there's a **Docker + Compose** setup that puts it behind
+Tailscale (the tailnet is the auth boundary, since PM has none) — see
+**[docs/docker.md](docs/docker.md)**.
+
 ## Run (dev)
 
 ```bash

@@ -1,7 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Core capabilities for the main window. The UI needs the webview's own network access (fetch/WebSocket to the chosen supervisor), which CSP gates — see tauri.conf.json's security.csp — plus the opener plugin so external links (terminal URLs, PR/review links) open in the OS default browser rather than the webview.",
-  "windows": ["main"],
-  "permissions": ["core:default", "opener:default"]
+  "description": "Capabilities for every PowderMonkey window. The UI needs the webview's own network access (fetch/WebSocket to the chosen supervisor), which CSP gates — see tauri.conf.json's security.csp — plus the opener plugin so external links (terminal URLs, PR/review links) open in the OS default browser rather than the webview. On top of that, real windows (docs/windows.md): any window can open another (Cmd/Ctrl-N → a WebviewWindow) and close itself (Cmd/Ctrl-W), so the create/close permissions are granted here. The window glob covers the boot window (main) and every spawned window (pm-*).",
+  "windows": ["main", "pm-*"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-close"
+  ]
 }

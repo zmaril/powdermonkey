@@ -11,6 +11,9 @@ process.env.PM_WORKTREE_DIR = join(tmp("pm-wt-"), "wt");
 // matching note in worktree.test.ts.
 process.env.PM_TMUX_SOCKET = `pm-test-${process.pid}`;
 process.env.PM_SESSION_CMD = "";
+// A remote exe.dev session's archive path tears down its worker VM — fabricate that
+// so reconcile never runs a real `ssh exe.dev rm`.
+process.env.PM_EXE_DRY_RUN = "1";
 
 const { ready } = await setupTestDb();
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
@@ -208,4 +211,38 @@ test("merging a task archives its live sessions; non-merged tasks are untouched"
   // Idempotent: a second tick finds nothing left to archive.
   const again = await reconcile();
   expect(again.sessionsArchived).toBe(0);
+});
+
+test("a cancelled task's exe.dev worker session is archived (and torn down)", async () => {
+  await loadPlan(
+    parsePlan({
+      goals: [
+        {
+          title: "Cancel",
+          milestones: [{ title: "m", tasks: [{ title: "to-cancel", phases: [{ name: "x" }] }] }],
+        },
+      ],
+    }),
+  );
+  const task = (await taskRepo.list()).find((t) => t.title === "to-cancel");
+  if (!task) throw new Error("seed failed");
+
+  // A remote exe.dev session (carries a vmName) whose sole task will be cancelled.
+  const session = await sessionRepo.create({
+    kind: "remote",
+    state: "running",
+    url: "https://pm-x-1-42.exe.xyz:3456/",
+    vmName: "pm-x-1-42",
+  });
+  await linkSessionTasks(session.id, [task.id]);
+
+  // Cancel the task (soft-delete + terminal status), as cancelTask does.
+  await taskRepo.update(task.id, { status: "cancelled", archivedAt: new Date() });
+
+  // Reconcile closes the session even though nothing merged — cancellation is terminal.
+  const result = await reconcile();
+  expect(result.sessionsArchived).toBe(1);
+  const archived = await sessionRepo.get(session.id);
+  expect(archived?.archivedAt).not.toBeNull();
+  expect(archived?.state).toBe("idle");
 });

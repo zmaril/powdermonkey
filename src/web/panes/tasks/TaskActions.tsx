@@ -2,6 +2,7 @@ import { Button, Group, Tooltip } from "@mantine/core";
 import { IconCloud, IconDeviceLaptop, IconPlayerPlayFilled } from "@tabler/icons-react";
 import { type ReactNode, useState } from "react";
 import { SessionKind } from "../../../shared/types.ts";
+import { confirm } from "../../confirm.tsx";
 import { useStore } from "../../store.ts";
 import { LaunchButton } from "./LaunchButton.tsx";
 
@@ -54,12 +55,19 @@ export function TaskActions({
     for (const id of ids) completeTask(id);
     onDone?.();
   };
-  const wontDo = () => {
+  const wontDo = async () => {
     const msg =
       ids.length > 1
         ? `Close ${ids.length} tasks as won't-do? They move to the archive as cancelled.`
         : "Close this task as won't-do? It moves to the archive as cancelled.";
-    if (window.confirm(msg)) {
+    if (
+      await confirm({
+        message: msg,
+        title: "Close as won't-do",
+        confirmLabel: "Close as won't-do",
+        danger: true,
+      })
+    ) {
       for (const id of ids) cancelTask(id);
       onDone?.();
     }
