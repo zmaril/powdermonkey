@@ -1,0 +1,1 @@
+ALTER TABLE "proposals" ALTER COLUMN "source_comment_id" SET DATA TYPE bigint;

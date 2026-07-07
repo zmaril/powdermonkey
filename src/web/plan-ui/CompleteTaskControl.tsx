@@ -1,6 +1,7 @@
 import { Badge, Button, Group, Text, UnstyledButton } from "@mantine/core";
 import type { Task } from "../../server/schema.ts";
 import { DecisionSource, TaskStatus } from "../../shared/types.ts";
+import { confirm } from "../confirm.tsx";
 import { useStore } from "../store.ts";
 
 // How each decision source renders — a colour and a short "by …" label, so an
@@ -28,7 +29,7 @@ export function CompleteTaskControl({ task }: { task: Task }) {
     const cancelled = task.status === TaskStatus.Cancelled;
     const verb = cancelled ? "won't do" : "done"; // lint-allow-string: badge label, not the status value
     return (
-      <Group gap={6} wrap="nowrap">
+      <Group gap="snug" wrap="nowrap">
         <Badge
           size="xs"
           color={cancelled ? "red" : desc.color}
@@ -63,8 +64,15 @@ export function CompleteTaskControl({ task }: { task: Task }) {
         variant="subtle"
         color="red"
         title="Close as won't-do — terminal, but not counted as done"
-        onClick={() => {
-          if (window.confirm("Close this task as won't-do? It moves to the archive as cancelled."))
+        onClick={async () => {
+          if (
+            await confirm({
+              message: "Close this task as won't-do? It moves to the archive as cancelled.",
+              title: "Close as won't-do",
+              confirmLabel: "Close as won't-do",
+              danger: true,
+            })
+          )
             cancelTask(task.id);
         }}
       >

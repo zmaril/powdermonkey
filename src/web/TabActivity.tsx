@@ -5,7 +5,8 @@ import {
   type IDockviewPanelHeaderProps,
 } from "dockview-react";
 import { type RefObject, useEffect, useRef } from "react";
-import { sessionsCollection, tasksCollection } from "./collections.ts";
+import { proposalsCollection, sessionsCollection, tasksCollection } from "./collections.ts";
+import { RepoBadge, useSessionRepo } from "./plan-ui";
 import { useStore } from "./store.ts";
 import { type ActivitySnapshot, paneActivity, snapshotActivity } from "./tab-activity.ts";
 
@@ -17,49 +18,54 @@ import { type ActivitySnapshot, paneActivity, snapshotActivity } from "./tab-act
 // click; this one only ever whispers from the tab bar while you're already here. So
 // it's a soft pulsing dot, not a hard blink or a count badge — present enough to
 // catch the eye in peripheral vision, quiet enough to ignore until you choose to look.
-const DOT_STYLE_ID = "pm-tab-activity-style";
-function ensureDotStyle(): void {
-  if (typeof document === "undefined" || document.getElementById(DOT_STYLE_ID)) return;
-  const el = document.createElement("style");
-  el.id = DOT_STYLE_ID;
-  el.textContent = `
-@keyframes pm-tab-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.78); } }
-.pm-tab-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: #4dabf7; box-shadow: 0 0 4px #4dabf7;
-  margin-right: 6px; flex: 0 0 auto;
-  animation: pm-tab-pulse 1.6s ease-in-out infinite;
-}
-@media (prefers-reduced-motion: reduce) { .pm-tab-dot { animation: none; } }`;
-  document.head.appendChild(el);
-}
+// The dot's style and pulse live in motion.css (.pm-tab-dot), so the motion setting
+// controls it like every other animation.
 
-/** Custom dockview tab = the default tab (title + close) prefixed with an activity
- *  dot when this pane is flagged. Clears its own flag the moment the tab is viewed
- *  (becomes visible), so the cue is self-extinguishing. */
-export function ActivityTab(props: IDockviewPanelHeaderProps) {
-  const id = props.api.id;
-  const flagged = useStore((s) => !!s.tabActivity[id]);
-  const clearTab = useStore((s) => s.clearTab);
-
-  useEffect(() => ensureDotStyle(), []);
-
+/** ActivityTab's effect: clear this tab's flag the moment it's viewed (becomes
+ *  visible), so the cue is self-extinguishing. */
+function useClearTabWhenVisible(
+  api: IDockviewPanelHeaderProps["api"],
+  id: string,
+  clearTab: (id: string) => void,
+): void {
   useEffect(() => {
     const clearIfVisible = () => {
-      if (props.api.isVisible) clearTab(id);
+      if (api.isVisible) clearTab(id);
     };
     clearIfVisible(); // already on screen when mounted → nothing to flag
-    const d1 = props.api.onDidVisibilityChange(clearIfVisible);
-    const d2 = props.api.onDidActiveChange(clearIfVisible);
+    const d1 = api.onDidVisibilityChange(clearIfVisible);
+    const d2 = api.onDidActiveChange(clearIfVisible);
     return () => {
       d1.dispose();
       d2.dispose();
     };
-  }, [id, props.api, clearTab]);
+  }, [id, api, clearTab]);
+}
+
+/** Custom dockview tab = the default tab (title + close) prefixed with an activity
+ *  dot when this pane is flagged — and, for a session's shell pane, the repo's
+ *  identity badge (icon in its color ring), so the tab strip reads like a rail of
+ *  repo-tagged sessions. Clears its own flag the moment the tab is viewed (becomes
+ *  visible), so the cue is self-extinguishing. */
+export function ActivityTab(props: IDockviewPanelHeaderProps) {
+  const id = props.api.id;
+  const flagged = useStore((s) => !!s.tabActivity[id]);
+  const clearTab = useStore((s) => s.clearTab);
+  // Shell panels carry their session id in the panel params (see App.tsx); every
+  // other pane has no session key and renders no badge.
+  const session = (props.params as { session?: number | null } | undefined)?.session;
+  const repo = useSessionRepo(session);
+
+  useClearTabWhenVisible(props.api, id, clearTab);
 
   return (
     <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
       {flagged && <span className="pm-tab-dot" aria-hidden />}
+      {repo && (
+        <span style={{ display: "inline-flex", marginLeft: "0.5em" }}>
+          <RepoBadge repo={repo} showName={false} />
+        </span>
+      )}
       <DockviewDefaultTab {...props} />
     </div>
   );
@@ -71,11 +77,12 @@ export function ActivityTab(props: IDockviewPanelHeaderProps) {
 export function useTabActivity(apiRef: RefObject<DockviewApi | null>): void {
   const sessions = useLiveQuery(() => sessionsCollection).data ?? [];
   const tasks = useLiveQuery(() => tasksCollection).data ?? [];
+  const proposals = useLiveQuery(() => proposalsCollection).data ?? [];
   const flagTab = useStore((s) => s.flagTab);
   const prev = useRef<ActivitySnapshot | null>(null);
 
   useEffect(() => {
-    const snap = snapshotActivity(sessions, tasks);
+    const snap = snapshotActivity(sessions, tasks, proposals);
     if (prev.current === null) {
       prev.current = snap;
       return;
@@ -86,5 +93,5 @@ export function useTabActivity(apiRef: RefObject<DockviewApi | null>): void {
       const visible = apiRef.current?.getPanel(pane)?.api.isVisible ?? false;
       if (!visible) flagTab(pane);
     }
-  }, [sessions, tasks, flagTab, apiRef]);
+  }, [sessions, tasks, proposals, flagTab, apiRef]);
 }

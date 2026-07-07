@@ -1,14 +1,11 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { setupTestDb, tmp } from "./db-harness.ts";
 
-process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
-const repoDir = mkdtempSync(join(tmpdir(), "pm-repo-"));
+const repoDir = tmp("pm-repo-");
 process.env.PM_REPO_DIR = repoDir;
 process.env.PM_MAIN_BRANCH = "main";
 
-const { ready } = await import("../src/server/db.ts");
+const { ready } = await setupTestDb();
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
 const { taskRepo, phaseRepo } = await import("../src/server/crud.ts");
 const { completePhase, reopenPhase, completeTask, cancelTask, reopenTask } = await import(
@@ -147,18 +144,5 @@ test("reopen refuses reconciled work; reconcile upgrades an override phase", asy
   expect(await commitBodies("main")).toContain(`PM-Phase: ${phases[0].id}`);
 });
 
-async function git(...args: string[]): Promise<void> {
-  const proc = Bun.spawn(["git", ...args], {
-    cwd: repoDir,
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "t",
-      GIT_AUTHOR_EMAIL: "t@t",
-      GIT_COMMITTER_NAME: "t",
-      GIT_COMMITTER_EMAIL: "t@t",
-    },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  await proc.exited;
-}
+import { git as runGit } from "./git-helper.ts";
+const git = (...args: string[]) => runGit(repoDir, ...args);

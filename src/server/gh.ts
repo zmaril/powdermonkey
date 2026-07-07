@@ -9,6 +9,8 @@
 // single seam to fake in tests (PM_PR_FIXTURE_DIR, see pr-review.ts) and one
 // definition of "which repo are we talking to".
 
+import { spawnCapture } from "./proc.ts";
+
 export type GhResult = { ok: boolean; stdout: string; stderr: string };
 
 /** Run `gh <args>` and capture stdout/stderr. Never throws — a missing `gh`, no
@@ -17,16 +19,7 @@ export type GhResult = { ok: boolean; stdout: string; stderr: string };
  *  to feed a request body (e.g. `gh api … --input -` for a JSON review payload). */
 export async function gh(args: string[], stdin?: string): Promise<GhResult> {
   try {
-    const proc = Bun.spawn(["gh", ...args], {
-      stdin: stdin != null ? new Blob([stdin]) : undefined,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    const code = await proc.exited;
+    const { code, stdout, stderr } = await spawnCapture(["gh", ...args], { stdin });
     return { ok: code === 0, stdout, stderr };
   } catch (e) {
     // `gh` not on PATH (e.g. a stripped container) — Bun.spawn throws synchronously.

@@ -17,7 +17,7 @@
 // supervisor's own `claude`), `pm-session-<id>` (per-task workers).
 
 import { selfArgv } from "./paths.ts";
-import { SOCKET, hasSession, shq, tmux } from "./tmux.ts";
+import { hasSession, SOCKET, shq, tmux } from "./tmux.ts";
 
 const SHELL = process.env.SHELL || "bash";
 

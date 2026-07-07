@@ -1,13 +1,11 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { setupTestDb } from "./db-harness.ts";
 
 // diffCloudPrs is the pure heart of the watcher — given last-seen PRs and a fresh
 // fetch, decide what events to emit. No DB, no network: just the classification.
 // Importing the module still transitively opens db.ts (subscribers use the task
 // repo), so isolate it to a throwaway data dir to avoid the writer lock.
-process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
+await setupTestDb();
 const {
   diffCloudPrs,
   parseTrailerIds,

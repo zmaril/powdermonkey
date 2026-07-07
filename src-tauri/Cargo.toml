@@ -1,0 +1,27 @@
+[package]
+name = "powdermonkey-desktop"
+version = "0.0.0"
+description = "PowderMonkey desktop client — a native window over the web UI, pointed at a supervisor you choose"
+edition = "2021"
+rust-version = "1.77"
+
+# The thin desktop shell. It ships the same web bundle (../public, built by
+# `bun run build:web`) and loads it in a native webview; the bundle then talks to
+# whichever supervisor the operator picks in Settings → Server (same-origin has no
+# meaning here, so it's always a configured remote, typically over Tailscale). All
+# the app logic lives in TypeScript — this crate only opens the window.
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# Opens external URLs (terminal links, PR/review links) in the OS default browser
+# instead of the app's own webview. The JS side is @tauri-apps/plugin-opener.
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# Embed the frontend assets in release builds (vs. loading from a dev server).
+custom-protocol = ["tauri/custom-protocol"]

@@ -1,7 +1,8 @@
 import { Button, Group, Stack, Text, Title } from "@mantine/core";
+import { IconExternalLink } from "@tabler/icons-react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { SessionState } from "../../shared/types.ts";
-import { sessionTasksCollection, sessionsCollection, tasksCollection } from "../collections.ts";
+import { sessionsCollection, sessionTasksCollection, tasksCollection } from "../collections.ts";
 import { useStore } from "../store.ts";
 
 // Shown over a shell pane whose attached session has ended (landed / merged /
@@ -9,12 +10,15 @@ import { useStore } from "../store.ts";
 // dead terminal the operator gets a clear end-state and a way out: close the pane,
 // open a fresh shell (at the session's worktree if it still exists, else the repo —
 // the server falls back), or jump to the PR. PR / worktree are looked up from the
-// store by session id; the session↔task join is returned for archived sessions too,
+// store by session id; the session<->task join is returned for archived sessions too,
 // so the PR link survives the session being archived on land/merge.
 export function SessionEndedOverlay({
   sessionId,
   onClose,
-}: { sessionId: number; onClose: () => void }) {
+}: {
+  sessionId: number;
+  onClose: () => void;
+}) {
   const openTerminal = useStore((s) => s.openTerminal);
   // The collections stream every row (live + archived), so the session and its PR
   // link survive the session being archived on land/merge.
@@ -37,7 +41,7 @@ export function SessionEndedOverlay({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "rgba(26,27,30,0.88)",
+        background: "var(--pm-overlay-scrim)",
         padding: 16,
       }}
     >
@@ -62,8 +66,9 @@ export function SessionEndedOverlay({
               component="a"
               href={prUrl}
               target="_blank"
+              rightSection={<IconExternalLink size={14} />}
             >
-              View PR ↗
+              View PR
             </Button>
           )}
         </Group>

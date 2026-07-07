@@ -1,23 +1,29 @@
 import { Group, List, Text, ThemeIcon, Tooltip, UnstyledButton } from "@mantine/core";
+import { type Icon, IconCheck, IconHandStop, IconPoint, IconRobot } from "@tabler/icons-react";
 import type { Phase } from "../../server/schema.ts";
 import { DecisionSource, PhaseStatus } from "../../shared/types.ts";
 import { useStore } from "../store.ts";
 import { EditableText } from "./EditableText.tsx";
 
 // A phase's completion, kept visually distinct by who made the call: reconciled is a
-// solid green ✓; an operator-asserted one an orange ✋ ("by hand"); a supervisor one
-// a violet 🤖. Todo is a gray dot. See docs/completion-model.md.
-function phaseGlyph(p: Phase): { color: string; mark: string; title: string } {
-  if (p.status !== PhaseStatus.Done) return { color: "gray", mark: "·", title: PhaseStatus.Todo };
+// solid green check; an operator-asserted one an orange hand ("by hand"); a supervisor
+// one a violet robot. Todo is a gray dot. See docs/completion-model.md.
+function phaseGlyph(p: Phase): { color: string; icon: Icon; title: string } {
+  if (p.status !== PhaseStatus.Done)
+    return { color: "gray", icon: IconPoint, title: PhaseStatus.Todo };
   if (p.decisionSource === DecisionSource.Operator)
-    return { color: "orange", mark: "✋", title: "marked done by hand — not reconciled from main" };
+    return {
+      color: "orange",
+      icon: IconHandStop,
+      title: "marked done by hand — not reconciled from main",
+    };
   if (p.decisionSource === DecisionSource.Supervisor)
     return {
       color: "violet",
-      mark: "🤖",
+      icon: IconRobot,
       title: "marked done via the supervisor — not reconciled",
     };
-  return { color: "green", mark: "✓", title: "reconciled from a trailer on main" };
+  return { color: "green", icon: IconCheck, title: "reconciled from a trailer on main" };
 }
 
 /** The plan's phase checklist. When `interactive`, each row carries the override
@@ -38,9 +44,10 @@ export function PhaseList({
 }) {
   const { completePhase, reopenPhase } = useStore();
   return (
-    <List spacing={2} size="sm" center>
+    <List spacing="hair" size="sm" center>
       {phases.map((p) => {
         const g = phaseGlyph(p);
+        const Glyph = g.icon;
         const done = p.status === PhaseStatus.Done;
         // An override (operator/supervisor) completion can be reopened; a reconciled
         // one is locked.
@@ -51,12 +58,12 @@ export function PhaseList({
             icon={
               <Tooltip label={g.title} withArrow openDelay={300}>
                 <ThemeIcon color={g.color} size={16} radius="xl">
-                  <Text size="9px">{g.mark}</Text>
+                  <Glyph size={11} />
                 </ThemeIcon>
               </Tooltip>
             }
           >
-            <Group gap={6} wrap="nowrap" align="baseline" style={{ flex: 1, minWidth: 0 }}>
+            <Group gap="snug" wrap="nowrap" align="baseline" style={{ flex: 1, minWidth: 0 }}>
               {onRename ? (
                 <EditableText
                   value={p.name}

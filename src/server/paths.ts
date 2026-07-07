@@ -37,8 +37,9 @@ export const MIGRATIONS_DIR = join(ASSET_ROOT, "drizzle");
 // itself (in node_modules, via its own import.meta.url). In a compiled binary that
 // lookup resolves into the virtual fs and the files aren't there, so we ship them
 // beside the executable and hand them to PGlite explicitly (see db.ts).
-export const PG_WASM = join(ASSET_ROOT, "postgres.wasm");
-export const PG_DATA = join(ASSET_ROOT, "postgres.data");
+export const PG_WASM = join(ASSET_ROOT, "pglite.wasm");
+export const PG_DATA = join(ASSET_ROOT, "pglite.data");
+export const INITDB_WASM = join(ASSET_ROOT, "initdb.wasm");
 
 // The CLI entry, used only in dev to re-invoke ourselves (the supervisor restart
 // loop spawns a fresh server process). In a compiled binary we re-exec the binary

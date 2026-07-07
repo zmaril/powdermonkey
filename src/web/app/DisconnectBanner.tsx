@@ -7,12 +7,12 @@ export function DisconnectBanner() {
         left: 0,
         right: 0,
         zIndex: 10000,
-        background: "#b54708",
-        color: "#fff",
+        background: "var(--pm-alert-bg)",
+        color: "var(--pm-alert-text)",
         textAlign: "center",
         padding: "5px 10px",
-        fontSize: 13,
-        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+        fontSize: "0.8125rem",
+        fontFamily: "var(--mantine-font-family-monospace)",
       }}
     >
       Disconnected from the supervisor — reconnecting, will refresh when it's back…

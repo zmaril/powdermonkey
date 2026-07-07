@@ -1,5 +1,6 @@
-import type { Proposal } from "../server/schema.ts";
+import type { Phase, Proposal, Task } from "../server/schema.ts";
 import { type ProposalChange, ProposalOp, ProposalStatus, VocabKind } from "../shared/types.ts";
+import type { Indexes } from "./plan-data.ts";
 
 // Projections from pending proposals onto the plan tree, so every proposed change can be
 // reviewed IN PLACE: a create renders as a "ghost" under the parent it'd land in, an
@@ -37,6 +38,13 @@ export type Ghost = {
   parentId: number | null;
   /** Title (goal/milestone/task) or name (phase). */
   title: string;
+  /** For a task ghost: its proposed task-kind (task | bug | spike) + description, so the
+   *  ghost card previews the same fields a real card shows (not just the title). */
+  taskKind?: string;
+  description?: string | null;
+  /** Proposed position among its siblings (a new phase's slot in the checklist, a new
+   *  task's slot in the milestone). `undefined` when the create doesn't pin one. */
+  position?: number;
   /** Child phase names, for a task ghost — shown as its checklist. */
   phases: string[];
 };
@@ -52,6 +60,14 @@ export type EntityEdit = {
   op: ProposalOp; // update | archive | reorder
   /** For an update: the proposed new title/name, when the change sets one. */
   newTitle?: string;
+  /** For an update: the proposed new task kind (task | bug | spike), when set. */
+  newKind?: string;
+  /** For an update: the proposed new description, when the change touches it (null =
+   *  cleared). `undefined` means the change doesn't touch the description at all. */
+  newDescription?: string | null;
+  /** For an update on a GOAL: the proposed new objective (goal's narrative field).
+   *  `undefined` means the change doesn't touch it. */
+  newObjective?: string | null;
   /** For a reorder: the proposed new position (0 = top) and/or parent. */
   position?: number;
   parentId?: number;
@@ -82,7 +98,20 @@ export function editLabel(e: EntityEdit): string {
     if (e.position != null) return `Proposed: move to position ${e.position + 1}`;
     return "Proposed: reorder";
   }
-  return e.newTitle ? `Proposed: rename → "${e.newTitle}"` : "Proposed: edit";
+  // Update: list EVERY field the change touches, so accepting is never a surprise — a
+  // rename that also retags or rewrites the description must say so, not read as "rename".
+  const parts: string[] = [];
+  if (e.newTitle != null) parts.push(`rename → "${e.newTitle}"`);
+  if (e.newKind != null) parts.push(`kind → ${e.newKind}`);
+  if (e.newDescription !== undefined) {
+    const d = e.newDescription;
+    parts.push(
+      d
+        ? `description → "${d.length > 44 ? `${d.slice(0, 44).trimEnd()}…` : d}"`
+        : "clear description",
+    );
+  }
+  return parts.length ? `Proposed: ${parts.join(" · ")}` : "Proposed: edit";
 }
 
 /** Every pending create, as a ghost placed under its parent. A create parented to a
@@ -117,6 +146,15 @@ export function proposalGhosts(proposals: Proposal[]): Ghost[] {
         kind: c.kind,
         parentId: c.parentId ?? null,
         title: title || "(untitled)",
+        // A task ghost previews its kind + description too, so the ghost card reads like
+        // the real card it will become (not just a bare title).
+        taskKind:
+          c.kind === VocabKind.Task && c.fields.kind != null ? String(c.fields.kind) : undefined,
+        description:
+          c.kind === VocabKind.Task && c.fields.description != null
+            ? String(c.fields.description)
+            : undefined,
+        position: typeof c.position === "number" ? c.position : undefined,
         phases,
       });
     });
@@ -167,12 +205,18 @@ export function proposalEditsByEntity(proposals: Proposal[]): Map<string, Entity
       ) {
         return;
       }
+      const isUpdate = c.op === ProposalOp.Update;
       const titleOrName =
-        c.op === ProposalOp.Update
-          ? (c.fields.title ?? c.fields.name) != null
-            ? String(c.fields.title ?? c.fields.name)
-            : undefined
+        isUpdate && (c.fields.title ?? c.fields.name) != null
+          ? String(c.fields.title ?? c.fields.name)
           : undefined;
+      // Surface every content field an update touches (not just the title) so the review
+      // strip shows the whole change. `"description" in fields` keeps an explicit clear.
+      const newKind = isUpdate && c.fields.kind != null ? String(c.fields.kind) : undefined;
+      const newDescription =
+        isUpdate && "description" in c.fields ? (c.fields.description as string | null) : undefined;
+      const newObjective =
+        isUpdate && "objective" in c.fields ? (c.fields.objective as string | null) : undefined;
       const edit: EntityEdit = {
         proposalId: p.id,
         proposalTitle: p.title,
@@ -181,6 +225,9 @@ export function proposalEditsByEntity(proposals: Proposal[]): Map<string, Entity
         id: c.id,
         op: c.op,
         newTitle: titleOrName,
+        newKind,
+        newDescription,
+        newObjective,
         position: c.op === ProposalOp.Reorder ? c.position : undefined,
         parentId: c.op === ProposalOp.Reorder ? c.parentId : undefined,
       };
@@ -191,4 +238,47 @@ export function proposalEditsByEntity(proposals: Proposal[]): Map<string, Entity
     });
   }
   return out;
+}
+
+/** The ids of every proposal that renders at least one piece somewhere on the board — a
+ *  ghost (goal / milestone / task / phase) or an edit strip on an existing node. This is
+ *  the "present" surface the new-proposal glow gates against (a proposal must render an
+ *  element to be seen/cleared), mirroring the rendered-task-id set the new-task glow uses. */
+export function renderedProposalIds(
+  ghosts: GroupedGhosts,
+  edits: Map<string, EntityEdit[]>,
+): Set<number> {
+  const ids = new Set<number>();
+  const add = (gs: Ghost[]) => {
+    for (const g of gs) ids.add(g.proposalId);
+  };
+  add(ghosts.goals);
+  for (const gs of ghosts.tasksByMilestone.values()) add(gs);
+  for (const gs of ghosts.milestonesByGoal.values()) add(gs);
+  for (const gs of ghosts.phasesByTask.values()) add(gs);
+  for (const es of edits.values()) for (const e of es) ids.add(e.proposalId);
+  return ids;
+}
+
+/** Gather a task's pending-proposal render props in one place: its phases, edits on the
+ *  task itself, proposed new phases, and edits on its existing phases — the bundle both
+ *  the grouped card and the flat row feed to their task view. */
+export function taskProposalProps(
+  t: Task,
+  idx: Indexes,
+  ghosts: GroupedGhosts,
+  edits: Map<string, EntityEdit[]>,
+): {
+  phases: Phase[];
+  edits: EntityEdit[] | undefined;
+  phaseGhosts: Ghost[] | undefined;
+  phaseEdits: EntityEdit[];
+} {
+  const phases = idx.phasesByTask.get(t.id) ?? [];
+  return {
+    phases,
+    edits: edits.get(entityKey(VocabKind.Task, t.id)),
+    phaseGhosts: ghosts.phasesByTask.get(t.id),
+    phaseEdits: phases.flatMap((p) => edits.get(entityKey(VocabKind.Phase, p.id)) ?? []),
+  };
 }

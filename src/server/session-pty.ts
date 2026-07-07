@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "./db.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { sessions } from "./schema.ts";
-import { SOCKET, TMUX_BIN, hasSession, shq, tmux } from "./tmux.ts";
+import { hasSession, SOCKET, shq, TMUX_BIN, tmux } from "./tmux.ts";
 
 // One long-lived `claude` per local session, run inside tmux so it OUTLIVES the
 // supervisor. The supervisor is started with `--watch`; editing PowderMonkey's own

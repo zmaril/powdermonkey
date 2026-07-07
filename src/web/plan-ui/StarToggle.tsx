@@ -1,4 +1,5 @@
 import { Text, UnstyledButton } from "@mantine/core";
+import { IconStar, IconStarFilled } from "@tabler/icons-react";
 import type { Task } from "../../server/schema.ts";
 import { useStore } from "../store.ts";
 
@@ -16,8 +17,8 @@ export function StarToggle({ task }: { task: Task }) {
       }}
       style={{ flexShrink: 0, lineHeight: 1 }}
     >
-      <Text span c={task.starred ? "yellow" : "dimmed"} style={{ userSelect: "none" }}>
-        {task.starred ? "★" : "☆"}
+      <Text span c={task.starred ? "yellow" : "dimmed"} style={{ display: "inline-flex" }}>
+        {task.starred ? <IconStarFilled size={14} /> : <IconStar size={14} />}
       </Text>
     </UnstyledButton>
   );

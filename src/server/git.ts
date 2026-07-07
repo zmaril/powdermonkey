@@ -2,19 +2,18 @@
 // or reports — NOT for execution correctness (the cloud always execs against
 // main regardless). See design.md "Running".
 
+import { spawnCapture } from "./proc.ts";
+
 export type GitResult = { ok: boolean; output: string };
 
-async function run(args: string[]): Promise<GitResult> {
-  const proc = Bun.spawn(["git", ...args], {
-    cwd: process.env.PM_REPO_DIR ?? process.cwd(),
-    stdout: "pipe",
-    stderr: "pipe",
+/** Run `git` in a repo. Defaults to the supervisor's own checkout
+ *  (`PM_REPO_DIR ?? cwd`); pass `cwd` to run inside a per-repo cache clone under
+ *  `~/.powdermonkey/repos` (see repo-cache.ts) — that's how worktree ops and
+ *  fetches target the task's repo rather than the supervisor's. */
+async function run(args: string[], cwd?: string): Promise<GitResult> {
+  const { code, stdout, stderr } = await spawnCapture(["git", ...args], {
+    cwd: cwd ?? process.env.PM_REPO_DIR ?? process.cwd(),
   });
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  const code = await proc.exited;
   return { ok: code === 0, output: (stdout + stderr).trim() };
 }
 
@@ -37,19 +36,34 @@ export async function commitBodies(branch: string): Promise<string> {
   return r.ok ? r.output : "";
 }
 
-export async function branchExists(branch: string): Promise<boolean> {
-  const r = await run(["rev-parse", "--verify", "--quiet", branch]);
+export async function branchExists(branch: string, cwd?: string): Promise<boolean> {
+  const r = await run(["rev-parse", "--verify", "--quiet", branch], cwd);
   return r.ok;
 }
 
-/** Add a worktree at `path`; create `branch` off `baseRef` if it doesn't exist yet. */
+/** Clone `url` into `dir` (a fresh cache clone). The target path is absolute, so
+ *  this is cwd-independent. */
+export function cloneRepo(url: string, dir: string): Promise<GitResult> {
+  return run(["clone", url, dir]);
+}
+
+/** Fetch `origin` inside an existing cache clone at `dir`, refreshing its refs so
+ *  a worktree cut off the default branch (or reconciliation's trailer scan) sees
+ *  current state. `--prune` drops server-deleted branches. */
+export function fetchRepo(dir: string): Promise<GitResult> {
+  return run(["fetch", "--prune", "origin"], dir);
+}
+
+/** Add a worktree at `path`; create `branch` off `baseRef` if it doesn't exist yet.
+ *  `cwd` selects the repo the worktree is cut from (default: the supervisor's own). */
 export async function worktreeAdd(
   path: string,
   branch: string,
   baseRef: string,
+  cwd?: string,
 ): Promise<GitResult> {
-  if (await branchExists(branch)) return run(["worktree", "add", path, branch]);
-  return run(["worktree", "add", "-b", branch, path, baseRef]);
+  if (await branchExists(branch, cwd)) return run(["worktree", "add", path, branch], cwd);
+  return run(["worktree", "add", "-b", branch, path, baseRef], cwd);
 }
 
 /** List remote branch names (without the `refs/heads/` prefix) matching `pattern`,
@@ -74,20 +88,25 @@ export async function worktreeAddRemote(
   path: string,
   branch: string,
   baseRef: string,
+  cwd?: string,
 ): Promise<GitResult> {
-  await run(["fetch", "origin", branch]);
-  if (await branchExists(branch)) return run(["worktree", "add", path, branch]);
-  if (await branchExists(`origin/${branch}`))
-    return run(["worktree", "add", "-b", branch, path, `origin/${branch}`]);
-  return run(["worktree", "add", "-b", branch, path, baseRef]);
+  await run(["fetch", "origin", branch], cwd);
+  if (await branchExists(branch, cwd)) return run(["worktree", "add", path, branch], cwd);
+  if (await branchExists(`origin/${branch}`, cwd))
+    return run(["worktree", "add", "-b", branch, path, `origin/${branch}`], cwd);
+  return run(["worktree", "add", "-b", branch, path, baseRef], cwd);
 }
 
 /** Remove a worktree. Not forced by default — fails if it has uncommitted changes,
  *  which is what `land` wants. Pass `{ force: true }` to remove regardless (an
  *  aborted session via `stop` discards its in-progress work rather than waiting
- *  for a clean tree). */
-export function worktreeRemove(path: string, opts?: { force?: boolean }): Promise<GitResult> {
+ *  for a clean tree). `cwd` selects the repo that owns the worktree (default: the
+ *  supervisor's own) — a worktree cut from a cache clone must be removed from it. */
+export function worktreeRemove(
+  path: string,
+  opts?: { force?: boolean; cwd?: string },
+): Promise<GitResult> {
   const args = ["worktree", "remove", path];
   if (opts?.force) args.push("--force");
-  return run(args);
+  return run(args, opts?.cwd);
 }

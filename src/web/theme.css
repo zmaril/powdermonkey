@@ -1,0 +1,150 @@
+/* straitjacket-allow-file:color  blessed palette file — hardcoded colors live here by design */
+/* App-wide chrome that lives outside Mantine's theme object: base canvas, text
+ * smoothing, scrollbars, text selection, and re-skinning the dockview "abyss"
+ * theme. Everything color-ish here reads off the `--pm-*` custom properties that
+ * themes.ts#applyPaletteVars sets from the active editor palette, so switching the
+ * palette re-skins the dock, scrollbars and selection along with the Mantine theme.
+ * The `--pm-*` fallbacks below are the One Dark defaults, used until the JS runs. */
+
+:root {
+  color-scheme: dark;
+  --pm-page-bg: #1b1e24;
+  --pm-pane-bg: #21252b;
+  --pm-surface: #2c313a;
+  --pm-tab-strip: #21252b;
+  --pm-hairline: #3b4048;
+  --pm-accent: #4f9fe0;
+  --pm-text: #abb2bf;
+  --pm-dim-text: #828a98;
+  --pm-scroll-thumb: #3b4048;
+  --pm-scroll-thumb-hover: #5c6370;
+  --pm-card-hover-border: #5c6370;
+  --pm-selection: rgba(97, 175, 239, 0.3);
+
+  /* Semantic, theme-independent colors — the fixed cues that must read the same in
+   * every palette (alerts, draft state, scrims, shadows, the selection glow). One
+   * home so they can be tuned — or made palette-aware — later, instead of hiding
+   * inline in components. */
+  --pm-alert-bg: #b54708;
+  --pm-alert-text: #fff;
+  --pm-draft-border: #b8893a;
+  --pm-draft-bg: #221d16;
+  --pm-overlay-scrim: rgba(26, 27, 30, 0.88);
+  --pm-drop-shadow: rgba(0, 0, 0, 0.35);
+  --pm-selection-glow: rgba(59, 130, 246, 0.55);
+  --pm-embed-backdrop: #fff;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--pm-page-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--pm-selection);
+}
+
+/* Thin, themed scrollbars instead of the chunky default ones. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--pm-scroll-thumb) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--pm-scroll-thumb);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--pm-scroll-thumb-hover);
+  background-clip: padding-box;
+}
+
+/* ── Dockview chrome ────────────────────────────────────────────────────────
+ * Most editor themes pass dockview their own native theme (themes.ts), so the dock
+ * paints itself. The exception is One Dark, which has no native dockview theme: it
+ * rides the Abyss theme and we re-skin Abyss's variables to the `--pm-*` properties.
+ * Scoped to the .pm-skin-onedark wrapper (set in App.tsx only when One Dark is
+ * active) so the native Abyss theme is left untouched. */
+.pm-skin-onedark .dockview-theme-abyss {
+  --dv-color-abyss-dark: var(--pm-pane-bg); /* pane / group background */
+  --dv-color-abyss: var(--pm-page-bg); /* hidden (inactive) tab background */
+  --dv-color-abyss-light: var(--pm-tab-strip); /* tab strip background */
+  --dv-color-abyss-lighter: var(--pm-hairline); /* dividers & separators */
+  --dv-color-abyss-accent: var(--pm-accent);
+  --dv-color-abyss-secondary-text: var(--pm-dim-text);
+  --dv-separator-border: var(--pm-hairline);
+  --dv-paneview-active-outline-color: var(--pm-accent);
+}
+
+/* Mark the active tab with a thin accent rule in every theme — a clearer "you are
+ * here" than the background-only difference dockview ships with. Uses `--pm-accent`
+ * (set per active theme) so it's colored to match whichever theme is on. */
+.dv-tab.dv-active-tab {
+  box-shadow: inset 0 2px 0 0 var(--pm-accent);
+}
+
+/* ── Terminal (xterm) ───────────────────────────────────────────────────────
+ * The terminal renders in Fira Code (a variable, ligature-heavy font). Ligatures
+ * fuse pairs like -> => == != into single wide glyphs, which breaks xterm's
+ * fixed-width cell grid — you get overlapping/repeated characters and mangled
+ * wrapping, and it's markedly worse in the desktop app's WebKit webview than in
+ * Chrome. Force plain, one-glyph-per-cell rendering. Scoped to .xterm so the rest
+ * of the UI keeps Fira Code's ligatures. */
+.xterm,
+.xterm .xterm-rows {
+  font-variant-ligatures: none;
+  font-feature-settings:
+    "liga" 0,
+    "calt" 0;
+}
+
+/* Cards feel alive: a faint border brighten on hover. Subtle on purpose — the
+ * task/backlog lists are dense, so anything stronger would be noise. (The transition
+ * itself lives in motion.css.) */
+.mantine-Card-root:hover {
+  border-color: var(--pm-card-hover-border);
+}
+
+/* ── Buttons: make the quiet variants pop without leaving the theme ──────────
+ * `filled` (primary) buttons already carry the accent + autoContrast labels. The
+ * `default` and `subtle` variants are the washed-out ones — give them an
+ * accent-tinted edge and an accent wash on hover so they read as interactive and
+ * on-theme, in whichever palette is active. */
+.mantine-Button-root[data-variant="default"]:hover {
+  border-color: var(--pm-accent);
+  color: var(--pm-accent);
+}
+.mantine-Button-root[data-variant="subtle"]:hover {
+  color: var(--pm-accent);
+}
+
+/* The `light` variant is the workhorse for primary actions (start / dispatch / land)
+ * and was the most washed-out: a pale accent fill with no edge. Give light-variant
+ * buttons and action icons a defined accent border (and a solid one on hover) so they
+ * read as real, clickable controls in every theme. Scoped to Button/ActionIcon so the
+ * status Badges keep their flat chip look. */
+.mantine-Button-root[data-variant="light"],
+.mantine-ActionIcon-root[data-variant="light"] {
+  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+}
+.mantine-Button-root[data-variant="light"]:hover,
+.mantine-ActionIcon-root[data-variant="light"]:hover {
+  border-color: color-mix(in srgb, currentColor 75%, transparent);
+}

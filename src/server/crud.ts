@@ -2,16 +2,18 @@ import { eq, isNull } from "drizzle-orm";
 import { db } from "./db.ts";
 import {
   type Goal,
-  type Milestone,
-  type Note,
-  type Phase,
-  type Session,
-  type Task,
   goals,
+  type Milestone,
   milestones,
+  type Note,
   notes,
+  type Phase,
   phases,
+  type Repo,
+  repos,
+  type Session,
   sessions,
+  type Task,
   tasks,
 } from "./schema.ts";
 
@@ -70,3 +72,4 @@ export const taskRepo = crud<Task, typeof tasks.$inferInsert>(tasks);
 export const phaseRepo = crud<Phase, typeof phases.$inferInsert>(phases);
 export const sessionRepo = crud<Session, typeof sessions.$inferInsert>(sessions);
 export const noteRepo = crud<Note, typeof notes.$inferInsert>(notes);
+export const repoRepo = crud<Repo, typeof repos.$inferInsert>(repos);

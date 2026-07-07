@@ -1,7 +1,18 @@
 import { createCollection } from "@tanstack/db";
 import type { CloudPr } from "../server/events.ts";
-import type { Goal, Milestone, Note, Phase, Proposal, Session, Task } from "../server/schema.ts";
+import type {
+  Goal,
+  Milestone,
+  Note,
+  Phase,
+  Proposal,
+  Repo,
+  Session,
+  Task,
+  TaskComment,
+} from "../server/schema.ts";
 import type { SessionLink } from "./active.ts";
+import { wsUrl } from "./server.ts";
 
 // The browser mirrors each server table as a TanStack DB collection, synced over the
 // /sync WebSocket from PGlite's `live.changes` (server stays embedded PGlite — see
@@ -36,8 +47,7 @@ function syncedCollection<T extends object>(table: string, key: keyof T & string
       // unchanged ones.
       rowUpdateMode: "partial",
       sync: ({ begin, write, commit, markReady, truncate }) => {
-        const proto = location.protocol === "https:" ? "wss" : "ws";
-        const ws = new WebSocket(`${proto}://${location.host}/sync?table=${table}`);
+        const ws = new WebSocket(wsUrl(`/sync?table=${table}`));
         let ready = false;
         const ensureReady = () => {
           if (ready) return;
@@ -84,6 +94,8 @@ export const sessionTasksCollection = syncedCollection<SessionLink & { id: numbe
   "session_tasks",
   "id",
 );
+export const taskCommentsCollection = syncedCollection<TaskComment>("task_comments", "id");
 export const notesCollection = syncedCollection<Note>("notes", "id");
+export const reposCollection = syncedCollection<Repo>("repos", "id");
 export const pullRequestsCollection = syncedCollection<CloudPr>("pull_requests", "number");
 export const proposalsCollection = syncedCollection<Proposal>("proposals", "id");

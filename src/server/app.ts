@@ -3,17 +3,37 @@ import { join } from "node:path";
 import type { TSchema } from "@sinclair/typebox";
 import { getTableColumns, getTableName } from "drizzle-orm";
 import { Elysia, t } from "elysia";
-import { P, match } from "ts-pattern";
-import { Decision, OverrideSource, ProposalStatus, SessionState } from "../shared/types.ts";
+import { match, P } from "ts-pattern";
+import {
+  CommentAuthor,
+  Decision,
+  DispatchBackend,
+  OverrideSource,
+  ProposalStatus,
+  SessionState,
+} from "../shared/types.ts";
 import { applyProposal, decideChange } from "./apply.ts";
+import { dumpSnapshot, type SqlClient } from "./backup.ts";
+import { getClaudeUsage } from "./claude-usage.ts";
+import { appendComment, archiveComment, listComments, updateComment } from "./comments.ts";
 import { cancelTask, completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
-import { goalRepo, milestoneRepo, noteRepo, phaseRepo, sessionRepo, taskRepo } from "./crud.ts";
+import { cors } from "./cors.ts";
+import {
+  goalRepo,
+  milestoneRepo,
+  noteRepo,
+  phaseRepo,
+  repoRepo,
+  sessionRepo,
+  taskRepo,
+} from "./crud.ts";
 import { pg } from "./db.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
+import { fanOutTasks } from "./fanout.ts";
 import { proposeFollowup } from "./followups.ts";
 import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
-import { models } from "./models.ts";
+import { models, taskKindSchema } from "./models.ts";
 import { PUBLIC_DIR } from "./paths.ts";
 import { loadPlan, planSchema } from "./plan.ts";
 import { getFileContents, getPrReview, postPrComment, submitReview } from "./pr-review.ts";
@@ -28,6 +48,7 @@ import {
 } from "./proposals.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { reconcile } from "./reconcile.ts";
+import { repoIconResponse } from "./repo-icon.ts";
 import {
   goals as goalsTable,
   milestones as milestonesTable,
@@ -35,19 +56,26 @@ import {
   phases as phasesTable,
   proposals as proposalsTable,
   pullRequests as pullRequestsTable,
-  sessionTasks as sessionTasksTable,
+  repos as reposTable,
   sessions as sessionsTable,
+  sessionTasks as sessionTasksTable,
+  taskComments as taskCommentsTable,
   tasks as tasksTable,
 } from "./schema.ts";
 import {
-  SUPERVISOR_ID,
   attachSessionPty,
   resizeSessionPty,
+  SUPERVISOR_ID,
   startSupervisorPty,
   writeSessionPty,
 } from "./session-pty.ts";
 import { listSessionTasks } from "./session-tasks.ts";
-import { getAutoRebase, setAutoRebase } from "./settings.ts";
+import {
+  getAutoRebase,
+  getDispatchSettings,
+  setAutoRebase,
+  setDispatchSettings,
+} from "./settings.ts";
 import { teleportTask } from "./teleport.ts";
 import { landSession, startLocalSession, stopSession } from "./worktree.ts";
 
@@ -87,7 +115,9 @@ const SYNC_TABLES: Record<string, { sql: string; key: string }> = Object.fromEnt
     phasesTable,
     sessionsTable,
     sessionTasksTable,
+    taskCommentsTable,
     notesTable,
+    reposTable,
     pullRequestsTable,
     proposalsTable,
     // biome-ignore lint/suspicious/noExplicitAny: heterogeneous pgTable objects, introspected generically.
@@ -101,37 +131,44 @@ const SYNC_TABLES: Record<string, { sql: string; key: string }> = Object.fromEnt
   }),
 );
 
+// The two response-shaping idioms every route below repeats: 404 when a lookup
+// misses, 400 when an action reports `{ ok: false }`. Factored out so each handler
+// stays a one-liner and the status codes live in one place.
+function orNotFound<T>(
+  set: { status?: number | string },
+  row: T | null | undefined,
+): T | { error: string } {
+  if (!row) {
+    set.status = 404;
+    return { error: "not found" };
+  }
+  return row;
+}
+function orBadRequest<T extends { ok: boolean }>(set: { status?: number | string }, result: T): T {
+  if (!result.ok) set.status = 400;
+  return result;
+}
+
 /** A CRUD route group: list / get / create / update / archive(DELETE) / restore. */
 function resource(name: string, repo: Repo, body: { create: TSchema; update: TSchema }) {
   return new Elysia({ prefix: `/${name}` })
     .get("/", ({ query }) => repo.list({ includeArchived: query.archived === "true" }), {
       query: t.Object({ archived: t.Optional(t.String()) }),
     })
-    .get("/:id", async ({ params, set }) => {
-      const row = await repo.get(Number(params.id));
-      if (!row) set.status = 404;
-      return row ?? { error: "not found" };
-    })
+    .get("/:id", async ({ params, set }) => orNotFound(set, await repo.get(Number(params.id))))
     .post("/", ({ body }) => repo.create(body), { body: body.create })
     .patch(
       "/:id",
-      async ({ params, body, set }) => {
-        const row = await repo.update(Number(params.id), body as Record<string, unknown>);
-        if (!row) set.status = 404;
-        return row ?? { error: "not found" };
-      },
+      async ({ params, body, set }) =>
+        orNotFound(set, await repo.update(Number(params.id), body as Record<string, unknown>)),
       { body: body.update },
     )
-    .delete("/:id", async ({ params, set }) => {
-      const row = await repo.archive(Number(params.id));
-      if (!row) set.status = 404;
-      return row ?? { error: "not found" };
-    })
-    .post("/:id/restore", async ({ params, set }) => {
-      const row = await repo.restore(Number(params.id));
-      if (!row) set.status = 404;
-      return row ?? { error: "not found" };
-    });
+    .delete("/:id", async ({ params, set }) =>
+      orNotFound(set, await repo.archive(Number(params.id))),
+    )
+    .post("/:id/restore", async ({ params, set }) =>
+      orNotFound(set, await repo.restore(Number(params.id))),
+    );
 }
 
 // Tasks carry runtime routes (dispatch/status) on top of CRUD. Keeping them in the
@@ -162,107 +199,134 @@ function decisionSource(body?: { source?: OverrideSource } | null): OverrideSour
 }
 
 const tasksGroup = resource("tasks", taskRepo, models.tasks)
+  // Fan-out create: author one task spec across N repos → one task per repo, all under
+  // the same milestone (see fanout.ts). The multi-select repo picker POSTs here instead
+  // of the single-task create so "add the linter to three repos" is authored once.
+  .post("/fan-out", async ({ body, set }) => orBadRequest(set, await fanOutTasks(body)), {
+    body: t.Object({
+      milestoneId: t.Number(),
+      title: t.String({ minLength: 1 }),
+      kind: t.Optional(taskKindSchema),
+      description: t.Optional(t.String()),
+      repoIds: t.Array(t.Number(), { minItems: 1 }),
+      phases: t.Optional(t.Array(t.Object({ name: t.String({ minLength: 1 }) }))),
+      position: t.Optional(t.Number()),
+    }),
+  })
   .post(
     "/:id/dispatch",
-    async ({ params, body, set }) => {
-      const result = await dispatchTask(launchIds(params.id, body), body?.comment);
-      if (!result.ok) set.status = 400;
-      return result;
-    },
+    async ({ params, body, set }) =>
+      orBadRequest(set, await dispatchTask(launchIds(params.id, body), body?.comment)),
     { body: launchBody },
   )
   // Start a local session: worktree on pm/task-<id> + a session row + trailer block.
   // Accepts extra `taskIds` to fold several tasks into the one worktree session.
   .post(
     "/:id/start-local",
-    async ({ params, body, set }) => {
-      const result = await startLocalSession(launchIds(params.id, body), {
-        comment: body?.comment,
-      });
-      if (!result.ok) set.status = 400;
-      return result;
-    },
+    async ({ params, body, set }) =>
+      orBadRequest(
+        set,
+        await startLocalSession(launchIds(params.id, body), { comment: body?.comment }),
+      ),
     { body: launchBody },
   )
   // Teleport a running cloud session down to a local worktree session, continuing
   // the same conversation via `claude --teleport <id>`.
-  .post("/:id/teleport", async ({ params, set }) => {
-    const result = await teleportTask(Number(params.id));
-    if (!result.ok) set.status = 400;
-    return result;
-  })
+  .post("/:id/teleport", async ({ params, set }) =>
+    orBadRequest(set, await teleportTask(Number(params.id))),
+  )
   // Re-fetch the worker prompt + phase trailers for a task — the same content
   // start-local/dispatch hand to a worker, available read-only without starting one.
-  .get("/:id/prompt", async ({ params, set }) => {
-    const result = await loadTaskPrompt(Number(params.id));
-    if (!result) set.status = 404;
-    return result ?? { error: "not found" };
-  })
+  .get("/:id/prompt", async ({ params, set }) =>
+    orNotFound(set, await loadTaskPrompt(Number(params.id))),
+  )
   // Override decisions (the non-reconciled path): close a task by hand for work that
   // never landed a trailer (`complete` → merged), abandon it (`cancel` → cancelled),
   // or walk either back (`reopen`). Each stamps `decision_source` with the caller's
   // `source` (operator default, or supervisor). Reconciled rows are never touched.
   .post(
     "/:id/complete",
-    async ({ params, body, set }) => {
-      const row = await completeTask(Number(params.id), decisionSource(body));
-      if (!row) set.status = 404;
-      return row ?? { error: "not found" };
-    },
+    async ({ params, body, set }) =>
+      orNotFound(set, await completeTask(Number(params.id), decisionSource(body))),
     { body: sourceBody },
   )
   .post(
     "/:id/cancel",
-    async ({ params, body, set }) => {
-      const row = await cancelTask(Number(params.id), decisionSource(body));
-      if (!row) set.status = 404;
-      return row ?? { error: "not found" };
-    },
+    async ({ params, body, set }) =>
+      orNotFound(set, await cancelTask(Number(params.id), decisionSource(body))),
     { body: sourceBody },
   )
-  .post("/:id/reopen", async ({ params, set }) => {
-    const row = await reopenTask(Number(params.id));
-    if (!row) set.status = 404;
-    return row ?? { error: "not found" };
-  });
+  .post("/:id/reopen", async ({ params, set }) =>
+    orNotFound(set, await reopenTask(Number(params.id))),
+  )
+  // The task's diary — one-line comments (see comments.ts). List reads oldest
+  // first (live rows only); append is zero-ceremony; PATCH edits a line in place;
+  // DELETE archives it (the same soft delete as every other entity). Changes
+  // stream to the browser through the task_comments synced collection.
+  .get("/:id/comments", ({ params }) => listComments(Number(params.id)))
+  .post(
+    "/:id/comments",
+    async ({ params, body, set }) =>
+      orNotFound(set, await appendComment(Number(params.id), body.body, body.author)),
+    {
+      body: t.Object({
+        body: t.String({ minLength: 1 }),
+        // Who's speaking — operator (default) or supervisor, same split as sourceBody.
+        author: t.Optional(
+          t.Union([t.Literal(CommentAuthor.Operator), t.Literal(CommentAuthor.Supervisor)]),
+        ),
+      }),
+    },
+  )
+  .patch(
+    "/:id/comments/:commentId",
+    async ({ params, body, set }) =>
+      orNotFound(set, await updateComment(Number(params.id), Number(params.commentId), body.body)),
+    { body: t.Object({ body: t.String({ minLength: 1 }) }) },
+  )
+  .delete("/:id/comments/:commentId", async ({ params, set }) =>
+    orNotFound(set, await archiveComment(Number(params.id), Number(params.commentId))),
+  );
 
 // Phases carry the same complete/reopen on top of CRUD — the grain at which a
 // squash-dropped trailer is most often patched up by hand.
 const phasesGroup = resource("phases", phaseRepo, models.phases)
   .post(
     "/:id/complete",
-    async ({ params, body, set }) => {
-      const row = await completePhase(Number(params.id), decisionSource(body));
-      if (!row) set.status = 404;
-      return row ?? { error: "not found" };
-    },
+    async ({ params, body, set }) =>
+      orNotFound(set, await completePhase(Number(params.id), decisionSource(body))),
     { body: sourceBody },
   )
-  .post("/:id/reopen", async ({ params, set }) => {
-    const row = await reopenPhase(Number(params.id));
-    if (!row) set.status = 404;
-    return row ?? { error: "not found" };
-  });
+  .post("/:id/reopen", async ({ params, set }) =>
+    orNotFound(set, await reopenPhase(Number(params.id))),
+  );
 
 // Sessions carry `land` (graceful teardown of finished work), `stop` (abort a
 // running session) and `open-editor` (VS Code on the operator's machine) on top
 // of CRUD.
 const sessionsGroup = resource("sessions", sessionRepo, models.sessions)
-  .post("/:id/land", async ({ params, set }) => {
-    const result = await landSession(Number(params.id));
-    if (!result.ok) set.status = 400;
-    return result;
-  })
-  .post("/:id/stop", async ({ params, set }) => {
-    const result = await stopSession(Number(params.id));
-    if (!result.ok) set.status = 400;
-    return result;
-  })
-  .post("/:id/open-editor", async ({ params, set }) => {
-    const result = await openSessionEditor(Number(params.id));
-    if (!result.ok) set.status = 400;
-    return result;
-  });
+  .post("/:id/land", async ({ params, set }) =>
+    orBadRequest(set, await landSession(Number(params.id))),
+  )
+  .post("/:id/stop", async ({ params, set }) =>
+    orBadRequest(set, await stopSession(Number(params.id))),
+  )
+  .post("/:id/open-editor", async ({ params, set }) =>
+    orBadRequest(set, await openSessionEditor(Number(params.id))),
+  );
+
+// Repos carry the identity-icon route on top of CRUD: the cached favicon/avatar
+// (resolved lazily on the first ask — see repo-icon.ts), or 404 when nothing
+// resolved (the UI falls back to the repo's color swatch).
+const reposGroup = resource("repos", repoRepo, models.repos).get(
+  "/:id/icon",
+  async ({ params, set }) => {
+    const res = await repoIconResponse(Number(params.id));
+    if (res) return res;
+    set.status = 404;
+    return { error: "no icon" };
+  },
+);
 
 // Proposals: a pending change-set the operator decides on. Authored when the
 // supervisor is SUGGESTING a change; reviewed as markdown (GET /:id/markdown renders
@@ -274,11 +338,7 @@ const proposalsGroup = new Elysia({ prefix: "/proposals" })
   .get("/", ({ query }) => listProposals({ status: query.status }), {
     query: t.Object({ status: t.Optional(t.String()) }),
   })
-  .get("/:id", async ({ params, set }) => {
-    const row = await getProposal(Number(params.id));
-    if (!row) set.status = 404;
-    return row ?? { error: "not found" };
-  })
+  .get("/:id", async ({ params, set }) => orNotFound(set, await getProposal(Number(params.id))))
   .post("/", ({ body }) => createProposal(body as CreateProposalInput), {
     body: proposalCreateBody,
   })
@@ -324,11 +384,7 @@ const proposalsGroup = new Elysia({ prefix: "/proposals" })
 // worker was on, which picks the milestone) sharpen the proposal.
 const followupsGroup = new Elysia({ prefix: "/followups" }).post(
   "/",
-  async ({ body, set }) => {
-    const result = await proposeFollowup(body);
-    if (!result.ok) set.status = 400;
-    return result;
-  },
+  async ({ body, set }) => orBadRequest(set, await proposeFollowup(body)),
   {
     body: t.Object({
       title: t.String(),
@@ -339,6 +395,9 @@ const followupsGroup = new Elysia({ prefix: "/followups" }).post(
 );
 
 export const app = new Elysia()
+  // Cross-origin access for desktop/remote clients (Tauri, or a browser over
+  // Tailscale). Inert same-origin. Must be first so it wraps every route.
+  .use(cors)
   .get("/health", () => ({ ok: true }))
   // Nested, id-less plan loader — Elysia validates the body against the TypeBox
   // plan schema before the handler runs.
@@ -352,16 +411,43 @@ export const app = new Elysia()
   // Persisted in the pull_requests table, so it's served from last-known state on
   // boot — the Active panel reads it for status badges.
   .get("/cloud-prs", () => currentCloudPrs())
-  // Runtime operator settings (in-memory, reset on restart). `autoRebase` gates the
-  // watcher's auto @claude-rebase ask, so the Active pane can pause/resume it.
-  .get("/settings", () => ({ autoRebase: getAutoRebase() }))
+  // On-demand logical backup of the whole store — a version-independent JSON snapshot
+  // (see backup.ts). Served from the live connection because the supervisor holds the
+  // single writer lock; the CLI `powdermonkey backup` just saves this response.
+  .get("/backup", async ({ set }) => {
+    const snap = await dumpSnapshot(pg as unknown as SqlClient, new Date().toISOString());
+    set.headers["content-disposition"] =
+      `attachment; filename="pm-backup-${snap.meta.takenAt.replace(/[:.]/g, "-")}.json"`;
+    return snap;
+  })
+  // The operator's Claude usage/limits (rolling 5-hour + weekly windows), read from
+  // the same OAuth usage endpoint Claude Code's `/usage` uses. Best-effort: returns
+  // `available: false` with a reason when there's no login / the API is down, never
+  // an error. The global status bar polls this. See docs/claude-usage-spike.md.
+  .get("/claude/usage", () => getClaudeUsage())
+  // Operator settings (single-row, survives restart). `autoRebase` gates the
+  // watcher's auto @claude-rebase ask; `dispatchBackend` + `exe*` pick and configure
+  // the cloud-dispatch backend. POST is a partial — only the fields present change.
+  .get("/settings", () => ({ autoRebase: getAutoRebase(), ...getDispatchSettings() }))
   .post(
     "/settings",
     async ({ body }) => {
-      await setAutoRebase(body.autoRebase);
-      return { autoRebase: getAutoRebase() };
+      if (body.autoRebase !== undefined) await setAutoRebase(body.autoRebase);
+      await setDispatchSettings(body);
+      return { autoRebase: getAutoRebase(), ...getDispatchSettings() };
     },
-    { body: t.Object({ autoRebase: t.Boolean() }) },
+    {
+      body: t.Object({
+        autoRebase: t.Optional(t.Boolean()),
+        dispatchBackend: t.Optional(
+          t.Union([t.Literal(DispatchBackend.ExeDev), t.Literal(DispatchBackend.ClaudeRemote)]),
+        ),
+        exeTemplate: t.Optional(t.String()),
+        exeTtydPort: t.Optional(t.Integer({ minimum: 1, maximum: 65535 })),
+        exeClaudeFlags: t.Optional(t.String()),
+        exeAutoTeardown: t.Optional(t.Boolean()),
+      }),
+    },
   )
   // In-app PR review: a PR's diff (raw patch per file) + its inline review comments,
   // so review happens here instead of bouncing to github.com. Backed by `gh api`
@@ -460,7 +546,7 @@ export const app = new Elysia()
       }),
     },
   )
-  // Every session↔task link. The browser intersects these with the sessions it
+  // Every session<->task link. The browser intersects these with the sessions it
   // already holds to learn which tasks are active and which session each surfaces,
   // so one flat list serves both the live panes and the archive view.
   .get("/session-tasks", () => listSessionTasks())
@@ -665,6 +751,7 @@ export const app = new Elysia()
   .use(phasesGroup)
   .use(sessionsGroup)
   .use(resource("notes", noteRepo, models.notes))
+  .use(reposGroup)
   .use(proposalsGroup)
   .use(followupsGroup)
   // Static: bundled web app, SPA fallback to index.html. Served from the package's

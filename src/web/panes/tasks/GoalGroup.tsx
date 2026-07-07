@@ -1,0 +1,134 @@
+import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { Group, Stack, Title } from "@mantine/core";
+import { useState } from "react";
+import type { Goal, Milestone, Task } from "../../../server/schema.ts";
+import { VocabKind } from "../../../shared/types.ts";
+import { type EntityEdit, entityKey, type GroupedGhosts } from "../../ghosts.ts";
+import type { Indexes } from "../../plan-data.ts";
+import { IdTag } from "../../plan-ui";
+import { Caret } from "./Caret.tsx";
+import { DecideControls } from "./DecideControls.tsx";
+import { GhostHeader } from "./GhostHeader.tsx";
+import { MilestoneGroup } from "./MilestoneGroup.tsx";
+import { ProsePreview } from "./ProsePreview.tsx";
+import { headerPreview } from "./preview.ts";
+import { Rename } from "./Rename.tsx";
+import { mId, type Reorder } from "./reorder.ts";
+
+/** A goal and its milestones. A caret collapses the whole goal. Edits on the goal itself
+ *  render in place as its proposed after-state — the title rename shown old → new, the
+ *  objective diffed, a proposed delete striking the header — each decided on the header;
+ *  proposed new milestones render as ghost blocks. A milestone shows when it has backlog
+ *  tasks, task-ghosts, or its own edits; a goal with nothing to show renders nothing. */
+export function GoalGroup({
+  goal,
+  idx,
+  backlog,
+  ghosts,
+  edits,
+  reorder,
+}: {
+  goal: Goal;
+  idx: Indexes;
+  backlog: Set<number>;
+  ghosts: GroupedGhosts;
+  edits: Map<string, EntityEdit[]>;
+  reorder: Reorder;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const goalEdits = edits.get(entityKey(VocabKind.Goal, goal.id)) ?? [];
+  // The goal header as it WILL be: title rename shown old → new, objective diffed, a
+  // proposed delete striking it — with the goal-level changes decided in place.
+  const preview = headerPreview({ title: goal.title, objective: goal.objective }, goalEdits);
+  const goalArchive = preview.archived;
+  const ghostMilestones = ghosts.milestonesByGoal.get(goal.id) ?? [];
+
+  // Order milestones (and each milestone's tasks) by the live drag order — pure
+  // `position` order, not star-first, so a drag maps one-to-one onto stored positions.
+  // (Stars still float tasks to the top of the flat launch list; here they're a marker.)
+  const milestones = reorder
+    .milestoneOrder(goal.id)
+    .map((id) => idx.milestoneById.get(id))
+    .filter((m): m is Milestone => m != null)
+    .map((m) => ({
+      m,
+      tasks: reorder
+        .taskOrder(m.id)
+        .filter((id) => backlog.has(id))
+        .map((id) => reorder.taskById(id))
+        .filter((t): t is Task => t != null),
+    }))
+    .filter(
+      ({ m, tasks }) =>
+        tasks.length > 0 ||
+        // An EMPTY milestone (no tasks at all — e.g. one you just created) shows, so it
+        // doesn't vanish the moment it's accepted; a DRAINED one (had tasks, now all
+        // done) stays hidden — that's the graveyard we prune.
+        (idx.tasksByMilestone.get(m.id)?.length ?? 0) === 0 ||
+        (ghosts.tasksByMilestone.get(m.id)?.length ?? 0) > 0 ||
+        (edits.get(entityKey(VocabKind.Milestone, m.id))?.length ?? 0) > 0,
+    );
+
+  if (milestones.length === 0 && ghostMilestones.length === 0 && goalEdits.length === 0) {
+    return null;
+  }
+
+  return (
+    <Stack gap="md">
+      <div data-pm-reveal={`g${goal.id}`}>
+        <Group gap="cozy" wrap="nowrap" align="center">
+          <Caret
+            collapsed={collapsed}
+            onToggle={() => setCollapsed((c) => !c)}
+            label={collapsed ? "Expand goal" : "Collapse goal"}
+          />
+          <IdTag prefix="g" id={goal.id} />
+          <Title
+            order={3}
+            c={goalArchive ? "dimmed" : undefined}
+            td={goalArchive ? "line-through" : undefined}
+          >
+            {!goalArchive && preview.title.changed ? (
+              <Rename before={preview.title.before} after={preview.title.after} />
+            ) : (
+              goal.title
+            )}
+          </Title>
+        </Group>
+        {!collapsed && (
+          <div
+            style={{ marginLeft: 26 }} // lint-allow-spacing: alignment offset under the caret + id
+          >
+            <ProsePreview
+              diff={preview.objective}
+              archived={goalArchive}
+              spacing={{ mt: "tight" }}
+            />
+          </div>
+        )}
+        {preview.changes.length > 0 && (
+          <Group mt="tight">
+            <DecideControls changes={preview.changes} showConflict />
+          </Group>
+        )}
+      </div>
+
+      {!collapsed && (
+        <SortableContext
+          items={milestones.map(({ m }) => mId(m.id))}
+          strategy={verticalListSortingStrategy}
+        >
+          {milestones.map(({ m, tasks }) => (
+            <MilestoneGroup key={m.id} milestone={m} tasks={tasks} ghosts={ghosts} edits={edits} />
+          ))}
+        </SortableContext>
+      )}
+      {!collapsed &&
+        ghostMilestones.map((g) => (
+          <div key={`p${g.proposalId}-${g.changeIndex}`} style={{ marginLeft: 20 }}>
+            <GhostHeader ghost={g} />
+          </div>
+        ))}
+    </Stack>
+  );
+}

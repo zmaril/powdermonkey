@@ -1,12 +1,26 @@
 import { Anchor, Badge, Box, Checkbox, Group, Text, UnstyledButton } from "@mantine/core";
+import { IconChevronDown } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { reasonLabel } from "../../../server/generated.ts";
 import type { ReviewFile } from "../../../server/pr-review.ts";
 import { api } from "../../client.ts";
-import { FilePatch } from "./FilePatch.tsx";
-import { LazyMount } from "./LazyMount.tsx";
 import { useReviewCtx } from "./context.ts";
+import { FilePatch } from "./FilePatch.tsx";
 import { estimateHeight } from "./helpers.ts";
+import { LazyMount } from "./LazyMount.tsx";
+
+/** The diff body's fold. Starts folded for a generated file, and re-syncs to
+ *  `viewed || generated` whenever those change (marking viewed folds; un-viewing
+ *  unfolds — except generated, which stays folded by default). A manual caret toggle
+ *  in between wins until the next viewed change. Returns `[collapsed, setCollapsed]`
+ *  so the caret can flip the fold directly without touching `viewed`. */
+export function useFileCollapse(isViewed: boolean, generated: boolean) {
+  const [collapsed, setCollapsed] = useState(generated);
+  useEffect(() => {
+    setCollapsed(isViewed || generated);
+  }, [isViewed, generated]);
+  return [collapsed, setCollapsed] as const;
+}
 
 /** One file in the diff list: our header (caret · name · status · +/- · Viewed) over
  *  the PatchDiff. Two independent ways to collapse the diff body: the caret (a pure
@@ -19,17 +33,9 @@ import { estimateHeight } from "./helpers.ts";
 export function FileBlock({ file }: { file: ReviewFile }) {
   const { review, viewed, toggleViewed } = useReviewCtx();
   const isViewed = viewed.has(file.filename);
-  // The diff body's fold. Driven by the caret directly and by Viewed via the effect
-  // below; the caret never writes back to `viewed`, keeping the two states separate.
-  // A generated file starts folded.
-  const [collapsed, setCollapsed] = useState(file.generated);
-  // Marking a file viewed folds it; un-viewing unfolds it — except a generated file,
-  // which falls back to its folded-by-default. (Fires on mount too, once the async
-  // viewed state arrives.) A manual caret toggle in between wins until the next viewed
-  // change, since this only fires when isViewed (or the generated flag) does.
-  useEffect(() => {
-    setCollapsed(isViewed || file.generated);
-  }, [isViewed, file.generated]);
+  // The diff body's fold — driven by the caret directly and by Viewed (see the hook);
+  // the caret never writes back to `viewed`, keeping the two states separate.
+  const [collapsed, setCollapsed] = useFileCollapse(isViewed, file.generated);
   // Full-file contents for context expansion, fetched on demand (see #2). null =
   // patch-only (light). Switching on pulls the blob and re-renders via MultiFileDiff.
   const [contents, setContents] = useState<{ oldText: string; newText: string } | null>(null);
@@ -52,27 +58,26 @@ export function FileBlock({ file }: { file: ReviewFile }) {
   };
 
   return (
-    <Box style={{ border: "1px solid #2c2e33", borderRadius: 6, overflow: "hidden" }}>
-      <Group justify="space-between" px="sm" py={6} style={{ background: "#202225" }}>
-        <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+    <Box style={{ border: "1px solid var(--pm-hairline)", borderRadius: 6, overflow: "hidden" }}>
+      <Group justify="space-between" px="sm" py="snug" style={{ background: "var(--pm-surface)" }}>
+        <Group gap="cozy" wrap="nowrap" style={{ minWidth: 0 }}>
           <UnstyledButton
             onClick={() => setCollapsed((c) => !c)}
             title={collapsed ? "Expand file" : "Collapse file"}
             aria-label={collapsed ? "Expand file" : "Collapse file"}
             aria-expanded={!collapsed}
-            style={{ display: "flex", alignItems: "center", flexShrink: 0, color: "#909296" }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              flexShrink: 0,
+              color: "var(--pm-dim-text)",
+            }}
           >
-            <Text
-              size="sm"
-              c="dimmed"
-              style={{
-                lineHeight: 1,
-                transition: "transform 120ms ease",
-                transform: collapsed ? "rotate(-90deg)" : "none",
-              }}
-            >
-              ▾
-            </Text>
+            <IconChevronDown
+              size={14}
+              className="pm-rotate"
+              style={{ transform: collapsed ? "rotate(-90deg)" : "none" }}
+            />
           </UnstyledButton>
           <Text size="sm" ff="monospace" truncate>
             {file.previousFilename ? `${file.previousFilename} → ` : ""}
@@ -92,7 +97,7 @@ export function FileBlock({ file }: { file: ReviewFile }) {
             </Badge>
           )}
         </Group>
-        <Group gap={10} wrap="nowrap">
+        <Group gap="xs" wrap="nowrap">
           <Text size="xs" c="green">
             +{file.additions}
           </Text>
@@ -115,7 +120,9 @@ export function FileBlock({ file }: { file: ReviewFile }) {
             label="Viewed"
             checked={isViewed}
             onChange={() => toggleViewed(file.filename)}
-            styles={{ label: { fontSize: 11, color: "#909296", paddingLeft: 6 } }}
+            styles={{
+              label: { fontSize: "0.6875rem", color: "var(--pm-dim-text)", paddingLeft: 6 },
+            }}
           />
         </Group>
       </Group>

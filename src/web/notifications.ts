@@ -2,7 +2,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { useEffect, useRef, useState } from "react";
 import type { Session, Task } from "../server/schema.ts";
 import type { SessionLink } from "./active.ts";
-import { sessionTasksCollection, sessionsCollection, tasksCollection } from "./collections.ts";
+import { sessionsCollection, sessionTasksCollection, tasksCollection } from "./collections.ts";
 
 // OS-level web notifications: ping the operator when a session falls idle at a
 // prompt ("needs you"). This is the away-from-the-app layer — distinct from the

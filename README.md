@@ -1,5 +1,9 @@
 # PowderMonkey
 
+> [!WARNING]
+> **Work in progress.** PowderMonkey has mostly been tested on itself, and is very
+> new — it breaks in fun and exciting ways. Expect rough edges.
+
 PowderMonkey helps you plan and execute long term projects via coding agents in the cloud through Github and Claude Code.
 
 ![A powder monkey serving the guns](docs/powder-monkey.jpg)
@@ -54,6 +58,22 @@ resolves back to the real location). Cross-platform prebuilt binaries are the
 planned distribution.
 
 To hack on PowderMonkey itself, run from a checkout instead (below).
+
+## Desktop client / remote servers
+
+The browser UI is a thin client over the supervisor, and the two don't have to be
+on the same machine. You can run the supervisor on a host somewhere and point a
+**desktop app** (Tauri) or another browser at it — pick the server in **Settings →
+Server**. Because there's no auth (by design), keep the supervisor on a private
+network (Tailscale / SSH tunnel / VPN), not a public address. Run it locally and
+it's the same single-machine setup as before. See **[docs/desktop.md](docs/desktop.md)**
+for the model, the build steps (`bun run desktop:dev` / `desktop:build`), and the
+network/auth notes.
+
+To run the supervisor headless on an always-on host so it keeps working after you
+close your laptop, there's a **Docker + Compose** setup that puts it behind
+Tailscale (the tailnet is the auth boundary, since PM has none) — see
+**[docs/docker.md](docs/docker.md)**.
 
 ## Run (dev)
 
@@ -189,3 +209,21 @@ commands — reserved session names, detaching safely, killing a stuck session, 
 finding the supervisor pane.
 
 
+
+## Powderworks
+
+PowderMonkey is part of [powderworks](https://github.com/zmaril?tab=repositories),
+an agentic consortium building for the here and now. Its siblings:
+[Straitjacket](https://github.com/zmaril/Straitjacket) keeps the slop out of the
+code your agents write, and [housekeeping](https://github.com/zmaril/housekeeping)
+keeps the repos they write it in squared away.
+
+## Contributing
+
+Issues and PRs welcome — PowderMonkey is young and opinionated, so open an
+issue first if you're planning something big. Reports from real sessions help
+most: what you ran, what the supervisor said, what broke.
+
+## License
+
+[MIT](LICENSE).

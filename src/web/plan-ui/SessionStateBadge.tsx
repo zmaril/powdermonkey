@@ -7,7 +7,7 @@ import { SESSION_BADGE } from "./constants.ts";
  *  badge. The state belongs to the worker, not each task, so it lives here. */
 export function SessionStateBadge({ session }: { session: Session }) {
   return (
-    <Group gap={6} wrap="nowrap">
+    <Group gap="snug" wrap="nowrap">
       {session.needsInput && (
         <Badge color="yellow" variant="filled">
           needs you

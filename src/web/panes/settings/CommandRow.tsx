@@ -5,8 +5,8 @@ import { Button, Code, CopyButton, Group, Text } from "@mantine/core";
 export function CommandRow({ cmd, hint }: { cmd: string; hint: string }) {
   return (
     <div>
-      <Group gap={6} wrap="nowrap" justify="space-between">
-        <Code style={{ fontSize: 12 }}>{cmd}</Code>
+      <Group gap="snug" wrap="nowrap" justify="space-between">
+        <Code style={{ fontSize: "0.75rem" }}>{cmd}</Code>
         <CopyButton value={cmd}>
           {({ copied, copy }) => (
             <Button

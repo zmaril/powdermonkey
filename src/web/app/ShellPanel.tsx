@@ -7,7 +7,14 @@ export function ShellPanel(props: IDockviewPanelProps<{ cwd: string; session: nu
   const [ended, setEnded] = useState(false);
   const session = props.params.session;
   return (
-    <div style={{ height: "100%", width: "100%", background: "#1a1b1e", position: "relative" }}>
+    <div
+      style={{
+        height: "100%",
+        width: "100%",
+        background: "var(--pm-pane-bg)",
+        position: "relative",
+      }}
+    >
       <ShellTerminal
         cwd={props.params.cwd || undefined}
         session={session ?? undefined}

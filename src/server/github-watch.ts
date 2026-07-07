@@ -4,10 +4,10 @@ import { taskRepo } from "./crud.ts";
 import { db } from "./db.ts";
 import {
   type AgentStatus,
+  bus,
   type CloudEventMeta,
   type CloudPr,
   type FollowupComment,
-  bus,
 } from "./events.ts";
 import { ingestFollowups } from "./followups.ts";
 import { askClaude, gh, resolveRepo } from "./gh.ts";
@@ -165,7 +165,7 @@ export function lastAgentComment(
  *  text still rides in `body`). `updatedAt` is filled in by the caller from the
  *  comment's GitHub timestamp. Pure — exported for tests. */
 export function parseStatusComment(body: string): Omit<AgentStatus, "updatedAt"> | null {
-  if (!body || !body.includes(STATUS_MARKER)) return null;
+  if (!body?.includes(STATUS_MARKER)) return null;
   const fields: Record<string, string> = {};
   for (const raw of body.split(/\r?\n/)) {
     // Strip emphasis/code/quote chars and a leading list marker so `**status:**`,
@@ -225,7 +225,7 @@ export const FOLLOWUP_MARKER = "<!-- pm:followup -->";
  *  the rest the body — so a worker can write a keyed block or just a one-liner. An
  *  optional leading `body:` label on the remainder is stripped. Pure — exported for tests. */
 export function parseFollowupComment(raw: string): { title: string; body: string } | null {
-  if (!raw || !raw.includes(FOLLOWUP_MARKER)) return null;
+  if (!raw?.includes(FOLLOWUP_MARKER)) return null;
   const clean = (s: string) =>
     s
       .replace(/[*`>]/g, "")

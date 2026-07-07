@@ -5,13 +5,17 @@ import type { DraftComment } from "./types.ts";
  *  amber card with a remove affordance, visually distinct from posted comments. */
 export function PendingCard({ draft, onRemove }: { draft: DraftComment; onRemove: () => void }) {
   return (
-    <Box px="md" py={6} style={{ background: "#1c1d20" }}>
+    <Box px="md" py="snug" style={{ background: "var(--pm-surface)" }}>
       <Box
         px="sm"
-        py={6}
-        style={{ border: "1px dashed #b8893a", background: "#221d16", borderRadius: 4 }}
+        py="snug"
+        style={{
+          border: "1px dashed var(--pm-draft-border)",
+          background: "var(--pm-draft-bg)",
+          borderRadius: 4,
+        }}
       >
-        <Group justify="space-between" mb={2} wrap="nowrap">
+        <Group justify="space-between" mb="hair" wrap="nowrap">
           <Badge size="xs" variant="light" color="yellow">
             pending
           </Badge>
