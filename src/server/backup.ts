@@ -47,15 +47,44 @@ async function columns(pg: SqlClient, table: string): Promise<ColInfo[]> {
   return rows;
 }
 
+/** The primary-key columns of `table`, in key order. Used to order the dump
+ *  deterministically so `dump → restore → dump` is byte-stable — the property the
+ *  round-trip test relies on (a table without an ORDER BY hands back rows in heap
+ *  order, which shifts after a reload). Empty only for a hypothetical PK-less table. */
+async function primaryKey(pg: SqlClient, table: string): Promise<string[]> {
+  const { rows } = await pg.query<{ column_name: string }>(
+    `SELECT kcu.column_name
+     FROM information_schema.table_constraints tc
+     JOIN information_schema.key_column_usage kcu
+       ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+     WHERE tc.constraint_type = 'PRIMARY KEY'
+       AND tc.table_schema = 'public' AND tc.table_name = $1
+     ORDER BY kcu.ordinal_position`,
+    [table],
+  );
+  return rows.map((r) => r.column_name);
+}
+
 /** Dump every table's rows to a version-independent JSON snapshot. `takenAt` is
- *  passed in (the caller stamps the time) so this stays a pure transform. */
+ *  passed in (the caller stamps the time) so this stays a pure transform. Rows are
+ *  ordered by primary key, so two dumps of the same data are identical byte-for-byte. */
 export async function dumpSnapshot(pg: SqlClient, takenAt: string): Promise<Snapshot> {
   const tables = await userTables(pg);
   const data: Record<string, Record<string, unknown>[]> = {};
   for (const t of tables) {
-    data[t] = (await pg.query(`SELECT * FROM "${t}"`)).rows;
+    const pk = await primaryKey(pg, t);
+    const order = pk.length > 0 ? `ORDER BY ${pk.map((c) => `"${c}"`).join(",")}` : "";
+    data[t] = (await pg.query(`SELECT * FROM "${t}" ${order}`)).rows;
   }
   return { meta: { pmVersion: pkg.version, takenAt, tables }, data };
+}
+
+/** Canonical JSON for a snapshot's *data* — the losslessness-relevant part, with
+ *  `meta.takenAt` (which changes every dump) excluded. Two dumps of identical data
+ *  serialize identically, so equality is a cheap `===`. This is what the round-trip
+ *  test and the autosync change-detector compare on. */
+export function snapshotDataJson(snap: Snapshot): string {
+  return JSON.stringify(snap.data);
 }
 
 /** Restore a snapshot into an EMPTY, freshly-migrated store. Refuses if any target

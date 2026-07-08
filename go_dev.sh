@@ -6,11 +6,15 @@
 # window that is just the front-end talking to the supervisor). Both must be up to "use
 # PowderMonkey on the desktop", so this script guarantees both.
 #
+# By default it pulls the latest origin/main first, so you always run the newest code.
+# Pin a specific version with PM_REF: PM_REF=v1.2.3 ./go_dev.sh (any tag / commit / branch).
+#
 # Usage:
-#   ./go_dev.sh                  # dev: ensure everything's up, then open the Tauri window live
+#   ./go_dev.sh                  # dev: pull latest, ensure everything's up, open the Tauri window
 #   ./go_dev.sh --build          # build the installable PowderMonkey.app instead, reveal it
 #   ./go_dev.sh --install-agent  # macOS: start the supervisor on every login (survives reboots)
 #   ./go_dev.sh --uninstall-agent# remove that LaunchAgent
+#   PM_REF=<tag|commit|branch> ./go_dev.sh   # run a pinned version instead of latest main
 #
 # Ctrl-C closes the app; the supervisor keeps running in tmux behind it (reattach with
 # `bun run attach`). Override the port with PORT=xxxx ./go_dev.sh (default 4500).
@@ -20,6 +24,7 @@ cd "$(dirname "$0")"
 
 PORT="${PORT:-4500}"
 PM_URL="${PM_URL:-http://localhost:${PORT}}"
+PM_REF="${PM_REF:-}"
 MODE="${1:-dev}"
 
 AGENT_LABEL="com.powdermonkey.supervisor"
@@ -41,6 +46,25 @@ wait_for_health() {
     fi
     sleep 1
   done
+}
+
+# Pull the latest origin/main into the checkout so you always launch the newest code —
+# unless PM_REF pins a tag/commit/branch. Best-effort: if it can't fast-forward (a feature
+# branch, a diverged local main, or local edits) it warns and launches what's checked out
+# rather than failing, so `go_dev.sh` never leaves you unable to start.
+update_repo() {
+  git rev-parse --git-dir >/dev/null 2>&1 || return 0 # not a git checkout → nothing to pull
+  git fetch origin --tags --quiet 2>/dev/null || { echo "  fetch failed — using the current checkout." >&2; return 0; }
+  if [ -n "${PM_REF}" ]; then
+    say "Pinned version requested (PM_REF=${PM_REF})…"
+    git checkout --quiet "${PM_REF}" 2>/dev/null || echo "  couldn't check out ${PM_REF} — using the current checkout." >&2
+  else
+    say "Pulling the latest origin/main…"
+    git merge --ff-only --quiet origin/main 2>/dev/null \
+      || { git checkout --quiet main 2>/dev/null && git merge --ff-only --quiet origin/main 2>/dev/null; } \
+      || echo "  couldn't fast-forward to origin/main (feature branch, diverged, or local edits) — using the current checkout." >&2
+  fi
+  echo "  at $(git rev-parse --short HEAD) [$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo detached)]"
 }
 
 # Install a macOS LaunchAgent that runs `serve` at every login. `serve` launches the tmux
@@ -108,14 +132,31 @@ case "${MODE}" in
   --uninstall-agent|uninstall-agent) uninstall_agent; exit 0 ;;
 esac
 
-# ── 1. Dependencies ─────────────────────────────────────────────────────────────
+# ── 1. Latest code (or the pinned ref) + dependencies + git hooks ───────────────
+BEFORE_HEAD="$(git rev-parse HEAD 2>/dev/null || echo none)"
+update_repo
+AFTER_HEAD="$(git rev-parse HEAD 2>/dev/null || echo none)"
+
 say "Installing dependencies (bun install)…"
 bun install
 
-# ── 2. Supervisor up + healthy ──────────────────────────────────────────────────
+# Wire up the local git hooks (pre-commit fast checks + pre-push CI mirror) so a
+# fresh clone is gated in one step. Idempotent — re-running just re-asserts them.
+say "Installing git hooks (bun run hooks:install)…"
+bun run hooks:install
+
+# ── 2. Supervisor up + on the latest code ────────────────────────────────────────
 # `serve` is idempotent: it launches the tmux serve-loop, or no-ops if it's already up.
+WAS_UP=no; curl -fsS "${PM_URL}/health" >/dev/null 2>&1 && WAS_UP=yes
 say "Ensuring the supervisor is running on ${PM_URL}…"
 PORT="${PORT}" bun run serve
+# A supervisor that was already running is on the OLD code; if the checkout just advanced,
+# restart it (the serve-loop respawns __server, rebuilding the web bundle on boot). A fresh
+# launch is already on the latest, so only the was-running case needs the kick.
+if [ "${WAS_UP}" = "yes" ] && [ "${BEFORE_HEAD}" != "${AFTER_HEAD}" ]; then
+  say "Code advanced — restarting the supervisor onto the new code…"
+  pkill -f 'powdermonkey.ts __server' 2>/dev/null || true
+fi
 wait_for_health
 
 # ── 3. Desktop app ──────────────────────────────────────────────────────────────

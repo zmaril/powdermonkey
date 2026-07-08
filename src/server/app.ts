@@ -7,12 +7,20 @@ import { match, P } from "ts-pattern";
 import {
   CommentAuthor,
   Decision,
+  DispatchBackend,
   OverrideSource,
   ProposalStatus,
   SessionState,
+  SyncMode,
 } from "../shared/types.ts";
 import { applyProposal, decideChange } from "./apply.ts";
 import { dumpSnapshot, type SqlClient } from "./backup.ts";
+import {
+  exportSnapshotToBranch,
+  exportSnapshotToPr,
+  syncStatus,
+  triggerSyncSoon,
+} from "./backup-sync.ts";
 import { getClaudeUsage } from "./claude-usage.ts";
 import { appendComment, archiveComment, listComments, updateComment } from "./comments.ts";
 import { cancelTask, completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
@@ -48,6 +56,8 @@ import {
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { reconcile } from "./reconcile.ts";
 import { repoIconResponse } from "./repo-icon.ts";
+import { listMyRepos, searchRepos } from "./repo-picker.ts";
+import { registerRepo } from "./repo-register.ts";
 import {
   goals as goalsTable,
   milestones as milestonesTable,
@@ -69,7 +79,7 @@ import {
   writeSessionPty,
 } from "./session-pty.ts";
 import { listSessionTasks } from "./session-tasks.ts";
-import { getAutoRebase, setAutoRebase } from "./settings.ts";
+import { getSettings, patchSettings } from "./settings.ts";
 import { teleportTask } from "./teleport.ts";
 import { landSession, startLocalSession, stopSession } from "./worktree.ts";
 
@@ -309,18 +319,29 @@ const sessionsGroup = resource("sessions", sessionRepo, models.sessions)
     orBadRequest(set, await openSessionEditor(Number(params.id))),
   );
 
-// Repos carry the identity-icon route on top of CRUD: the cached favicon/avatar
-// (resolved lazily on the first ask — see repo-icon.ts), or 404 when nothing
-// resolved (the UI falls back to the repo's color swatch).
-const reposGroup = resource("repos", repoRepo, models.repos).get(
-  "/:id/icon",
-  async ({ params, set }) => {
+// Repos carry two routes on top of CRUD: the identity icon — the cached
+// favicon/avatar (resolved lazily on the first ask — see repo-icon.ts), 404 when
+// nothing resolved (the UI falls back to the repo's color swatch) — and
+// `register`, the picker's confirm path. Register is fork-first: a slug the
+// operator can't push to is forked (`gh repo fork --clone=false`) and the fork is
+// registered with `upstream` recording the source (repo-register.ts). Idempotent
+// on the live set, so re-picking an added repo just returns its row.
+const reposGroup = resource("repos", repoRepo, models.repos)
+  .get("/:id/icon", async ({ params, set }) => {
     const res = await repoIconResponse(Number(params.id));
     if (res) return res;
     set.status = 404;
     return { error: "no icon" };
-  },
-);
+  })
+  .post(
+    "/register",
+    async ({ body, set }) => {
+      const result = await registerRepo(body.slug);
+      if (!result.ok) set.status = 502;
+      return result;
+    },
+    { body: t.Object({ slug: t.String({ pattern: "^[^/\\s]+/[^/\\s]+$" }) }) },
+  );
 
 // Proposals: a pending change-set the operator decides on. Authored when the
 // supervisor is SUGGESTING a change; reviewed as markdown (GET /:id/markdown renders
@@ -376,6 +397,25 @@ const proposalsGroup = new Elysia({ prefix: "/proposals" })
 // leaves a `<!-- pm:followup -->` PR comment that github-watch slurps into the same
 // path. Just the title is required; body (context) and sourceTaskId (the task the
 // worker was on, which picks the milestone) sharpen the proposal.
+// The picker's read sources (docs/vocabulary.md § Repo): the operator's own repos
+// and a public GitHub search, both through the operator's authed `gh`. 502 when gh
+// is missing/unauthed/unreachable — the picker surfaces the message in place.
+const ghGroup = new Elysia({ prefix: "/gh" })
+  .get("/repos", async ({ set }) => {
+    const result = await listMyRepos();
+    if (!result.ok) set.status = 502;
+    return result;
+  })
+  .get(
+    "/search",
+    async ({ query, set }) => {
+      const result = await searchRepos(query.q);
+      if (!result.ok) set.status = 502;
+      return result;
+    },
+    { query: t.Object({ q: t.String({ minLength: 1 }) }) },
+  );
+
 const followupsGroup = new Elysia({ prefix: "/followups" }).post(
   "/",
   async ({ body, set }) => orBadRequest(set, await proposeFollowup(body)),
@@ -414,21 +454,72 @@ export const app = new Elysia()
       `attachment; filename="pm-backup-${snap.meta.takenAt.replace(/[:.]/g, "-")}.json"`;
     return snap;
   })
+  // On-demand export of the store snapshot to git: a fresh branch, and optionally a PR
+  // opened for it. Distinct from autosync's one durable branch — each export is its own
+  // point-in-time archive (see backup-sync.ts). `target: "pr"` pushes + opens a PR;
+  // `target: "branch"` just commits (push controls whether it also lands on origin).
+  .post(
+    "/backup/export",
+    async ({ body, set }) => {
+      try {
+        if (body.target === "pr") {
+          return await exportSnapshotToPr({ base: body.base, title: body.title });
+        }
+        const branch =
+          body.branch ?? `powdermonkey-backup-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+        return await exportSnapshotToBranch(branch, { push: body.push ?? false });
+      } catch (e) {
+        set.status = 500;
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+    {
+      body: t.Object({
+        target: t.Union([t.Literal("branch"), t.Literal("pr")]),
+        branch: t.Optional(t.String()),
+        base: t.Optional(t.String()),
+        title: t.Optional(t.String()),
+        push: t.Optional(t.Boolean()),
+      }),
+    },
+  )
+  // Autosync status: mode/branch, last-synced time, last commit, and any error — the
+  // "surface last-synced status" the UI reads (also polled by the CLI).
+  .get("/backup/status", () => syncStatus())
   // The operator's Claude usage/limits (rolling 5-hour + weekly windows), read from
   // the same OAuth usage endpoint Claude Code's `/usage` uses. Best-effort: returns
   // `available: false` with a reason when there's no login / the API is down, never
   // an error. The global status bar polls this. See docs/claude-usage-spike.md.
   .get("/claude/usage", () => getClaudeUsage())
-  // Runtime operator settings (in-memory, reset on restart). `autoRebase` gates the
-  // watcher's auto @claude-rebase ask, so the Active pane can pause/resume it.
-  .get("/settings", () => ({ autoRebase: getAutoRebase() }))
+  // Persisted operator settings (single-row, survives restart). `autoRebase` gates the
+  // watcher's auto @claude-rebase ask; `syncMode`/`syncBranch` configure data-durability
+  // autosync; `dispatchBackend` + `exe*` pick and configure the cloud-dispatch backend.
+  // A partial POST patches only the keys it carries. Turning autosync on (mode → non-off)
+  // kicks an immediate sync so the durable branch is seeded without waiting for a write.
+  .get("/settings", () => getSettings())
   .post(
     "/settings",
     async ({ body }) => {
-      await setAutoRebase(body.autoRebase);
-      return { autoRebase: getAutoRebase() };
+      const next = await patchSettings(body);
+      if (body.syncMode && body.syncMode !== SyncMode.Off) triggerSyncSoon();
+      return next;
     },
-    { body: t.Object({ autoRebase: t.Boolean() }) },
+    {
+      body: t.Object({
+        autoRebase: t.Optional(t.Boolean()),
+        syncMode: t.Optional(
+          t.Union([t.Literal(SyncMode.Off), t.Literal(SyncMode.Local), t.Literal(SyncMode.Push)]),
+        ),
+        syncBranch: t.Optional(t.String()),
+        dispatchBackend: t.Optional(
+          t.Union([t.Literal(DispatchBackend.ExeDev), t.Literal(DispatchBackend.ClaudeRemote)]),
+        ),
+        exeTemplate: t.Optional(t.String()),
+        exeTtydPort: t.Optional(t.Integer({ minimum: 1, maximum: 65535 })),
+        exeClaudeFlags: t.Optional(t.String()),
+        exeAutoTeardown: t.Optional(t.Boolean()),
+      }),
+    },
   )
   // In-app PR review: a PR's diff (raw patch per file) + its inline review comments,
   // so review happens here instead of bouncing to github.com. Backed by `gh api`
@@ -733,6 +824,7 @@ export const app = new Elysia()
   .use(sessionsGroup)
   .use(resource("notes", noteRepo, models.notes))
   .use(reposGroup)
+  .use(ghGroup)
   .use(proposalsGroup)
   .use(followupsGroup)
   // Static: bundled web app, SPA fallback to index.html. Served from the package's

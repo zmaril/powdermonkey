@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test";
 import { PGlite } from "@electric-sql/pglite";
 import { readdirSync, readFileSync } from "node:fs";
-import { dumpSnapshot, restoreSnapshot, type SqlClient } from "../src/server/backup.ts";
+import {
+  dumpSnapshot,
+  restoreSnapshot,
+  snapshotDataJson,
+  type SqlClient,
+} from "../src/server/backup.ts";
 
 // Backup is a logical (row-level) snapshot, so it round-trips through plain SQL and is
 // version-independent — the property the DB upgrade relies on. These tests use two raw
@@ -48,6 +53,34 @@ test("dump→restore round-trips ids, FKs, jsonb and bigint into a fresh store",
     (r) => (r as { id: number }).id,
   );
   expect(new Set(ids).size).toBe(ids.length);
+
+  await src.close();
+  await dst.close();
+});
+
+test("dump → restore → dump is lossless (byte-stable snapshot data)", async () => {
+  // The property autosync and the branch/PR export rely on: a snapshot restored into
+  // a fresh store re-dumps to identical data. Deterministic row ordering (ORDER BY
+  // primary key in dumpSnapshot) is what makes the equality a plain string compare.
+  const src = await migrated();
+  await src.exec("INSERT INTO goals (title,objective) VALUES ('G','o'),('G2','o2')");
+  await src.exec("INSERT INTO milestones (goal_id,title,position) SELECT id,'M',0 FROM goals");
+  await src.exec(
+    "INSERT INTO tasks (milestone_id,title,position) SELECT id,'T',0 FROM milestones",
+  );
+  await src.exec(
+    `INSERT INTO proposals (title,summary,status,changes,base,source_comment_id)
+     VALUES ('P','s','pending','[{"op":"create"}]'::jsonb,'{"k":"v"}'::jsonb,4827711718)`,
+  );
+  await src.exec("INSERT INTO notes (title,body,position) VALUES ('n','b',0)");
+  const dump1 = await dumpSnapshot(src as unknown as SqlClient, "2026-07-05T00:00:00Z");
+
+  const dst = await migrated();
+  await restoreSnapshot(dst as unknown as SqlClient, dump1);
+  const dump2 = await dumpSnapshot(dst as unknown as SqlClient, "2026-07-05T09:99:99Z");
+
+  // meta.takenAt differs by design; the *data* must be byte-identical.
+  expect(snapshotDataJson(dump2)).toBe(snapshotDataJson(dump1));
 
   await src.close();
   await dst.close();

@@ -16,6 +16,7 @@ import { FilterBar } from "../FilterBar.tsx";
 import {
   ANY,
   DEFAULT_TASK_FILTER,
+  filterGhosts,
   matchTask,
   parseScope,
   scopeOptions,
@@ -184,7 +185,7 @@ function usePreserveScrollAcrossResort(
 
 export function TasksPane({ api }: { api?: DockviewPanelApi }) {
   const { idx, activeIds, loading } = useFullData();
-  const ghosts = useProposalGhosts();
+  const rawGhosts = useProposalGhosts();
   const edits = useProposalEdits();
   const reorder = useBacklogReorder(idx);
   const [view, setView] = useState<View>("grouped");
@@ -202,6 +203,10 @@ export function TasksPane({ api }: { api?: DockviewPanelApi }) {
   const [filter, setFilter] = useState<TaskFilter>(DEFAULT_TASK_FILTER);
   const set = (patch: Partial<TaskFilter>) => setFilter((f) => ({ ...f, ...patch }));
   const isDefault = JSON.stringify(filter) === JSON.stringify(DEFAULT_TASK_FILTER);
+  // The proposal ghosts sliced by the same filter the tasks obey — so a query (and the
+  // goal/milestone scope) hides a non-matching ghost instead of leaving it stranded on the
+  // board. An empty query keeps them all (hit() matches everything on an empty needle).
+  const ghosts = useMemo(() => filterGhosts(rawGhosts, idx, filter), [rawGhosts, idx, filter]);
 
   // The active window's ambient repo scope, applied UNDER the FilterBar: an unscoped
   // window ([]) sees every task; a scoped one only what's on its repo tabs.
