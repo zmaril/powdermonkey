@@ -122,6 +122,22 @@ export type SyncMode = ValueOf<typeof SyncMode>;
 export const DispatchBackend = { ClaudeRemote: "claude-remote", ExeDev: "exe-dev" } as const;
 export type DispatchBackend = ValueOf<typeof DispatchBackend>;
 
+/**
+ * One row of pm's runtime registry: an env × agent × model the dispatch engine
+ * (disponent) can run, sourced live from its offerings table (see GET /offerings,
+ * which calls `getDisponent().offerings()` in src/server/exe-dev.ts). `isDefault`
+ * marks the pick for a dispatch that names only the environment. The Settings
+ * dispatch picker is driven from this registry instead of hardcoded backend
+ * literals — see docs/agents-and-models.md for where the full env × agent ×
+ * model × effort model is headed. Capabilities are deferred (not in this op yet).
+ */
+export type Offering = {
+  envSlug: string;
+  agentName: string;
+  modelId: string;
+  isDefault: boolean;
+};
+
 // GitHub PR state, bounded to the values GitHub's GraphQL actually returns. Same
 // const-object-is-the-source-of-truth shape as the status enums above, so the rest
 // of the code (CloudPr, the pull_requests row, the UI badges) speaks one closed

@@ -2,7 +2,13 @@ import type { SerializedDockview } from "dockview-react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Note, TaskComment } from "../server/schema.ts";
-import { type Decision, DispatchBackend, type SyncMode, type TaskKind } from "../shared/types.ts";
+import {
+  type Decision,
+  DispatchBackend,
+  type Offering,
+  type SyncMode,
+  type TaskKind,
+} from "../shared/types.ts";
 
 /** The editable cloud-dispatch settings (mirrors the server's DispatchSettings). */
 export type DispatchSettingsPatch = {
@@ -95,6 +101,10 @@ export type State = {
   exeTtydPort: number;
   exeClaudeFlags: string;
   exeAutoTeardown: boolean;
+  // pm's runtime registry — the env × agent × model rows disponent offers, fetched
+  // from /offerings by loadSettings. Drives the Settings dispatch picker instead of
+  // hardcoded backend literals. Server runtime data, never persisted.
+  offerings: Offering[];
   setDispatchSettings: (next: Partial<DispatchSettingsPatch>) => Promise<void>;
   error: string | null;
   // In-flight slow actions, keyed `${action}:${taskId}` (e.g. `dispatch:7`). A button
@@ -334,6 +344,7 @@ export const useStore = create<State>()(
       exeTtydPort: 3456,
       exeClaudeFlags: "--dangerously-skip-permissions",
       exeAutoTeardown: true,
+      offerings: [],
       error: null,
       pending: {},
       lastStart: null,
@@ -435,6 +446,11 @@ export const useStore = create<State>()(
           exeClaudeFlags: d.exeClaudeFlags ?? "--dangerously-skip-permissions",
           exeAutoTeardown: d.exeAutoTeardown ?? true,
         });
+        // The dispatch runtime registry (env × agent × model), sourced from disponent's
+        // offerings table. A failure leaves offerings empty and DispatchControl falls
+        // back to its known backends — never blocks the rest of settings from loading.
+        const off = await api.offerings.get();
+        if (!off.error && Array.isArray(off.data)) set({ offerings: off.data as Offering[] });
       },
       ensureScratch: () => ensureScratch((e) => set({ error: e })),
       saveNote: async (id, values) => {

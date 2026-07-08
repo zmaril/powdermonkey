@@ -37,6 +37,7 @@ import {
 import { pg } from "./db.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
 import { openSessionEditor } from "./editor.ts";
+import { getDisponent } from "./exe-dev.ts";
 import { fanOutTasks } from "./fanout.ts";
 import { proposeFollowup } from "./followups.ts";
 import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
@@ -496,6 +497,19 @@ export const app = new Elysia()
   // autosync; `dispatchBackend` + `exe*` pick and configure the cloud-dispatch backend.
   // A partial POST patches only the keys it carries. Turning autosync on (mode → non-off)
   // kicks an immediate sync so the durable branch is seeded without waiting for a write.
+  // pm's runtime registry: the env × agent × model rows disponent can dispatch to
+  // (its offerings table), read live from the lazily-opened engine. The Settings
+  // dispatch picker is driven from this instead of hardcoded backend literals. A
+  // disponent hiccup is non-fatal — return an empty registry and the UI falls back
+  // to its known backends rather than blanking the settings pane.
+  .get("/offerings", async () => {
+    try {
+      return await getDisponent().offerings();
+    } catch (e) {
+      console.warn("offerings unavailable (non-fatal):", e instanceof Error ? e.message : e);
+      return [];
+    }
+  })
   .get("/settings", () => getSettings())
   .post(
     "/settings",
