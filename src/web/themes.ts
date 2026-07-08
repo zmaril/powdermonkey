@@ -1,4 +1,5 @@
-import type { MantineColorsTuple } from "@mantine/core";
+// straitjacket-allow-file:color  the blessed palette source of truth — every editor palette's hex values live here by design
+import type { MantineColorShade, MantineColorsTuple } from "@mantine/core";
 import {
   themeAbyss,
   themeCatppuccinMocha,
@@ -47,11 +48,16 @@ export type EditorTheme = {
   // primary buttons pop.
   accent: MantineColorsTuple;
   // Index into `accent` used as the primary (buttons, switches, active-tab rule).
-  primaryShade: number;
+  primaryShade: MantineColorShade;
   // xterm terminal background — matched to the theme so the shell is seamless.
   terminalBg: string;
   // ::selection highlight (accent at low alpha).
   selection: string;
+  // Repo identity swatches — the theme's canonical accent hues (its syntax/ANSI
+  // palette), one of which each repo is assigned by hashing its color seed (see
+  // repo-color.ts). Living here means a repo's color always belongs to the active
+  // theme: switch themes and every repo re-skins to the matching hue family.
+  swatches: string[];
 };
 
 export const THEMES: Record<string, EditorTheme> = {
@@ -90,6 +96,8 @@ export const THEMES: Record<string, EditorTheme> = {
     primaryShade: 4,
     terminalBg: "#21252b",
     selection: "rgba(97, 175, 239, 0.3)",
+    // One Dark's syntax palette: red, orange, yellow, green, cyan, blue, magenta.
+    swatches: ["#e06c75", "#d19a66", "#e5c07b", "#98c379", "#56b6c2", "#61afef", "#c678dd"],
   },
 
   // VS Code Dark — dockview's "dark" theme. Neutral grey, vivid blue accent.
@@ -125,6 +133,8 @@ export const THEMES: Record<string, EditorTheme> = {
     primaryShade: 5,
     terminalBg: "#1e1e1e",
     selection: "rgba(0, 122, 204, 0.3)",
+    // VS Code Dark's bright ANSI terminal hues + the string/keyword token colors.
+    swatches: ["#f14c4c", "#ce9178", "#dcdcaa", "#23d18b", "#29b8db", "#3b8eea", "#d670d6"],
   },
 
   // Visual Studio — dockview's "vs". Like Dark but with a brighter focus-blue accent.
@@ -160,6 +170,8 @@ export const THEMES: Record<string, EditorTheme> = {
     primaryShade: 5,
     terminalBg: "#1e1e1e",
     selection: "rgba(55, 148, 255, 0.3)",
+    // Same editor family as VS Code Dark — the same bright ANSI/token hues.
+    swatches: ["#f14c4c", "#ce9178", "#dcdcaa", "#23d18b", "#29b8db", "#3b8eea", "#d670d6"],
   },
 
   // Abyss — dockview's native deep-navy theme, electric-purple accent.
@@ -195,6 +207,8 @@ export const THEMES: Record<string, EditorTheme> = {
     primaryShade: 5,
     terminalBg: "#10192c",
     selection: "rgba(106, 58, 227, 0.35)",
+    // Abyss's token palette: pink, sand, cream, green, blues, violet.
+    swatches: ["#f280d0", "#ddbb88", "#ffeebb", "#22aa44", "#2277ff", "#6688cc", "#9966b8"],
   },
 
   // Dracula — the iconic dark-purple theme.
@@ -230,6 +244,8 @@ export const THEMES: Record<string, EditorTheme> = {
     primaryShade: 4,
     terminalBg: "#282a36",
     selection: "rgba(189, 147, 249, 0.32)",
+    // Dracula's published accent set: red, orange, yellow, green, cyan, purple, pink.
+    swatches: ["#ff5555", "#ffb86c", "#f1fa8c", "#50fa7b", "#8be9fd", "#bd93f9", "#ff79c6"],
   },
 
   // Monokai — warm dark; dockview's native accent is the signature lime green.
@@ -265,6 +281,8 @@ export const THEMES: Record<string, EditorTheme> = {
     primaryShade: 4,
     terminalBg: "#272822",
     selection: "rgba(166, 226, 46, 0.22)",
+    // Monokai's syntax palette: pink, orange, yellow, green, cyan, purple, magenta.
+    swatches: ["#f92672", "#fd971f", "#e6db74", "#a6e22e", "#66d9ef", "#ae81ff", "#fd5ff0"],
   },
 
   // Nord — arctic blue-greys. A punchier frost-blue accent so buttons aren't washed out.
@@ -300,6 +318,17 @@ export const THEMES: Record<string, EditorTheme> = {
     primaryShade: 5,
     terminalBg: "#2e3440",
     selection: "rgba(129, 161, 193, 0.3)",
+    // Nord's aurora (red→purple) + frost (teals/blues) accents.
+    swatches: [
+      "#bf616a",
+      "#d08770",
+      "#ebcb8b",
+      "#a3be8c",
+      "#b48ead",
+      "#8fbcbb",
+      "#88c0d0",
+      "#81a1c1",
+    ],
   },
 
   // GitHub Dark — near-black neutral, vivid blue accent.
@@ -335,6 +364,17 @@ export const THEMES: Record<string, EditorTheme> = {
     primaryShade: 5,
     terminalBg: "#0d1117",
     selection: "rgba(56, 166, 255, 0.3)",
+    // GitHub Primer's dark accent scale: red, orange, yellow, green, cyan, blue, purple, pink.
+    swatches: [
+      "#ff7b72",
+      "#ffa657",
+      "#e3b341",
+      "#3fb950",
+      "#39c5cf",
+      "#58a6ff",
+      "#bc8cff",
+      "#f778ba",
+    ],
   },
 
   // Catppuccin Mocha — soft pastel on a deep indigo base, blue accent.
@@ -370,6 +410,17 @@ export const THEMES: Record<string, EditorTheme> = {
     primaryShade: 4,
     terminalBg: "#1e1e2e",
     selection: "rgba(137, 180, 250, 0.26)",
+    // Catppuccin Mocha's pastels: red, peach, yellow, green, teal, blue, mauve, pink.
+    swatches: [
+      "#f38ba8",
+      "#fab387",
+      "#f9e2af",
+      "#a6e3a1",
+      "#94e2d5",
+      "#89b4fa",
+      "#cba6f7",
+      "#f5c2e7",
+    ],
   },
 
   // ── Light themes (dark tuple laid out for a light page) ──────────────────────
@@ -407,6 +458,8 @@ export const THEMES: Record<string, EditorTheme> = {
     primaryShade: 6,
     terminalBg: "#ffffff",
     selection: "rgba(10, 108, 219, 0.18)",
+    // VS Code Light's token/ANSI hues — dark enough to read on the white page.
+    swatches: ["#cd3131", "#795e26", "#098658", "#267f99", "#0451a5", "#af00db", "#811f3f"],
   },
 
   // GitHub Light.
@@ -442,6 +495,17 @@ export const THEMES: Record<string, EditorTheme> = {
     primaryShade: 5,
     terminalBg: "#ffffff",
     selection: "rgba(9, 105, 218, 0.15)",
+    // GitHub Primer's light accent scale: red, orange, yellow, green, cyan, blue, purple, pink.
+    swatches: [
+      "#cf222e",
+      "#bc4c00",
+      "#9a6700",
+      "#1a7f37",
+      "#1b7c83",
+      "#0969da",
+      "#8250df",
+      "#bf3989",
+    ],
   },
 
   // Solarized Light.
@@ -482,6 +546,17 @@ export const THEMES: Record<string, EditorTheme> = {
     primaryShade: 5,
     terminalBg: "#fdf6e3",
     selection: "rgba(38, 139, 210, 0.18)",
+    // Solarized's eight published accents: yellow, orange, red, magenta, violet, blue, cyan, green.
+    swatches: [
+      "#b58900",
+      "#cb4b16",
+      "#dc322f",
+      "#d33682",
+      "#6c71c4",
+      "#268bd2",
+      "#2aa198",
+      "#859900",
+    ],
   },
 };
 

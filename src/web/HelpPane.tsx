@@ -1,4 +1,5 @@
 import { Group, Stack, Text } from "@mantine/core";
+import { PaneShell } from "./PaneShell.tsx";
 
 // One pane type, described in a line. Keeps the Help pane's list declarative.
 const PANES: { name: string; blurb: string }[] = [
@@ -16,55 +17,35 @@ const PANES: { name: string; blurb: string }[] = [
 // the top bar like any other pane.
 export function HelpPane() {
   return (
-    <div
-      style={{
-        height: "100%",
-        background: "var(--pm-pane-bg)",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      <Group px="md" py="cozy" style={{ flex: "0 0 auto" }}>
-        <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 0.5 }}>
-          HELP
+    <PaneShell title="HELP" bodyGap="lg" bodyMaxWidth={620}>
+      <Stack gap="snug">
+        <Text size="sm" fw={600}>
+          The pane system
         </Text>
-      </Group>
-      <Stack
-        gap="lg"
-        px="md"
-        pb="md"
-        maw={620}
-        style={{ flex: 1, minHeight: 0, overflowY: "auto" }}
-      >
-        <Stack gap="snug">
-          <Text size="sm" fw={600}>
-            The pane system
-          </Text>
-          <Text size="sm" c="dimmed">
-            Click a button in the top bar to open (or focus) that pane — it appears in the current
-            group below. Drag a tab to move or split it, and close a pane with its ×. Your layout is
-            remembered across reloads, and the top bar can always bring a closed pane back. Shell
-            and Browser open a fresh pane each time; the rest have a single instance.
-          </Text>
-        </Stack>
-        <Stack gap="snug">
-          <Text size="sm" fw={600}>
-            The panes
-          </Text>
-          <Stack gap="cozy">
-            {PANES.map((p) => (
-              <Group key={p.name} gap="cozy" wrap="nowrap" align="baseline">
-                <Text size="sm" fw={600} style={{ flex: "0 0 76px" }}>
-                  {p.name}
-                </Text>
-                <Text size="sm" c="dimmed" style={{ flex: 1 }}>
-                  {p.blurb}
-                </Text>
-              </Group>
-            ))}
-          </Stack>
+        <Text size="sm" c="dimmed">
+          Click a button in the top bar to open (or focus) that pane — it appears in the current
+          group below. Drag a tab to move or split it, and close a pane with its ×. Your layout is
+          remembered across reloads, and the top bar can always bring a closed pane back. Shell and
+          Browser open a fresh pane each time; the rest have a single instance.
+        </Text>
+      </Stack>
+      <Stack gap="snug">
+        <Text size="sm" fw={600}>
+          The panes
+        </Text>
+        <Stack gap="cozy">
+          {PANES.map((p) => (
+            <Group key={p.name} gap="cozy" wrap="nowrap" align="baseline">
+              <Text size="sm" fw={600} style={{ flex: "0 0 76px" }}>
+                {p.name}
+              </Text>
+              <Text size="sm" c="dimmed" style={{ flex: 1 }}>
+                {p.blurb}
+              </Text>
+            </Group>
+          ))}
         </Stack>
       </Stack>
-    </div>
+    </PaneShell>
   );
 }

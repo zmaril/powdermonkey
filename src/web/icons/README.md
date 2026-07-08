@@ -19,6 +19,6 @@ export function IconPowderMonkey({ size = 16 }: { size?: number }) {
 }
 ```
 
-Enforced by `scripts/lint-svg.ts` (part of `bun run check`): `<svg>` anywhere outside
+Enforced by straitjacket (`inline-svg` rule): `<svg>` anywhere outside
 this directory fails the build. Keeping every icon a real, swappable component is what
 lets the whole UI re-skin and stay consistent — the same reason we don't use emoji.

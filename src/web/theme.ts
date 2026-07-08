@@ -1,4 +1,4 @@
-import { Badge, Button, Card, type MantineTheme, Title, createTheme } from "@mantine/core";
+import { Badge, Button, Card, createTheme, type MantineThemeOverride, Title } from "@mantine/core";
 import { spacingFor } from "./appearance.ts";
 import type { EditorTheme } from "./themes.ts";
 
@@ -9,10 +9,10 @@ import type { EditorTheme } from "./themes.ts";
 
 const SANS =
   'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
-const MONO =
+export const MONO =
   '"Fira Code Variable", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
 
-export function buildTheme(t: EditorTheme, densityFactor: number): Partial<MantineTheme> {
+export function buildTheme(t: EditorTheme, densityFactor: number): MantineThemeOverride {
   return createTheme({
     primaryColor: "accent",
     primaryShade: { light: t.primaryShade, dark: t.primaryShade },

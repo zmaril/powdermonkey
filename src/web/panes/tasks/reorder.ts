@@ -1,5 +1,5 @@
-import { KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
+import { KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { useEffect, useRef, useState } from "react";
 import type { Goal, Milestone, Task } from "../../../server/schema.ts";
@@ -226,7 +226,11 @@ export function useBacklogReorder(idx: Indexes): Reorder {
   return {
     milestoneOrder: (goalId) => order.milestonesByGoal[goalId] ?? [],
     taskOrder: (milestoneId) => order.tasksByMilestone[milestoneId] ?? [],
-    taskById: (id) => order.taskMap[id],
+    // Order (which milestone, what sequence) is optimistic; CONTENT is server-fresh.
+    // Resolve the row from `idx` so an edited field renders live even while an in-flight
+    // reorder holds the sequence; fall back to the optimistic map for a row not (yet) in
+    // idx. Without this, a same-id/same-position edit was masked until reload.
+    taskById: (id) => idx.taskById.get(id) ?? order.taskMap[id],
     sensors,
     activeId,
     draggedLabel,

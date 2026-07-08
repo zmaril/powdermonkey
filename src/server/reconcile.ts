@@ -8,9 +8,14 @@ import {
   TaskStatus,
 } from "../shared/types.ts";
 import { db } from "./db.ts";
+import { teardownRemoteWorker } from "./exe-dev.ts";
 import { commitBodies } from "./git.ts";
-import { phases, sessionTasks, sessions, tasks } from "./schema.ts";
+import { phases, sessions, sessionTasks, tasks } from "./schema.ts";
 import { landSession } from "./worktree.ts";
+
+// A task in a terminal state — its work is settled (merged) or abandoned (cancelled).
+// A session whose every task is terminal is finished and can be archived + torn down.
+const TERMINAL_TASK: TaskStatus[] = [TaskStatus.Merged, TaskStatus.Cancelled];
 
 // Progress is driven by what lands on `main`, never by a session self-reporting.
 // A commit carries trailers naming the work it completed:
@@ -61,19 +66,22 @@ function scanTrailers(text: string, key: string): Set<number> {
 // session has no worktree, so we just archive its row.
 async function archiveMergedTaskSessions(): Promise<number> {
   const liveSessions = await db
-    .select({ id: sessions.id, kind: sessions.kind })
+    .select({ id: sessions.id, kind: sessions.kind, vmName: sessions.vmName })
     .from(sessions)
     .where(isNull(sessions.archivedAt));
 
-  // Keep only sessions that have linked tasks and whose tasks have ALL merged.
-  const live: { id: number; kind: SessionKind }[] = [];
+  // Keep only sessions that have linked tasks whose tasks have ALL reached a terminal
+  // state (merged or cancelled). Merged = work landed; cancelled = won't-do — either
+  // way the session is finished, so its worker (if any) should be torn down. Driven
+  // off current status so it's idempotent/self-healing.
+  const live: { id: number; kind: SessionKind; vmName: string | null }[] = [];
   for (const s of liveSessions) {
     const linked = await db
       .select({ status: tasks.status })
       .from(sessionTasks)
       .innerJoin(tasks, eq(sessionTasks.taskId, tasks.id))
       .where(eq(sessionTasks.sessionId, s.id));
-    if (linked.length > 0 && linked.every((t) => t.status === TaskStatus.Merged)) live.push(s);
+    if (linked.length > 0 && linked.every((t) => TERMINAL_TASK.includes(t.status))) live.push(s);
   }
 
   let archived = 0;
@@ -86,14 +94,16 @@ async function archiveMergedTaskSessions(): Promise<number> {
         if (!res.ok) console.warn(`reconcile: could not land session ${s.id}: ${res.error}`);
         return res.ok;
       })
-      // remote: no worktree/PTY to tear down — just archive the row. Guarded on
-      // archivedAt so a concurrent land/stop can't double-archive.
+      // remote: no worktree/PTY to tear down, but an exe.dev backend has a worker VM
+      // to delete. Archive the row (guarded on archivedAt so a concurrent land/stop
+      // can't double-archive); only reach exe.dev if we actually claimed the archive.
       .with(SessionKind.Remote, async () => {
         const [updated] = await db
           .update(sessions)
           .set({ state: SessionState.Idle, archivedAt: new Date(), updatedAt: new Date() })
           .where(and(eq(sessions.id, s.id), isNull(sessions.archivedAt)))
           .returning({ id: sessions.id });
+        if (updated) await teardownRemoteWorker(s);
         return Boolean(updated);
       })
       .exhaustive();

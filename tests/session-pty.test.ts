@@ -1,23 +1,20 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { setupTestDb, tmp } from "./db-harness.ts";
 
-process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
 // Isolate the tmux socket so we never create/kill sessions on the operator's
 // shared "powdermonkey" socket (these ids start at 1 and could collide).
 process.env.PM_TMUX_SOCKET = `pm-test-${process.pid}`;
 // A short idle window so the test doesn't sit around; we don't assert on it.
 process.env.PM_SESSION_IDLE_MS = "100";
 
-const { ready } = await import("../src/server/db.ts");
+const { ready } = await setupTestDb();
 const { startSessionPty, attachSessionPty, killSessionPty, hasSessionPty } = await import(
   "../src/server/session-pty.ts"
 );
 
 await ready();
 
-const repoDir = mkdtempSync(join(tmpdir(), "pm-repo-"));
+const repoDir = tmp("pm-repo-");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Bring up a durable plain-shell session and wait until it's live. */

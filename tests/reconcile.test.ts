@@ -1,41 +1,29 @@
 import { beforeAll, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setupTestDb, tmp } from "./db-harness.ts";
 
-process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
-const repoDir = mkdtempSync(join(tmpdir(), "pm-repo-"));
+const repoDir = tmp("pm-repo-");
 process.env.PM_REPO_DIR = repoDir;
 process.env.PM_MAIN_BRANCH = "main";
-process.env.PM_WORKTREE_DIR = join(mkdtempSync(join(tmpdir(), "pm-wt-")), "wt");
+process.env.PM_WORKTREE_DIR = join(tmp("pm-wt-"), "wt");
 // Isolate the tmux socket + skip launching a real `claude` so the local-session
 // teardown path (landSession) doesn't touch the operator's real sessions. See the
 // matching note in worktree.test.ts.
 process.env.PM_TMUX_SOCKET = `pm-test-${process.pid}`;
 process.env.PM_SESSION_CMD = "";
+// A remote exe.dev session's archive path tears down its worker VM — fabricate that
+// so reconcile never runs a real `ssh exe.dev rm`.
+process.env.PM_EXE_DRY_RUN = "1";
 
-const { ready } = await import("../src/server/db.ts");
+const { ready } = await setupTestDb();
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
 const { taskRepo, phaseRepo, sessionRepo } = await import("../src/server/crud.ts");
 const { reconcile } = await import("../src/server/reconcile.ts");
 const { startLocalSession } = await import("../src/server/worktree.ts");
 const { linkSessionTasks } = await import("../src/server/session-tasks.ts");
 
-async function git(...args: string[]): Promise<void> {
-  const proc = Bun.spawn(["git", ...args], {
-    cwd: repoDir,
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "t",
-      GIT_AUTHOR_EMAIL: "t@t",
-      GIT_COMMITTER_NAME: "t",
-      GIT_COMMITTER_EMAIL: "t@t",
-    },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  await proc.exited;
-}
+import { git as runGit } from "./git-helper.ts";
+const git = (...args: string[]) => runGit(repoDir, ...args);
 
 beforeAll(async () => {
   await ready();
@@ -177,4 +165,38 @@ test("merging a task archives its live sessions; non-merged tasks are untouched"
   // Idempotent: a second tick finds nothing left to archive.
   const again = await reconcile();
   expect(again.sessionsArchived).toBe(0);
+});
+
+test("a cancelled task's exe.dev worker session is archived (and torn down)", async () => {
+  await loadPlan(
+    parsePlan({
+      goals: [
+        {
+          title: "Cancel",
+          milestones: [{ title: "m", tasks: [{ title: "to-cancel", phases: [{ name: "x" }] }] }],
+        },
+      ],
+    }),
+  );
+  const task = (await taskRepo.list()).find((t) => t.title === "to-cancel");
+  if (!task) throw new Error("seed failed");
+
+  // A remote exe.dev session (carries a vmName) whose sole task will be cancelled.
+  const session = await sessionRepo.create({
+    kind: "remote",
+    state: "running",
+    url: "https://pm-x-1-42.exe.xyz:3456/",
+    vmName: "pm-x-1-42",
+  });
+  await linkSessionTasks(session.id, [task.id]);
+
+  // Cancel the task (soft-delete + terminal status), as cancelTask does.
+  await taskRepo.update(task.id, { status: "cancelled", archivedAt: new Date() });
+
+  // Reconcile closes the session even though nothing merged — cancellation is terminal.
+  const result = await reconcile();
+  expect(result.sessionsArchived).toBe(1);
+  const archived = await sessionRepo.get(session.id);
+  expect(archived?.archivedAt).not.toBeNull();
+  expect(archived?.state).toBe("idle");
 });

@@ -1,14 +1,13 @@
 import { beforeAll, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { setupTestDb } from "./db-harness.ts";
 
 // Isolate the store before importing anything that opens the DB.
-process.env.PM_DATA_DIR = join(mkdtempSync(join(tmpdir(), "pm-")), "pg");
 
-const { ready } = await import("../src/server/db.ts");
+const { ready } = await setupTestDb();
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
-const { goalRepo, milestoneRepo, taskRepo, phaseRepo } = await import("../src/server/crud.ts");
+const { goalRepo, milestoneRepo, taskRepo, phaseRepo, repoRepo } = await import(
+  "../src/server/crud.ts"
+);
 
 beforeAll(async () => {
   await ready();
@@ -49,6 +48,44 @@ test("nested plan loads and wires foreign keys, assigning int ids", async () => 
   expect(phases.every((p) => p.status === "todo")).toBe(true);
 });
 
+test("plan loader cascades the default repo: milestone overrides goal, task overrides both", async () => {
+  const goalRepoRow = await repoRepo.create({ slug: "o/goal", owner: "o", name: "goal" });
+  const msRepoRow = await repoRepo.create({ slug: "o/ms", owner: "o", name: "ms" });
+  const taskRepoRow = await repoRepo.create({ slug: "o/task", owner: "o", name: "task" });
+
+  await loadPlan(
+    parsePlan({
+      goals: [
+        {
+          title: "cascade goal",
+          repoId: goalRepoRow.id,
+          milestones: [
+            // No milestone repo → tasks inherit the goal's.
+            { title: "inherits goal", tasks: [{ title: "a" }] },
+            // Milestone repo overrides the goal for its tasks, but an explicit
+            // task.repoId still wins.
+            {
+              title: "overrides goal",
+              repoId: msRepoRow.id,
+              tasks: [{ title: "b" }, { title: "c", repoId: taskRepoRow.id }],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+
+  const byTitle = Object.fromEntries((await taskRepo.list()).map((t) => [t.title, t]));
+  expect(byTitle.a.repoId).toBe(goalRepoRow.id); // inherited from the goal
+  expect(byTitle.b.repoId).toBe(msRepoRow.id); // milestone overrides the goal
+  expect(byTitle.c.repoId).toBe(taskRepoRow.id); // explicit task repo wins
+
+  const ms = await milestoneRepo.list();
+  expect(ms.find((m) => m.title === "overrides goal")?.repoId).toBe(msRepoRow.id);
+  const goal = (await goalRepo.list()).find((g) => g.title === "cascade goal");
+  expect(goal?.repoId).toBe(goalRepoRow.id);
+});
+
 test("CRUD: create, update, get", async () => {
   const goal = await goalRepo.create({ title: "G2" });
   expect(goal.id).toBeGreaterThan(0);
@@ -75,4 +112,45 @@ test("soft delete: archive hides from list, get still finds it, restore brings i
   const restored = await goalRepo.restore(goal.id);
   expect(restored?.archivedAt).toBeNull();
   expect((await goalRepo.list()).some((g) => g.id === goal.id)).toBe(true);
+});
+
+test("plan loader carries kind + description through; omitted → plain task, no description", async () => {
+  await loadPlan(
+    parsePlan({
+      goals: [
+        {
+          title: "kinds goal",
+          milestones: [
+            {
+              title: "kinds ms",
+              tasks: [
+                { title: "why is it slow", kind: "spike", description: "profile before guessing" },
+                { title: "just work" },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const tasks = await taskRepo.list();
+  const spike = tasks.find((t) => t.title === "why is it slow");
+  expect(spike?.kind).toBe("spike");
+  expect(spike?.description).toBe("profile before guessing");
+  const plain = tasks.find((t) => t.title === "just work");
+  expect(plain?.kind).toBe("task");
+  expect(plain?.description).toBeNull();
+});
+
+test("plan parse rejects a kind outside task|bug|spike", () => {
+  expect(() =>
+    parsePlan({
+      goals: [
+        {
+          title: "g",
+          milestones: [{ title: "m", tasks: [{ title: "t", kind: "chore" }] }],
+        },
+      ],
+    }),
+  ).toThrow();
 });

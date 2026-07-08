@@ -1,7 +1,7 @@
 import "@mantine/core/styles.css";
 // Fira Code (variable) — the app's monospace face, loaded once so both the Mantine
 // `fontFamilyMonospace` token (theme.ts) and the xterm terminals can use it.
-import "@fontsource-variable/fira-code";
+import "@fontsource-variable/fira-code/index.css";
 // Import dockview's stylesheet here, before theme.css, so our abyss-variable
 // overrides in theme.css come last in the bundle and win. (App.tsx also imports
 // it, but the module-graph position is fixed by this first occurrence.)
@@ -13,13 +13,21 @@ import { useLayoutEffect, useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App.tsx";
 import { applyFontScale, densityOption } from "./appearance.ts";
+import { ConfirmHost } from "./confirm.tsx";
 import { applyMotionVars } from "./motion.ts";
 import { useStore } from "./store.ts";
 import { buildTheme } from "./theme.ts";
 import { applyThemeVars, getTheme } from "./themes.ts";
+import { bootWindow } from "./window-bridge.ts";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");
+
+// Bind this webview to its PM window (from the `#w=<id>` hash, else adopt/mint) before
+// the first render, so the dock restores the right window's layout on onReady. Each
+// native window / browser tab is one PM window; the registry is shared, activeWindowId
+// is this webview's alone. See docs/windows.md.
+bootWindow();
 
 // Wraps the app so the active code-editor theme (store state, persisted) drives the
 // Mantine theme. Rebuilds the theme and re-applies the `--pm-*` document variables
@@ -52,6 +60,9 @@ function ThemedRoot() {
   return (
     <MantineProvider forceColorScheme={editor.scheme} theme={mantineTheme}>
       <App />
+      {/* One in-app confirm() modal host for the whole app — a cross-env stand-in
+          for window.confirm, which no-ops in the Tauri desktop webview. */}
+      <ConfirmHost />
     </MantineProvider>
   );
 }

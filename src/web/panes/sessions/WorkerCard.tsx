@@ -3,24 +3,18 @@ import { IconExternalLink } from "@tabler/icons-react";
 import type { Session, Task } from "../../../server/schema.ts";
 import { Markdown } from "../../markdown.tsx";
 import type { Indexes } from "../../plan-data.ts";
-import { KIND_ICON, PrRow, SessionActions, SessionStateBadge } from "../../plan-ui";
+import {
+  KIND_ICON,
+  PrRow,
+  RepoBadge,
+  SessionActions,
+  SessionStateBadge,
+  useRepo,
+} from "../../plan-ui";
+import { timeAgo } from "../../time.ts";
 import { ColumnLabel } from "./ColumnLabel.tsx";
-import { TaskLine } from "./TaskLine.tsx";
 import { contextOf, workerPrs } from "./grouping.ts";
-
-/** Compact relative time ("5m ago") for the agent-comment stamp. Null on bad input. */
-function timeAgo(iso: string | null): string | null {
-  if (!iso) return null;
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return null;
-  const s = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (s < 60) return `${s}s ago`;
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.round(h / 24)}d ago`;
-}
+import { TaskLine } from "./TaskLine.tsx";
 
 /** One worker = one card. The header holds everything session-level (kind · state ·
  *  shared context · session link · Teleport · Stop); the task(s) the worker is
@@ -46,6 +40,9 @@ export function WorkerCard({
   // The PR carrying the agent's freshest comment (usually the worker has one PR).
   const commentPr = prs.find((p) => p.lastComment);
   const KindIcon = KIND_ICON[session.kind];
+  // The repo this worker runs against — one session = one repo, so any task's
+  // pinned repo is THE repo. Undefined for repo-less (pre-registry) tasks.
+  const repo = useRepo(tasks[0]?.repoId);
   // A historical session (landed / stopped / teleported) is archived: its state badge
   // is the outcome, and the live-only controls (Shell/VS Code/Teleport/Stop) no longer
   // apply, so they drop off. The card still shows its tasks, PRs and final agent status.
@@ -57,6 +54,7 @@ export function WorkerCard({
         <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
           <KindIcon size={15} title={session.kind} style={{ flexShrink: 0 }} />
           <SessionStateBadge session={session} />
+          {repo && <RepoBadge repo={repo} />}
           {sharedContext && (
             <Text size="xs" c="dimmed" truncate>
               {sharedContext}

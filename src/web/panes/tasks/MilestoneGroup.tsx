@@ -4,21 +4,20 @@ import { CSS } from "@dnd-kit/utilities";
 import { Button, Group, Stack, Title } from "@mantine/core";
 import { useState } from "react";
 import type { Milestone, Task } from "../../../server/schema.ts";
-import { Decision, ProposalOp, VocabKind } from "../../../shared/types.ts";
-import { type EntityEdit, type GroupedGhosts, editLabel, entityKey } from "../../ghosts.ts";
-import type { Indexes } from "../../plan-data.ts";
+import { VocabKind } from "../../../shared/types.ts";
+import { type EntityEdit, entityKey, type GroupedGhosts } from "../../ghosts.ts";
 import { IdTag } from "../../plan-ui";
 import { useStore } from "../../store.ts";
 import { BacklogCard } from "./BacklogCard.tsx";
 import { CardEditor } from "./CardEditor.tsx";
 import { Caret } from "./Caret.tsx";
+import { DecideControls } from "./DecideControls.tsx";
 import { DragHandle } from "./DragHandle.tsx";
-import { ProposedStrip } from "./ProposedStrip.tsx";
-import { SortableCard } from "./SortableCard.tsx";
 import { useReveal } from "./new-task.ts";
-import { type Reorder, cId, mId, tId } from "./reorder.ts";
-import type { Selection } from "./types.ts";
-import { useDecide } from "./useDecide.ts";
+import { headerPreview, previewTaskOrder } from "./preview.ts";
+import { Rename } from "./Rename.tsx";
+import { cId, mId, tId } from "./reorder.ts";
+import { SortableCard } from "./SortableCard.tsx";
 
 /** A milestone and its backlog cards. The header drag-handle reorders the milestone within
  *  its goal; each card drags to reorder within the milestone or move to another. Pending
@@ -30,25 +29,18 @@ import { useDecide } from "./useDecide.ts";
 export function MilestoneGroup({
   milestone,
   tasks,
-  idx,
-  selection,
   ghosts,
   edits,
-  reorder,
 }: {
   milestone: Milestone;
   tasks: Task[];
-  idx: Indexes;
-  selection: Selection;
   ghosts: GroupedGhosts;
   edits: Map<string, EntityEdit[]>;
-  reorder: Reorder;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [adding, setAdding] = useState(false);
   const { createTaskWithPhases } = useStore();
   const requestReveal = useReveal((s) => s.requestReveal);
-  const { busy, decide } = useDecide();
   // The milestone is itself sortable within its goal's SortableContext (see GoalGroup).
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: mId(milestone.id),
@@ -58,8 +50,14 @@ export function MilestoneGroup({
   // no backlog cards.
   const { setNodeRef: dropRef, isOver } = useDroppable({ id: cId(milestone.id) });
   const milestoneEdits = edits.get(entityKey(VocabKind.Milestone, milestone.id)) ?? [];
-  const archiveProposed = milestoneEdits.some((e) => e.op === ProposalOp.Archive);
+  // The milestone header as it WILL be: title rename old → new, a proposed delete striking
+  // it — with the milestone-level changes decided in place.
+  const preview = headerPreview({ title: milestone.title }, milestoneEdits);
+  const archiveProposed = preview.archived;
   const taskGhosts = ghosts.tasksByMilestone.get(milestone.id) ?? [];
+  // A pending reorder shows the card at its NEW spot: overlay the proposed positions onto
+  // the live task order so a to-be-moved card renders where it would land.
+  const orderedTasks = previewTaskOrder(tasks, milestone.id, edits);
 
   return (
     <Stack
@@ -85,23 +83,22 @@ export function MilestoneGroup({
           c={archiveProposed ? "dimmed" : undefined}
           td={archiveProposed ? "line-through" : undefined}
         >
-          {milestone.title}
+          {!archiveProposed && preview.title.changed ? (
+            <Rename before={preview.title.before} after={preview.title.after} />
+          ) : (
+            milestone.title
+          )}
         </Title>
       </Group>
-      {milestoneEdits.map((e) => (
-        <ProposedStrip
-          key={`p${e.proposalId}-${e.changeIndex}`}
-          label={editLabel(e)}
-          hint={`From proposal P${e.proposalId}: ${e.proposalTitle}`}
-          busy={busy}
-          onAccept={() => decide(e.proposalId, e.changeIndex, Decision.Accept)}
-          onReject={() => decide(e.proposalId, e.changeIndex, Decision.Reject)}
-        />
-      ))}
+      {preview.changes.length > 0 && (
+        <Group>
+          <DecideControls changes={preview.changes} showConflict />
+        </Group>
+      )}
       {!collapsed && (
         <Stack gap="xs">
           <SortableContext
-            items={tasks.map((t) => tId(t.id))}
+            items={orderedTasks.map((t) => tId(t.id))}
             strategy={verticalListSortingStrategy}
           >
             <Stack
@@ -113,22 +110,9 @@ export function MilestoneGroup({
                 outline: isOver ? "1px dashed var(--pm-accent)" : undefined,
               }}
             >
-              {tasks.map((t) => {
-                const taskPhases = idx.phasesByTask.get(t.id) ?? [];
-                return (
-                  <SortableCard
-                    key={t.id}
-                    task={t}
-                    phases={taskPhases}
-                    selection={selection}
-                    edits={edits.get(entityKey(VocabKind.Task, t.id))}
-                    phaseGhosts={ghosts.phasesByTask.get(t.id)}
-                    phaseEdits={taskPhases.flatMap(
-                      (p) => edits.get(entityKey(VocabKind.Phase, p.id)) ?? [],
-                    )}
-                  />
-                );
-              })}
+              {orderedTasks.map((t) => (
+                <SortableCard key={t.id} task={t} />
+              ))}
             </Stack>
           </SortableContext>
           {taskGhosts.map((g) => (
@@ -136,8 +120,11 @@ export function MilestoneGroup({
           ))}
           {adding ? (
             <CardEditor
-              onCreate={async (title, names) => {
-                const id = await createTaskWithPhases(milestone.id, title, names, tasks.length);
+              onCreate={async (title, names, kind, description) => {
+                const id = await createTaskWithPhases(milestone.id, title, names, tasks.length, {
+                  kind,
+                  description: description ?? undefined,
+                });
                 // Only a task YOU just added here earns an auto-scroll-into-view.
                 if (id != null) requestReveal(id);
               }}

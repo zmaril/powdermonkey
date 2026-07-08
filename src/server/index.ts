@@ -2,9 +2,12 @@
 // thing that talks to the cloud.
 
 import { app } from "./app.ts";
+import { startAutosync } from "./backup-sync.ts";
 import { ready } from "./db.ts";
+import { gcOrphanedWorkers } from "./exe-dev.ts";
 import { startGithubWatch } from "./github-watch.ts";
 import { reconcile } from "./reconcile.ts";
+import { seedSupervisorRepo } from "./seed.ts";
 import { startSupervisorPty } from "./session-pty.ts";
 import { loadSettings } from "./settings.ts";
 
@@ -14,6 +17,15 @@ await ready();
 // Load persisted operator settings (e.g. autoRebase) into the in-memory cache the
 // watcher reads, so a toggle made before a restart is honored on boot.
 await loadSettings();
+
+// Upgrade path: make sure the supervisor's own repo is in the flat repo registry.
+// Idempotent (find-or-create by slug), and non-fatal — a `gh` hiccup must never
+// keep the supervisor from coming up.
+try {
+  await seedSupervisorRepo();
+} catch (e) {
+  console.warn("repo seed skipped:", e instanceof Error ? e.message : e);
+}
 
 // Bind the preferred port, but never crash if it's already taken — another
 // instance (a teleported worker, or just a second copy) may already hold it.
@@ -70,6 +82,31 @@ if (RECONCILE_MS > 0) {
       running = false;
     }
   }, RECONCILE_MS);
+}
+
+// Autosync: on every store write, produce a snapshot and land it on the durable
+// backup branch (debounced/batched, off the write path). No-op until the operator
+// turns it on (settings.syncMode); safe to start unconditionally.
+startAutosync();
+
+// Garbage-collect leaked exe.dev worker VMs on a slow loop — a safety net for any
+// teardown the land/stop/reconcile paths miss. Runs far less often than reconcile
+// (an `ssh exe.dev ls` per tick) and no-ops unless exe.dev has been used. Disable
+// with PM_EXE_GC_INTERVAL_MS=0.
+const EXE_GC_MS = Number(process.env.PM_EXE_GC_INTERVAL_MS ?? 300_000);
+if (EXE_GC_MS > 0) {
+  let gcRunning = false;
+  setInterval(async () => {
+    if (gcRunning) return;
+    gcRunning = true;
+    try {
+      await gcOrphanedWorkers();
+    } catch (e) {
+      console.warn("exe.dev gc tick failed:", e instanceof Error ? e.message : e);
+    } finally {
+      gcRunning = false;
+    }
+  }, EXE_GC_MS);
 }
 
 // Watch GitHub for cloud workers' PRs (pm/task-*): one poll loop fans out events

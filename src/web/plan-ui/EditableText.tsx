@@ -1,4 +1,4 @@
-import { Text, TextInput, Textarea } from "@mantine/core";
+import { Text, Textarea, TextInput } from "@mantine/core";
 import { useState } from "react";
 
 /** Click-to-edit text: shows the value, becomes an input on click, commits on Enter or

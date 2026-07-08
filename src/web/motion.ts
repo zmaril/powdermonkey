@@ -2,7 +2,7 @@
 // density / font. ALL animation in the app is defined in one place — motion.css for the
 // CSS (transitions, keyframes) and this file for the durations/easing — and keyed off a
 // single setting so it can be softened or switched off entirely. Components never write
-// ad-hoc transitions; that's enforced by scripts/lint-motion.ts.
+// ad-hoc transitions; that.s enforced by straitjacket (motion rule).
 //
 // How the setting reaches everything:
 //   • Our own transitions/keyframes (motion.css) read the `--pm-dur-*` variables this
@@ -20,7 +20,7 @@ const BASE = { fast: 120, base: 200, slow: 300, pulse: 1600 };
 export const MOTION: MotionOption[] = [
   { key: "full", label: "Full", factor: 1 },
   { key: "subtle", label: "Subtle", factor: 0.6 },
-  { key: "off", label: "Off", factor: 0 },
+  { key: "off", label: "Off", factor: 0 }, // lint-allow-string: motion preference key, not SyncMode.Off
 ];
 
 export const DEFAULT_MOTION = "full";

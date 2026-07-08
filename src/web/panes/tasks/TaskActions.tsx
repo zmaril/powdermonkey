@@ -1,7 +1,8 @@
-import { Button, Group } from "@mantine/core";
+import { Button, Group, Tooltip } from "@mantine/core";
 import { IconCloud, IconDeviceLaptop, IconPlayerPlayFilled } from "@tabler/icons-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { SessionKind } from "../../../shared/types.ts";
+import { confirm } from "../../confirm.tsx";
 import { useStore } from "../../store.ts";
 import { LaunchButton } from "./LaunchButton.tsx";
 
@@ -22,14 +23,25 @@ const REMOTE_ICON = (
 /** The shared action cluster for a backlog task (or a whole multi-selection): launch
  *  local (laptop) / remote (cloud) — each with an optional run note — or close it
  *  (DONE / WONTDO). Works on one or many ids — the solo card passes `[task.id]`, the
- *  batch bar passes the selection. `onDone` clears the selection after an action. */
-export function TaskActions({ ids, onDone }: { ids: number[]; onDone?: () => void }) {
+ *  batch bar passes the selection. `onDone` clears the selection after an action.
+ *  `blockedReason`, when set, disables the two launch buttons (the selection can't run
+ *  as one session — e.g. it spans repos); closing (DONE/WONTDO) stays available. */
+export function TaskActions({
+  ids,
+  onDone,
+  blockedReason,
+}: {
+  ids: number[];
+  onDone?: () => void;
+  blockedReason?: string;
+}) {
   const { startLocalMany, dispatchMany, completeTask, cancelTask } = useStore();
   const [running, setRunning] = useState<SessionKind | null>(null);
   const busy = running !== null;
+  const launchBlocked = blockedReason != null;
 
   const launch = async (kind: SessionKind, comment: string) => {
-    if (busy || ids.length === 0) return;
+    if (busy || launchBlocked || ids.length === 0) return;
     setRunning(kind);
     try {
       if (kind === SessionKind.Local) await startLocalMany(ids, comment);
@@ -43,34 +55,56 @@ export function TaskActions({ ids, onDone }: { ids: number[]; onDone?: () => voi
     for (const id of ids) completeTask(id);
     onDone?.();
   };
-  const wontDo = () => {
+  const wontDo = async () => {
     const msg =
       ids.length > 1
         ? `Close ${ids.length} tasks as won't-do? They move to the archive as cancelled.`
         : "Close this task as won't-do? It moves to the archive as cancelled.";
-    if (window.confirm(msg)) {
+    if (
+      await confirm({
+        message: msg,
+        title: "Close as won't-do",
+        confirmLabel: "Close as won't-do",
+        danger: true,
+      })
+    ) {
       for (const id of ids) cancelTask(id);
       onDone?.();
     }
   };
 
+  // Wrap the launch pair so a disabled button still surfaces WHY on hover (a bare
+  // disabled button eats pointer events, so the tooltip goes on the wrapper).
+  const withReason = (node: ReactNode) =>
+    launchBlocked ? (
+      <Tooltip label={blockedReason} multiline w={260} withArrow>
+        <span>{node}</span>
+      </Tooltip>
+    ) : (
+      node
+    );
+
   return (
     <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-      <LaunchButton
-        icon={LOCAL_ICON}
-        label="Start local"
-        loading={running === SessionKind.Local}
-        disabled={busy}
-        onRun={(c) => launch(SessionKind.Local, c)}
-      />
-      <LaunchButton
-        icon={REMOTE_ICON}
-        label="Dispatch remote"
-        color="cyan"
-        loading={running === SessionKind.Remote}
-        disabled={busy}
-        onRun={(c) => launch(SessionKind.Remote, c)}
-      />
+      {withReason(
+        <LaunchButton
+          icon={LOCAL_ICON}
+          label="Start local"
+          loading={running === SessionKind.Local}
+          disabled={busy || launchBlocked}
+          onRun={(c) => launch(SessionKind.Local, c)}
+        />,
+      )}
+      {withReason(
+        <LaunchButton
+          icon={REMOTE_ICON}
+          label="Dispatch remote"
+          color="cyan"
+          loading={running === SessionKind.Remote}
+          disabled={busy || launchBlocked}
+          onRun={(c) => launch(SessionKind.Remote, c)}
+        />,
+      )}
       <Button
         size="compact-xs"
         variant="light"

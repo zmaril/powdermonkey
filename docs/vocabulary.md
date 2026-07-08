@@ -49,6 +49,25 @@ A coherent grouping of tasks toward a goal — a checkpoint, an area, a chapter.
 ### Task
 A unit of dispatchable work. **Targets exactly one Repo** — its environment. Id chip `t`.
 
+**Kind (`task` | `bug` | `spike`).** What flavour of work it is — purely descriptive
+(it colors the card and sets authoring expectations), never behaviour: dispatch,
+reconciliation, and progress are identical across kinds.
+
+- **task** — the default: planned, build-shaped work.
+- **bug** — something is wrong and needs fixing.
+- **spike** — a timeboxed investigation whose deliverable is understanding.
+
+Kinds deliberately do **not** template phases. Bugs and spikes are **discovery-first**:
+what the work actually is emerges from doing it, so it can't be pre-canned into a
+checklist at authoring time. Such a task usually starts with **few or no phases** and
+accrues them — hand-authored, or co-pilot-proposed — as the work is understood. (This is
+also why a worker's follow-up hand-back is authored as a phase-less `bug`.)
+
+**Description vs. phases.** A task may carry a free-form **description** — the *context*:
+why it exists, what's known, where it was seen. Phases stay **pure work** — discrete,
+completable steps, the grain progress is measured at. Narrative goes in the description,
+never smuggled into phase names; a phase you can't complete isn't a phase.
+
 A task **inherits its default repo(s)** from its milestone, else its goal — so a goal
 scoped to a repo group pre-fills every task under it. Authoring still offers a
 **multi-select repo picker** (pre-filled from the inherited default, freely overridden):
@@ -60,6 +79,19 @@ three times.
 ### Phase
 An author-defined sub-step within a Task. **The grain at which progress is measured**
 (reconciliation marks phases done from `PM-Phase:` commit trailers on `main`). Id chip `#`.
+**Pure work only**: a phase is a discrete, completable step — context and narrative belong
+in the task's description. Discovery-first tasks (bugs, spikes) legitimately start with
+none and gain phases as the work is understood.
+
+### Task comment
+A one-liner muttered onto a Task — the task's **diary**. Typed straight into the card
+(Enter appends, auto-timestamped); after capture a line is an ordinary row — click it to
+edit in place (fix the typo), × to archive it (the soft delete every entity uses). Two
+voices, recorded in `author`: the **operator** (the card's composer) and the
+**supervisor** (via the API, rendered with the robot glyph). Comments are capture, not
+documentation — no title, no fields, no formatting — and they never affect progress. The
+supervisor reads a task's diary as intent/mood context ("operator was unsure here")
+before authoring proposals about it.
 
 ### Repo
 A **GitHub git repo** (`owner/repo`, a default branch), in a **flat global list** you
@@ -83,12 +115,14 @@ scannable at a glance:
 - **Color** — a stable hue hashed from the slug, resolved to a swatch in the *active*
   theme's palette (re-skins on theme change, never clashes). Stored as a seed on the repo
   row; operator-overridable.
-- **Icon** — resolved once on registration: try the repo's homepage favicon
-  (`gh repo view --json homepageUrl` → `/favicon.ico`), else the owner avatar
-  (`https://github.com/<owner>.png`, always available). Cached under
-  `~/.powdermonkey/repos/<slug>/icon.png`, served at `/repos/:id/icon`.
+- **Icon** — resolved once per repo, lazily on the first icon request: try the repo's
+  homepage favicon (`gh repo view --json homepageUrl` → `/favicon.ico`), else the owner
+  avatar (`https://github.com/<owner>.png`, always available). Cached under
+  `~/.powdermonkey/repos/.icons/<owner>/<name>.png` — next to the cache clones, not
+  inside them, so a pre-clone icon never makes `git clone` fail on a non-empty dir —
+  and served at `/repos/:id/icon`.
 
-Task cards, session panes, and the Windows rail all render a repo's color + icon.
+Task cards, session panes, and a window's repo tab strip all render a repo's color + icon.
 
 ### Session
 One run of work, independent of the hierarchy: `local` (a git worktree) or `remote`
@@ -174,7 +208,9 @@ milestone, `t41` a task, `#137` a phase, `r4` a repo.
 4. **Windows are Firefox windows, not Layouts.** A *Layout* implies a re-applyable template;
    people rarely want templates. A window is a live, disposable view you keep only as long
    as it's useful, and it bundles both its panel arrangement **and** which repos it shows.
-   Session-restored, usually unnamed, lives in an always-open left rail.
+   Session-restored and usually unnamed. Each window is a **real native OS window**
+   (`Cmd/Ctrl-N` opens another) — not an in-app view swapped from a rail; see
+   [windows.md](windows.md).
 
 5. **Cloud-first repos.** A repo is its GitHub identity (`owner/repo`), not a local checkout.
    PowderMonkey keeps only transient cache clones under `~/.powdermonkey/`, cloned on demand

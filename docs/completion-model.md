@@ -1,3 +1,4 @@
+<!-- straitjacket-allow-file:emoji  documents the app's per-source completion glyphs (✓ reconciled, ✋ by hand, 🤖 supervisor) -->
 # Non-reconciled completion
 
 ## The problem

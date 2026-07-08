@@ -6,7 +6,11 @@ export function Caret({
   collapsed,
   onToggle,
   label,
-}: { collapsed: boolean; onToggle: () => void; label: string }) {
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+  label: string;
+}) {
   return (
     <UnstyledButton onClick={onToggle} title={label} style={{ lineHeight: 1, flexShrink: 0 }}>
       <Text

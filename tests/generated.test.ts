@@ -1,9 +1,5 @@
 import { expect, test } from "bun:test";
-import {
-  classifyFile,
-  gitignoreMatch,
-  parseGitattributes,
-} from "../src/server/generated.ts";
+import { classifyFile, gitignoreMatch, parseGitattributes } from "../src/server/generated.ts";
 
 // The ruleset behind auto-collapsing generated/vendored files in the review pane.
 // These pin the conditions GitHub uses (lockfiles, vendored dirs, minified, source

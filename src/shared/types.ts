@@ -46,6 +46,16 @@ export const OverrideSource = {
 } as const;
 export type OverrideSource = ValueOf<typeof OverrideSource>;
 
+/** Who wrote a task-comment line: the operator (the UI's one-line composer) or the
+ *  supervisor agent (through the API, e.g. leaving context on a task it's watching).
+ *  The same two human-driven voices as OverrideSource — `reconciled` is a decision
+ *  provenance, not a speaker, so it can't author a comment. */
+export const CommentAuthor = {
+  Operator: DecisionSource.Operator,
+  Supervisor: DecisionSource.Supervisor,
+} as const;
+export type CommentAuthor = ValueOf<typeof CommentAuthor>;
+
 /**
  * A task's lifecycle. `Pending`/`Dispatched`/`Merged` are the happy path;
  * `Cancelled` is the won't-do terminal state — the task is closed without being
@@ -59,6 +69,23 @@ export const TaskStatus = {
   Cancelled: "cancelled",
 } as const;
 export type TaskStatus = ValueOf<typeof TaskStatus>;
+
+/**
+ * What flavour of work a task is. Purely descriptive — it colors the card and sets
+ * authoring expectations, never behaviour (dispatch, reconciliation, and progress
+ * are identical across kinds):
+ *
+ * - `Task` — the default: planned, build-shaped work.
+ * - `Bug` — something is wrong and needs fixing. Discovery-first.
+ * - `Spike` — a timeboxed investigation whose deliverable is understanding.
+ *
+ * Kinds deliberately do NOT template phases: discovery-first work (a bug, a spike)
+ * can't be pre-canned — such a task usually starts with few or no phases and
+ * accrues them (hand-authored or co-pilot-proposed) as the work is understood.
+ * See docs/vocabulary.md § Task.
+ */
+export const TaskKind = { Task: "task", Bug: "bug", Spike: "spike" } as const;
+export type TaskKind = ValueOf<typeof TaskKind>;
 
 /**
  * Runtime state of a `claude --remote` session.
@@ -78,6 +105,22 @@ export type SessionState = ValueOf<typeof SessionState>;
 /** Where a session executes: a local git worktree, or a cloud `claude --remote` run. */
 export const SessionKind = { Local: "local", Remote: "remote" } as const;
 export type SessionKind = ValueOf<typeof SessionKind>;
+
+/** Where autosync lands each snapshot (see docs/backups.md, backup-sync.ts):
+ *  `off` — disabled; `local` — commit to a durable local branch only; `push` —
+ *  commit locally AND push that one branch to origin. Not a PR per change. */
+export const SyncMode = { Off: "off", Local: "local", Push: "push" } as const;
+export type SyncMode = ValueOf<typeof SyncMode>;
+
+/**
+ * Which backend a cloud ("Dispatch remote") launch uses. `ClaudeRemote` is a
+ * `claude --remote` run in Anthropic's cloud; `ExeDev` provisions a per-task VM on
+ * exe.dev (copy an authed template → clone the repo → run claude in tmux, exposed
+ * over ttyd). Chosen in Settings and read by `dispatchTask`; both produce a
+ * `SessionKind.Remote` session (the exe.dev one also carries a `vmName` for teardown).
+ */
+export const DispatchBackend = { ClaudeRemote: "claude-remote", ExeDev: "exe-dev" } as const;
+export type DispatchBackend = ValueOf<typeof DispatchBackend>;
 
 // GitHub PR state, bounded to the values GitHub's GraphQL actually returns. Same
 // const-object-is-the-source-of-truth shape as the status enums above, so the rest

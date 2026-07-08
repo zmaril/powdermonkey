@@ -1,0 +1,6 @@
+logo = "src-tauri/icons/icon.png"  # fleet dashboard logo
+fleet = "zmaril/powderworks"
+
+[checks]
+# firetheslopcannon.com isn't live yet — flip to "required" when it is
+website = "off"

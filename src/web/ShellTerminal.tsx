@@ -2,19 +2,23 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useRef } from "react";
+import { type RefObject, useEffect, useRef } from "react";
 import { fontScaleOption } from "./appearance.ts";
+import { GithubRefLinkProvider } from "./github-links.ts";
+import { openExternal } from "./open-external.ts";
 import { PmIdDecorator } from "./pm-id-decorate.ts";
 import { PmIdLinkProvider } from "./pm-id-links.ts";
 import { apiUrl, wsUrl } from "./server.ts";
 import { useActiveTheme, useStore } from "./store.ts";
+import { useTerminalRepoSlug } from "./terminal-repo.ts";
+import { MONO } from "./theme.ts";
+import type { EditorTheme } from "./themes.ts";
 
 // The accent colour (a #RRGGBB hex) the PM-id links are tinted with — the same accent the
 // cursor uses. xterm decorations only accept #RRGGBB, which the palette tuples already are.
 function accentHex(t: EditorTheme): string {
   return t.accent[t.primaryShade];
 }
-import type { EditorTheme } from "./themes.ts";
 
 // The xterm theme for an editor palette. Crucially sets `foreground` (the palette's
 // primary text) — xterm defaults it to white, which renders white-on-white on the light
@@ -30,35 +34,24 @@ function xtermThemeOf(t: EditorTheme) {
   };
 }
 
-// xterm.js wired to the /pty WebSocket. Server sends binary PTY output; we send
-// JSON input/resize frames back. Pass `session` to attach to a local session's
-// long-lived agent PTY; otherwise `cwd` opens a fresh shell at that path.
-//
-// `onEnded` fires when the server signals the attached session is gone for good
-// (landed/stopped/merged, or its agent exited) — a text "session-ended" control
-// frame, distinct from binary PTY output. The caller swaps in an end-state pane;
-// here we also print a clear line so a bare terminal never just goes silent.
-export function ShellTerminal({
-  cwd,
-  session,
-  onEnded,
-}: {
-  cwd?: string;
-  session?: number;
-  onEnded?: () => void;
-}) {
+// The whole xterm engine wired to the /pty WebSocket, as a hook so no effect lives in
+// the ShellTerminal component file. Returns the container ref to attach. Server sends
+// binary PTY output; we send JSON input/resize frames back. `session` attaches to a
+// local session's long-lived agent PTY; otherwise `cwd` opens a fresh shell there.
+// `onEnded` fires when the server signals the attached session is gone for good.
+export function useShellTerminal(
+  cwd: string | undefined,
+  session: number | undefined,
+  onEnded: (() => void) | undefined,
+): RefObject<HTMLDivElement | null> {
   const ref = useRef<HTMLDivElement>(null);
   // Keep the latest onEnded without re-running the socket effect on every render.
   const onEndedRef = useRef(onEnded);
   onEndedRef.current = onEnded;
   // The terminal follows the active editor theme. Build a full xterm theme — not just
-  // the background — so the shell stays readable in every theme: without an explicit
-  // `foreground`, xterm falls back to white, which renders white-on-white on the light
-  // themes (GitHub Light / VS Code Light have a white terminal background). Drive it
-  // off the palette's own tokens (primary text for the foreground, the accent for the
-  // cursor, the theme's selection wash) and read it through a ref so a theme change
-  // re-skins the live terminal (effect below) without re-running the socket effect —
-  // that owns the PTY WebSocket and must stay stable.
+  // the background — so the shell stays readable in every theme; read it through a ref
+  // so a theme change re-skins the live terminal (effect below) without re-running the
+  // socket effect — that owns the PTY WebSocket and must stay stable.
   const editor = useActiveTheme();
   const themeRef = useRef(xtermThemeOf(editor));
   themeRef.current = xtermThemeOf(editor);
@@ -67,6 +60,13 @@ export function ShellTerminal({
   const fontPx = Math.round(13 * fontScaleOption(useStore((s) => s.fontScale)).factor);
   const fontRef = useRef(fontPx);
   fontRef.current = fontPx;
+  // The terminal's repo context (owner/name), for resolving a bare issue ref (#n) in the
+  // GitHub-ref links below. Read through a ref so the provider always sees the latest slug — it may
+  // arrive after the socket effect runs (collections sync in) — without re-running that
+  // effect. Undefined for a supervisor/cwd shell with no session-pinned repo.
+  const repoSlug = useTerminalRepoSlug(session);
+  const repoSlugRef = useRef(repoSlug);
+  repoSlugRef.current = repoSlug;
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const decoRef = useRef<PmIdDecorator | null>(null);
@@ -77,7 +77,7 @@ export function ShellTerminal({
 
     const term = new Terminal({
       fontSize: fontRef.current,
-      fontFamily: '"Fira Code Variable", ui-monospace, SFMono-Regular, Menlo, monospace', // lint-allow-font: xterm renders to a canvas and needs a literal font stack, not a CSS var
+      fontFamily: MONO,
       lineHeight: 1.15,
       theme: themeRef.current,
       cursorBlink: true,
@@ -89,12 +89,12 @@ export function ShellTerminal({
     const fit = new FitAddon();
     fitRef.current = fit;
     term.loadAddon(fit);
-    // Detect URLs in the output and render them as clickable links. Clicking
-    // opens the URL in a new tab; noopener/noreferrer keeps the opened page
-    // from reaching back into this one.
+    // Detect URLs in the output and render them as clickable links. openExternal
+    // opens a new tab in the browser and hands off to the OS default browser in
+    // the desktop shell; either way the opened page can't reach back into this one.
     term.loadAddon(
       new WebLinksAddon((_ev, uri) => {
-        window.open(uri, "_blank", "noopener,noreferrer");
+        openExternal(uri);
       }),
     );
     // The PM-id counterpart to the URL links above: scan the same PTY output for
@@ -105,6 +105,19 @@ export function ShellTerminal({
       new PmIdLinkProvider(term, (kind, id) => {
         useStore.getState().revealEntity(kind, id);
       }),
+    );
+    // The GitHub-ref counterpart, over the same PTY output: an issue/PR ref (#n, owner/repo#n,
+    // or GH-n) → the github.com page. A bare ref resolves against this terminal's repo
+    // (repoSlugRef, read live so a late-synced slug still lands). Clicking hands off through
+    // openExternal — a new tab in the browser, the OS default browser in the desktop shell —
+    // exactly like the URL links above. Registered on every terminal, so a ref links whoever
+    // printed it.
+    const ghLinkProvider = term.registerLinkProvider(
+      new GithubRefLinkProvider(
+        term,
+        (url) => openExternal(url),
+        () => repoSlugRef.current,
+      ),
     );
     term.open(el);
     fit.fit();
@@ -213,6 +226,7 @@ export function ShellTerminal({
       decorator.dispose();
       decoRef.current = null;
       linkProvider.dispose();
+      ghLinkProvider.dispose();
       ro.disconnect();
       el.removeEventListener("dragover", onDragOver);
       el.removeEventListener("drop", onDrop);
@@ -238,5 +252,22 @@ export function ShellTerminal({
     fitRef.current?.fit();
   }, [fontPx]);
 
+  return ref;
+}
+
+// xterm.js wired to the /pty WebSocket. Pass `session` to attach to a local session's
+// long-lived agent PTY; otherwise `cwd` opens a fresh shell at that path. `onEnded`
+// fires when the server signals the attached session is gone for good. The whole
+// engine lives in useShellTerminal (effects belong in hook files).
+export function ShellTerminal({
+  cwd,
+  session,
+  onEnded,
+}: {
+  cwd?: string;
+  session?: number;
+  onEnded?: () => void;
+}) {
+  const ref = useShellTerminal(cwd, session, onEnded);
   return <div ref={ref} style={{ height: "100%", width: "100%" }} />;
 }

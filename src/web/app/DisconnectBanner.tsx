@@ -7,8 +7,8 @@ export function DisconnectBanner() {
         left: 0,
         right: 0,
         zIndex: 10000,
-        background: "#b54708", // lint-allow-color: fixed alert color — a disconnect warning must read the same in every theme
-        color: "#fff", // lint-allow-color: text on the fixed alert background
+        background: "var(--pm-alert-bg)",
+        color: "var(--pm-alert-text)",
         textAlign: "center",
         padding: "5px 10px",
         fontSize: "0.8125rem",
