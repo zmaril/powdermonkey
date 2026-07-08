@@ -215,7 +215,7 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
           if (compose) addDraft(body, compose.anchor, compose.path, compose.startLine);
         },
         onReply: (inReplyTo, body) => {
-          // A reply re-uses the parent's anchor only for the (unused) line/side; the
+          // A reply reuses the parent's anchor only for the (unused) line/side; the
           // server ignores them when in_reply_to is set.
           const parent = review.comments.find((c) => c.id === inReplyTo);
           const anchor: LineAnchor = { side: parent?.side ?? "RIGHT", line: parent?.line ?? 1 };

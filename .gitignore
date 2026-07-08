@@ -14,3 +14,7 @@ storybook-static/
 .lostpixel/difference/
 .env
 .env.local
+
+# Vale: synced style packages (proselint, etc.); keep only our vocab config.
+styles/*
+!styles/config
