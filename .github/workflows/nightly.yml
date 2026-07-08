@@ -25,5 +25,22 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
+      # @disponent/node is a file: dep on a sibling checkout (../disponent) —
+      # clone + build it at the pin so bun install can vendor it (same step as
+      # ci.yml; keep the DISPONENT_REF values in lockstep).
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ../disponent
+      - name: "Build @disponent/node (sibling file: dep)"
+        env:
+          DISPONENT_REF: 7bdcce78ebbf27fbe1f71fc96153014aa1c08f76
+        run: |
+          git init -q ../disponent
+          git -C ../disponent fetch -q --depth 1 https://github.com/zmaril/disponent "$DISPONENT_REF"
+          git -C ../disponent checkout -q FETCH_HEAD
+          cd ../disponent/crates/disponent-node
+          bun install
+          bun run build
       - run: bun install --frozen-lockfile
       - run: bun run tauri build
