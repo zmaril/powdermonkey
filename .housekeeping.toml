@@ -1,3 +1,4 @@
+logo = "src-tauri/icons/icon.png"  # fleet dashboard logo
 fleet = "zmaril/powderworks"
 
 [checks]
