@@ -11,9 +11,16 @@ import {
   OverrideSource,
   ProposalStatus,
   SessionState,
+  SyncMode,
 } from "../shared/types.ts";
 import { applyProposal, decideChange } from "./apply.ts";
 import { dumpSnapshot, type SqlClient } from "./backup.ts";
+import {
+  exportSnapshotToBranch,
+  exportSnapshotToPr,
+  syncStatus,
+  triggerSyncSoon,
+} from "./backup-sync.ts";
 import { getClaudeUsage } from "./claude-usage.ts";
 import { appendComment, archiveComment, listComments, updateComment } from "./comments.ts";
 import { cancelTask, completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
@@ -70,12 +77,7 @@ import {
   writeSessionPty,
 } from "./session-pty.ts";
 import { listSessionTasks } from "./session-tasks.ts";
-import {
-  getAutoRebase,
-  getDispatchSettings,
-  setAutoRebase,
-  setDispatchSettings,
-} from "./settings.ts";
+import { getSettings, patchSettings } from "./settings.ts";
 import { teleportTask } from "./teleport.ts";
 import { landSession, startLocalSession, stopSession } from "./worktree.ts";
 
@@ -420,25 +422,63 @@ export const app = new Elysia()
       `attachment; filename="pm-backup-${snap.meta.takenAt.replace(/[:.]/g, "-")}.json"`;
     return snap;
   })
+  // On-demand export of the store snapshot to git: a fresh branch, and optionally a PR
+  // opened for it. Distinct from autosync's one durable branch — each export is its own
+  // point-in-time archive (see backup-sync.ts). `target: "pr"` pushes + opens a PR;
+  // `target: "branch"` just commits (push controls whether it also lands on origin).
+  .post(
+    "/backup/export",
+    async ({ body, set }) => {
+      try {
+        if (body.target === "pr") {
+          return await exportSnapshotToPr({ base: body.base, title: body.title });
+        }
+        const branch =
+          body.branch ?? `powdermonkey-backup-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+        return await exportSnapshotToBranch(branch, { push: body.push ?? false });
+      } catch (e) {
+        set.status = 500;
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+    {
+      body: t.Object({
+        target: t.Union([t.Literal("branch"), t.Literal("pr")]),
+        branch: t.Optional(t.String()),
+        base: t.Optional(t.String()),
+        title: t.Optional(t.String()),
+        push: t.Optional(t.Boolean()),
+      }),
+    },
+  )
+  // Autosync status: mode/branch, last-synced time, last commit, and any error — the
+  // "surface last-synced status" the UI reads (also polled by the CLI).
+  .get("/backup/status", () => syncStatus())
   // The operator's Claude usage/limits (rolling 5-hour + weekly windows), read from
   // the same OAuth usage endpoint Claude Code's `/usage` uses. Best-effort: returns
   // `available: false` with a reason when there's no login / the API is down, never
   // an error. The global status bar polls this. See docs/claude-usage-spike.md.
   .get("/claude/usage", () => getClaudeUsage())
-  // Operator settings (single-row, survives restart). `autoRebase` gates the
-  // watcher's auto @claude-rebase ask; `dispatchBackend` + `exe*` pick and configure
-  // the cloud-dispatch backend. POST is a partial — only the fields present change.
-  .get("/settings", () => ({ autoRebase: getAutoRebase(), ...getDispatchSettings() }))
+  // Persisted operator settings (single-row, survives restart). `autoRebase` gates the
+  // watcher's auto @claude-rebase ask; `syncMode`/`syncBranch` configure data-durability
+  // autosync; `dispatchBackend` + `exe*` pick and configure the cloud-dispatch backend.
+  // A partial POST patches only the keys it carries. Turning autosync on (mode → non-off)
+  // kicks an immediate sync so the durable branch is seeded without waiting for a write.
+  .get("/settings", () => getSettings())
   .post(
     "/settings",
     async ({ body }) => {
-      if (body.autoRebase !== undefined) await setAutoRebase(body.autoRebase);
-      await setDispatchSettings(body);
-      return { autoRebase: getAutoRebase(), ...getDispatchSettings() };
+      const next = await patchSettings(body);
+      if (body.syncMode && body.syncMode !== SyncMode.Off) triggerSyncSoon();
+      return next;
     },
     {
       body: t.Object({
         autoRebase: t.Optional(t.Boolean()),
+        syncMode: t.Optional(
+          t.Union([t.Literal(SyncMode.Off), t.Literal(SyncMode.Local), t.Literal(SyncMode.Push)]),
+        ),
+        syncBranch: t.Optional(t.String()),
         dispatchBackend: t.Optional(
           t.Union([t.Literal(DispatchBackend.ExeDev), t.Literal(DispatchBackend.ClaudeRemote)]),
         ),

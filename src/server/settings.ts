@@ -1,13 +1,14 @@
 import { eq } from "drizzle-orm";
-import { DispatchBackend } from "../shared/types.ts";
+import { DispatchBackend, SyncMode } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { type Settings, settings } from "./schema.ts";
 
 // Operator settings, persisted in the single-row `settings` table so a toggle
 // survives a restart. Hot paths read these synchronously (the watcher reads
-// `autoRebase` per PR/tick; dispatch reads the backend + exe.dev config per launch),
-// so we keep an in-memory cache loaded once at boot and updated on every write — the
-// read stays synchronous, the write goes through to the DB.
+// `autoRebase` per PR/tick; autosync reads `syncMode` on every write; dispatch reads
+// the backend + exe.dev config per launch), so we keep an in-memory cache loaded once
+// at boot and updated on every write — reads stay synchronous, writes go through to
+// the DB.
 
 const SINGLETON_ID = 1;
 
@@ -21,8 +22,10 @@ export type ExeDevConfig = {
 
 // The mutable in-memory mirror of the singleton row. Defaults match the schema
 // defaults so a read before `loadSettings` (or with no row yet) is still sane.
-type Cache = {
+export type SettingsCache = {
   autoRebase: boolean;
+  syncMode: SyncMode;
+  syncBranch: string;
   dispatchBackend: DispatchBackend;
   exeTemplate: string;
   exeTtydPort: number;
@@ -30,8 +33,10 @@ type Cache = {
   exeAutoTeardown: boolean;
 };
 
-let cache: Cache = {
+let cache: SettingsCache = {
   autoRebase: true,
+  syncMode: SyncMode.Off,
+  syncBranch: "powdermonkey-backup",
   dispatchBackend: DispatchBackend.ExeDev,
   exeTemplate: "powdermonkey",
   exeTtydPort: 3456,
@@ -42,6 +47,8 @@ let cache: Cache = {
 function seed(row: Settings): void {
   cache = {
     autoRebase: row.autoRebase,
+    syncMode: row.syncMode,
+    syncBranch: row.syncBranch,
     dispatchBackend: row.dispatchBackend,
     exeTemplate: row.exeTemplate,
     exeTtydPort: row.exeTtydPort,
@@ -60,6 +67,11 @@ export async function loadSettings(): Promise<void> {
   }
 }
 
+/** The whole settings snapshot (the /settings route serves this). */
+export function getSettings(): SettingsCache {
+  return { ...cache };
+}
+
 /** Whether the watcher should auto-ask @claude to rebase a conflicting PR. */
 export function getAutoRebase(): boolean {
   return cache.autoRebase;
@@ -67,11 +79,28 @@ export function getAutoRebase(): boolean {
 
 /** Flip the auto-rebase toggle: update the cache and persist it. */
 export async function setAutoRebase(on: boolean): Promise<void> {
-  cache.autoRebase = on;
+  await patchSettings({ autoRebase: on });
+}
+
+/** Autosync target (off / local / push) — read on the write hot path by autosync. */
+export function getSyncMode(): SyncMode {
+  return cache.syncMode;
+}
+
+/** The single durable branch snapshots land on. */
+export function getSyncBranch(): string {
+  return cache.syncBranch;
+}
+
+/** Update any subset of settings: patch the cache and persist. One writer, one row,
+ *  so a partial update reads the current cache and rewrites the changed columns. */
+export async function patchSettings(patch: Partial<SettingsCache>): Promise<SettingsCache> {
+  cache = { ...cache, ...patch };
   await db
     .insert(settings)
-    .values({ id: SINGLETON_ID, autoRebase: on, updatedAt: new Date() })
-    .onConflictDoUpdate({ target: settings.id, set: { autoRebase: on, updatedAt: new Date() } });
+    .values({ id: SINGLETON_ID, ...cache, updatedAt: new Date() })
+    .onConflictDoUpdate({ target: settings.id, set: { ...patch, updatedAt: new Date() } });
+  return getSettings();
 }
 
 /** Which backend a "Dispatch remote" launch uses. Read synchronously at dispatch time. */

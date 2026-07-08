@@ -12,6 +12,7 @@ import {
   type PrState,
   SessionKind,
   SessionState,
+  SyncMode,
   TaskKind,
   TaskStatus,
 } from "../shared/types.ts";
@@ -263,12 +264,19 @@ export const pullRequests = pgTable("pull_requests", {
 });
 
 // Operator runtime settings — a single-row table (id always 1) of toggles that
-// should survive a restart. `autoRebase` gates the watcher's rebase nudge; the
+// should survive a restart. `autoRebase` gates the watcher's rebase nudge;
+// `syncMode`/`syncBranch` configure the data-durability autosync (off / local-only
+// / push-to-repo, landing on ONE durable branch — see backup-sync.ts); the
 // `dispatch*`/`exe*` columns configure the cloud-dispatch backend (see
 // DispatchBackend + src/server/exe-dev.ts). Add columns as more settings appear.
 export const settings = pgTable("settings", {
   id: integer("id").primaryKey().default(1),
   autoRebase: boolean("auto_rebase").notNull().default(true),
+  // Autosync target: "off" | "local" | "push" (SyncMode). Default off so the store
+  // is never committed anywhere until the operator opts in.
+  syncMode: text("sync_mode").$type<SyncMode>().notNull().default(SyncMode.Off),
+  // The single durable branch snapshots land on (local ref, and origin in push mode).
+  syncBranch: text("sync_branch").notNull().default("powdermonkey-backup"),
   // Which backend a "Dispatch remote" launch uses: "exe-dev" (a per-task exe.dev VM)
   // or "claude-remote" (Anthropic-cloud `claude --remote`).
   dispatchBackend: text("dispatch_backend")

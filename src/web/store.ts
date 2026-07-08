@@ -2,7 +2,7 @@ import type { SerializedDockview } from "dockview-react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Note, TaskComment } from "../server/schema.ts";
-import { type Decision, DispatchBackend, type TaskKind } from "../shared/types.ts";
+import { type Decision, DispatchBackend, type SyncMode, type TaskKind } from "../shared/types.ts";
 
 /** The editable cloud-dispatch settings (mirrors the server's DispatchSettings). */
 export type DispatchSettingsPatch = {
@@ -54,6 +54,8 @@ export type StartInfo = {
 type PersistedUi = {
   windows: PmWindow[];
   autoRebase: boolean;
+  syncMode: string;
+  syncBranch: string;
   lastBrowserUrl: string;
   theme: string;
   density: string;
@@ -80,6 +82,11 @@ export type State = {
   // Operator toggle: whether the watcher auto-asks @claude to rebase conflicting PRs.
   // Server runtime state (not a synced table), loaded via loadSettings.
   autoRebase: boolean;
+  // Data-durability autosync: mode (off / local / push) + the durable branch. Server
+  // settings, loaded via loadSettings; the live sync *status* is polled separately
+  // (SyncControl reads /backup/status) rather than kept here.
+  syncMode: string;
+  syncBranch: string;
   // Cloud-dispatch backend config — server settings loaded via loadSettings, edited in
   // the Settings pane. `dispatchBackend` picks exe.dev vs claude --remote; the `exe*`
   // fields configure the exe.dev worker VMs.
@@ -210,6 +217,8 @@ export type State = {
   deletePhase: (phaseId: number) => Promise<void>;
   toggleStar: (taskId: number, starred: boolean) => Promise<void>;
   setAutoRebase: (on: boolean) => Promise<void>;
+  setSyncMode: (mode: string) => Promise<void>;
+  setSyncBranch: (branch: string) => Promise<void>;
   startLocal: (taskId: number) => Promise<void>;
   dispatch: (taskId: number) => Promise<void>;
   // Launch several backlog tasks together: ONE session works the whole batch. The
@@ -309,6 +318,8 @@ export const useStore = create<State>()(
       motion: DEFAULT_MOTION,
       setMotion: (key) => set({ motion: key }),
       autoRebase: true,
+      syncMode: "off", // lint-allow-string: default before /settings loads, not SyncMode.Off (store is enum-free)
+      syncBranch: "powdermonkey-backup",
       dispatchBackend: DispatchBackend.ExeDev,
       exeTemplate: "powdermonkey",
       exeTtydPort: 3456,
@@ -397,9 +408,15 @@ export const useStore = create<State>()(
       loadSettings: async () => {
         const { data, error } = await api.settings.get();
         if (error || !data) return;
-        const d = data as Partial<DispatchSettingsPatch> & { autoRebase?: boolean };
+        const d = data as Partial<DispatchSettingsPatch> & {
+          autoRebase?: boolean;
+          syncMode?: string;
+          syncBranch?: string;
+        };
         set({
           autoRebase: d.autoRebase ?? true,
+          syncMode: d.syncMode ?? "off", // lint-allow-string: fallback, not SyncMode.Off
+          syncBranch: d.syncBranch ?? "powdermonkey-backup",
           dispatchBackend: d.dispatchBackend ?? DispatchBackend.ExeDev,
           exeTemplate: d.exeTemplate ?? "powdermonkey",
           exeTtydPort: d.exeTtydPort ?? 3456,
@@ -500,6 +517,22 @@ export const useStore = create<State>()(
         if (error) {
           set({ error: String(error.value ?? error.status) });
           await get().loadSettings(); // revert to server truth on failure
+        }
+      },
+      setSyncMode: async (mode) => {
+        set({ syncMode: mode }); // optimistic
+        const { error } = await api.settings.post({ syncMode: mode as SyncMode });
+        if (error) {
+          set({ error: String(error.value ?? error.status) });
+          await get().loadSettings();
+        }
+      },
+      setSyncBranch: async (branch) => {
+        set({ syncBranch: branch });
+        const { error } = await api.settings.post({ syncBranch: branch });
+        if (error) {
+          set({ error: String(error.value ?? error.status) });
+          await get().loadSettings();
         }
       },
       setDispatchSettings: async (next) => {
@@ -651,6 +684,8 @@ export const useStore = create<State>()(
       partialize: (s) => ({
         windows: s.windows,
         autoRebase: s.autoRebase,
+        syncMode: s.syncMode,
+        syncBranch: s.syncBranch,
         lastBrowserUrl: s.lastBrowserUrl,
         theme: s.theme,
         density: s.density,

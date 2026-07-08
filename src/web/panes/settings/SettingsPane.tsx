@@ -7,6 +7,7 @@ import { DispatchControl } from "./DispatchControl.tsx";
 import { NotifyControl } from "./NotifyControl.tsx";
 import { SegmentedSetting } from "./SegmentedSetting.tsx";
 import { ServerControl } from "./ServerControl.tsx";
+import { SyncControl } from "./SyncControl.tsx";
 import { ThemeControl } from "./ThemeControl.tsx";
 
 // The Settings pane: cross-cutting controls that aren't tied to a particular task —
@@ -54,6 +55,8 @@ export function SettingsPane() {
         setter={(s) => s.setMotion}
         options={MOTION}
       />
+      <Divider />
+      <SyncControl />
       <Divider />
       <Stack gap="snug">
         <Text size="sm" fw={600}>

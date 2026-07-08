@@ -20,7 +20,7 @@ const BASE = { fast: 120, base: 200, slow: 300, pulse: 1600 };
 export const MOTION: MotionOption[] = [
   { key: "full", label: "Full", factor: 1 },
   { key: "subtle", label: "Subtle", factor: 0.6 },
-  { key: "off", label: "Off", factor: 0 },
+  { key: "off", label: "Off", factor: 0 }, // lint-allow-string: motion preference key, not SyncMode.Off
 ];
 
 export const DEFAULT_MOTION = "full";

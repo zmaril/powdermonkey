@@ -106,6 +106,12 @@ export type SessionState = ValueOf<typeof SessionState>;
 export const SessionKind = { Local: "local", Remote: "remote" } as const;
 export type SessionKind = ValueOf<typeof SessionKind>;
 
+/** Where autosync lands each snapshot (see docs/backups.md, backup-sync.ts):
+ *  `off` — disabled; `local` — commit to a durable local branch only; `push` —
+ *  commit locally AND push that one branch to origin. Not a PR per change. */
+export const SyncMode = { Off: "off", Local: "local", Push: "push" } as const;
+export type SyncMode = ValueOf<typeof SyncMode>;
+
 /**
  * Which backend a cloud ("Dispatch remote") launch uses. `ClaudeRemote` is a
  * `claude --remote` run in Anthropic's cloud; `ExeDev` provisions a per-task VM on

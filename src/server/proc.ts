@@ -7,11 +7,14 @@ export type Captured = { code: number; stdout: string; stderr: string };
 
 export async function spawnCapture(
   cmd: string[],
-  opts: { cwd?: string; stdin?: string } = {},
+  opts: { cwd?: string; stdin?: string; env?: Record<string, string> } = {},
 ): Promise<Captured> {
   const proc = Bun.spawn(cmd, {
     cwd: opts.cwd,
     stdin: opts.stdin != null ? new Blob([opts.stdin]) : undefined,
+    // Merge over the inherited environment — callers layer git identity / index
+    // overrides on top without dropping PATH and the rest (see git plumbing).
+    env: opts.env ? { ...process.env, ...opts.env } : undefined,
     stdout: "pipe",
     stderr: "pipe",
   });
