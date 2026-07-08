@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# go_dev.sh — bring up the whole PowderMonkey desktop setup with one command.
+# scripts/dev.sh — bring up the whole PowderMonkey desktop setup with one command.
 #
 # PowderMonkey on the desktop is two pieces: the SUPERVISOR (the backend — API, PGlite,
 # tmux, reconcile, PR-watch, on http://localhost:PORT) and the DESKTOP APP (a Tauri
@@ -7,20 +7,21 @@
 # PowderMonkey on the desktop", so this script guarantees both.
 #
 # By default it pulls the latest origin/main first, so you always run the newest code.
-# Pin a specific version with PM_REF: PM_REF=v1.2.3 ./go_dev.sh (any tag / commit / branch).
+# Pin a specific version with PM_REF: PM_REF=v1.2.3 ./scripts/dev.sh (any tag / commit / branch).
 #
 # Usage:
-#   ./go_dev.sh                  # dev: pull latest, ensure everything's up, open the Tauri window
-#   ./go_dev.sh --build          # build the installable PowderMonkey.app instead, reveal it
-#   ./go_dev.sh --install-agent  # macOS: start the supervisor on every login (survives reboots)
-#   ./go_dev.sh --uninstall-agent# remove that LaunchAgent
-#   PM_REF=<tag|commit|branch> ./go_dev.sh   # run a pinned version instead of latest main
+#   ./scripts/dev.sh                  # dev: pull latest, ensure everything's up, open the Tauri window
+#   ./scripts/dev.sh --build          # build the installable PowderMonkey.app instead, reveal it
+#   ./scripts/dev.sh --install-agent  # macOS: start the supervisor on every login (survives reboots)
+#   ./scripts/dev.sh --uninstall-agent# remove that LaunchAgent
+#   PM_REF=<tag|commit|branch> ./scripts/dev.sh   # run a pinned version instead of latest main
 #
 # Ctrl-C closes the app; the supervisor keeps running in tmux behind it (reattach with
-# `bun run attach`). Override the port with PORT=xxxx ./go_dev.sh (default 4500).
+# `bun run attach`). Override the port with PORT=xxxx ./scripts/dev.sh (default 4500).
 set -euo pipefail
 
-cd "$(dirname "$0")"
+# Run from the repo root regardless of where this lives under scripts/.
+cd "$(dirname "$0")/.."
 
 PORT="${PORT:-4500}"
 PM_URL="${PM_URL:-http://localhost:${PORT}}"
@@ -51,7 +52,7 @@ wait_for_health() {
 # Pull the latest origin/main into the checkout so you always launch the newest code —
 # unless PM_REF pins a tag/commit/branch. Best-effort: if it can't fast-forward (a feature
 # branch, a diverged local main, or local edits) it warns and launches what's checked out
-# rather than failing, so `go_dev.sh` never leaves you unable to start.
+# rather than failing, so `scripts/dev.sh` never leaves you unable to start.
 update_repo() {
   git rev-parse --git-dir >/dev/null 2>&1 || return 0 # not a git checkout → nothing to pull
   git fetch origin --tags --quiet 2>/dev/null || { echo "  fetch failed — using the current checkout." >&2; return 0; }
@@ -114,7 +115,7 @@ PLIST
   launchctl kickstart -k "${domain}/${AGENT_LABEL}" 2>/dev/null || true
 
   wait_for_health && say "Done — the supervisor now starts on every login and survives reboots."
-  echo "  logs: ${proj}/data/supervisor-agent.log · undo: ./go_dev.sh --uninstall-agent"
+  echo "  logs: ${proj}/data/supervisor-agent.log · undo: ./scripts/dev.sh --uninstall-agent"
 }
 
 uninstall_agent() {
