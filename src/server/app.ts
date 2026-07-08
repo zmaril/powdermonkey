@@ -56,6 +56,8 @@ import {
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { reconcile } from "./reconcile.ts";
 import { repoIconResponse } from "./repo-icon.ts";
+import { listMyRepos, searchRepos } from "./repo-picker.ts";
+import { registerRepo } from "./repo-register.ts";
 import {
   goals as goalsTable,
   milestones as milestonesTable,
@@ -317,18 +319,29 @@ const sessionsGroup = resource("sessions", sessionRepo, models.sessions)
     orBadRequest(set, await openSessionEditor(Number(params.id))),
   );
 
-// Repos carry the identity-icon route on top of CRUD: the cached favicon/avatar
-// (resolved lazily on the first ask — see repo-icon.ts), or 404 when nothing
-// resolved (the UI falls back to the repo's color swatch).
-const reposGroup = resource("repos", repoRepo, models.repos).get(
-  "/:id/icon",
-  async ({ params, set }) => {
+// Repos carry two routes on top of CRUD: the identity icon — the cached
+// favicon/avatar (resolved lazily on the first ask — see repo-icon.ts), 404 when
+// nothing resolved (the UI falls back to the repo's color swatch) — and
+// `register`, the picker's confirm path. Register is fork-first: a slug the
+// operator can't push to is forked (`gh repo fork --clone=false`) and the fork is
+// registered with `upstream` recording the source (repo-register.ts). Idempotent
+// on the live set, so re-picking an added repo just returns its row.
+const reposGroup = resource("repos", repoRepo, models.repos)
+  .get("/:id/icon", async ({ params, set }) => {
     const res = await repoIconResponse(Number(params.id));
     if (res) return res;
     set.status = 404;
     return { error: "no icon" };
-  },
-);
+  })
+  .post(
+    "/register",
+    async ({ body, set }) => {
+      const result = await registerRepo(body.slug);
+      if (!result.ok) set.status = 502;
+      return result;
+    },
+    { body: t.Object({ slug: t.String({ pattern: "^[^/\\s]+/[^/\\s]+$" }) }) },
+  );
 
 // Proposals: a pending change-set the operator decides on. Authored when the
 // supervisor is SUGGESTING a change; reviewed as markdown (GET /:id/markdown renders
@@ -384,6 +397,25 @@ const proposalsGroup = new Elysia({ prefix: "/proposals" })
 // leaves a `<!-- pm:followup -->` PR comment that github-watch slurps into the same
 // path. Just the title is required; body (context) and sourceTaskId (the task the
 // worker was on, which picks the milestone) sharpen the proposal.
+// The picker's read sources (docs/vocabulary.md § Repo): the operator's own repos
+// and a public GitHub search, both through the operator's authed `gh`. 502 when gh
+// is missing/unauthed/unreachable — the picker surfaces the message in place.
+const ghGroup = new Elysia({ prefix: "/gh" })
+  .get("/repos", async ({ set }) => {
+    const result = await listMyRepos();
+    if (!result.ok) set.status = 502;
+    return result;
+  })
+  .get(
+    "/search",
+    async ({ query, set }) => {
+      const result = await searchRepos(query.q);
+      if (!result.ok) set.status = 502;
+      return result;
+    },
+    { query: t.Object({ q: t.String({ minLength: 1 }) }) },
+  );
+
 const followupsGroup = new Elysia({ prefix: "/followups" }).post(
   "/",
   async ({ body, set }) => orBadRequest(set, await proposeFollowup(body)),
@@ -792,6 +824,7 @@ export const app = new Elysia()
   .use(sessionsGroup)
   .use(resource("notes", noteRepo, models.notes))
   .use(reposGroup)
+  .use(ghGroup)
   .use(proposalsGroup)
   .use(followupsGroup)
   // Static: bundled web app, SPA fallback to index.html. Served from the package's

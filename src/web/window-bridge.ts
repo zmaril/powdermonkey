@@ -1,3 +1,4 @@
+import { withPickParam } from "./new-window.ts";
 import { useStore } from "./store.ts";
 import { type PmWindow, planBoot, windowWithId } from "./windows.ts";
 
@@ -24,9 +25,12 @@ export function hashWindowId(): string | null {
 }
 
 /** The app URL for a given window id: this same document with a `#w=<id>` hash. Used
- *  both as a browser `window.open` target and as a Tauri WebviewWindow url. */
-export function windowUrl(id: string): string {
-  return `${window.location.pathname}${window.location.search}#w=${encodeURIComponent(id)}`;
+ *  both as a browser `window.open` target and as a Tauri WebviewWindow url. `pick`
+ *  stamps the `?pick=1` boot flag, so the arriving webview opens the repo picker
+ *  scoped to its window (new-window.ts). */
+export function windowUrl(id: string, opts: { pick?: boolean } = {}): string {
+  const search = opts.pick ? withPickParam(window.location.search) : window.location.search;
+  return `${window.location.pathname}${search}#w=${encodeURIComponent(id)}`;
 }
 
 /** A Tauri window label for a PM window id. Labels must be unique per app and match
@@ -40,11 +44,11 @@ export function windowLabel(id: string): string {
  *  (its own OS window + webview); browser → `window.open` (a separate OS window that
  *  carries the scope in its `#w=<id>` hash). The caller registers the window in the
  *  shared store *first*, so the new webview finds itself in the registry on boot. */
-export async function spawnWindow(id: string): Promise<void> {
+export async function spawnWindow(id: string, opts: { pick?: boolean } = {}): Promise<void> {
   if (isDesktop()) {
     const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
     new WebviewWindow(windowLabel(id), {
-      url: windowUrl(id),
+      url: windowUrl(id, opts),
       title: "PowderMonkey",
       width: 1400,
       height: 900,
@@ -54,18 +58,19 @@ export async function spawnWindow(id: string): Promise<void> {
   } else {
     // A new browser window (not a background tab) — the desktop-window analog. Popup
     // blockers allow this because it's a direct response to the user's click/shortcut.
-    window.open(windowUrl(id), "_blank");
+    window.open(windowUrl(id, opts), "_blank");
   }
 }
 
 /** Open a brand-new window: mint a fresh unscoped PM window, register it in the shared
- *  store, then spawn its OS window. New windows always open unscoped — you scope them
- *  afterward from the repo tab strip. This webview keeps showing its own window; the
- *  new scope lives in the new OS window. Wired to `Cmd/Ctrl-N` and the "New window"
- *  button. */
+ *  store, then spawn its OS window with the picker boot flag — the new window opens
+ *  onto the Blender-style picker, scoped to itself, so it starts by choosing its repos
+ *  (vocabulary.md § Window; skip/close it and the window is simply unscoped). This
+ *  webview keeps showing its own window; the new scope lives in the new OS window.
+ *  Wired to `Cmd/Ctrl-N` and the "New window" button. */
 export async function openNewWindow(): Promise<void> {
   const id = useStore.getState().createWindow();
-  await spawnWindow(id);
+  await spawnWindow(id, { pick: true });
 }
 
 /** Close THIS window: on the desktop, ask Tauri to close the OS window (which fires
