@@ -70,13 +70,41 @@ it's the same single-machine setup as before. See **[docs/desktop.md](docs/deskt
 for the model, the build steps (`bun run desktop:dev` / `desktop:build`), and the
 network/auth notes.
 
+To run the supervisor headless on an always-on host so it keeps working after you
+close your laptop, there's a **Docker + Compose** setup that puts it behind
+Tailscale (the tailnet is the auth boundary, since PM has none) — see
+**[docs/docker.md](docs/docker.md)**.
+
 ## Run (dev)
 
 ```bash
 bun install
-bun run build:web   # bundle the Mantine app → public/assets/
-bun run dev         # supervisor + UI on http://localhost:4500 (foreground)
+bun run hooks:install   # local git hooks (see below) — one time per clone
+bun run build:web       # bundle the Mantine app → public/assets/
+bun run dev             # supervisor + UI on http://localhost:4500 (foreground)
 ```
+
+(`./go_dev.sh` runs `bun install` **and** `bun run hooks:install` for you, so a
+fresh desktop bring-up installs the hooks in one step.)
+
+#### Git hooks
+
+`bun run hooks:install` points `core.hooksPath` at the checked-in
+[`hooks/`](hooks) dir, so commits and pushes are gated locally instead of failing
+on CI. The path is stored relative, so each git worktree runs its own copy — safe
+across the `pm/task-*` worktrees the supervisor cuts. It's idempotent; re-run it
+any time (e.g. after a fresh clone or `bun install`).
+
+- **pre-commit** — `biome check` on the staged `src` files it owns, plus the
+  `lint-strings` / `lint-dock-theme` / `lint-spacing` scripts (only when a `src/`
+  file changed). Fast; runs on the changed files.
+- **pre-push** — `bun run typecheck` + `bun run test`, the exact checks CI runs,
+  so a push can't turn those red.
+
+Need to bypass a hook once (WIP commit, docs-only push): add `--no-verify` to the
+`git commit` / `git push`. Prefer `--copy` if your setup can't use `core.hooksPath`
+(`bun run hooks:install --copy` writes the hooks into `.git/hooks` instead);
+`bun run hooks:install --uninstall` reverts either.
 
 For a long-running operator session, run the supervisor in its own tmux pane on
 the private `powdermonkey` socket instead — it then outlives the launching

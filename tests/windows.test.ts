@@ -2,19 +2,22 @@ import { expect, test } from "bun:test";
 import type { SerializedDockview } from "dockview-react";
 import {
   type PmWindow,
-  closeWindow,
+  dropWindow,
   fromLegacyLayout,
   mergeExternalWindows,
   newWindow,
+  planBoot,
   resolveActive,
   updateWindow,
   windowLabel,
+  windowWithId,
 } from "../src/web/windows.ts";
 
-// The pure Window core (windows.ts): construction, list surgery, the legacy
-// single-layout migration, and labeling. These pin the semantics the store
-// delegates to — a device's window list is never empty, closing the active
-// window hands focus to a neighbour, and a v0 layout folds into "window 1".
+// The pure Window core (windows.ts): construction, list surgery, the boot planner,
+// the legacy single-layout migration, and labeling. These pin the semantics the store
+// delegates to — a closed window is simply dropped (real windows are disposable), the
+// primary webview adopts-or-mints and spawns the rest, and a v0 layout folds into
+// "window 1".
 
 const layout = { grid: {}, panels: {} } as unknown as SerializedDockview;
 
@@ -38,34 +41,19 @@ test("updateWindow patches one window immutably and ignores unknown ids", () => 
   expect(updateWindow([a, b], "nope", { name: "x" })).toEqual([a, b]);
 });
 
-test("closeWindow: closing a background window keeps the active one", () => {
+test("dropWindow: removes just that window, order preserved", () => {
   const [a, b, c] = [newWindow(), newWindow(), newWindow()];
-  const out = closeWindow([a, b, c], b.id, c.id);
-  expect(out.windows.map((w) => w.id)).toEqual([a.id, c.id]);
-  expect(out.activeId).toBe(c.id);
+  expect(dropWindow([a, b, c], b.id).map((w) => w.id)).toEqual([a.id, c.id]);
 });
 
-test("closeWindow: closing the active window focuses its right-hand neighbour", () => {
-  const [a, b, c] = [newWindow(), newWindow(), newWindow()];
-  expect(closeWindow([a, b, c], b.id, b.id).activeId).toBe(c.id);
-  // ...and the last window falls back left.
-  expect(closeWindow([a, b, c], c.id, c.id).activeId).toBe(b.id);
-});
-
-test("closeWindow: the list is never left empty", () => {
+test("dropWindow: closing the last window empties the registry (no synthetic replacement)", () => {
   const only = newWindow([7]);
-  const out = closeWindow([only], only.id, only.id);
-  expect(out.windows).toHaveLength(1);
-  expect(out.windows[0].id).not.toBe(only.id); // a fresh window, not the old one
-  expect(out.windows[0].repoIds).toEqual([]);
-  expect(out.activeId).toBe(out.windows[0].id);
+  expect(dropWindow([only], only.id)).toEqual([]);
 });
 
-test("closeWindow: unknown id is a no-op", () => {
+test("dropWindow: unknown id is a no-op", () => {
   const a = newWindow();
-  const out = closeWindow([a], "nope", a.id);
-  expect(out.windows).toEqual([a]);
-  expect(out.activeId).toBe(a.id);
+  expect(dropWindow([a], "nope")).toEqual([a]);
 });
 
 test("resolveActive falls back to the first window on a stale id", () => {
@@ -94,6 +82,30 @@ test("windowLabel: name, else the repo tabs, else a placeholder", () => {
   // An archived/unknown repo drops out of the label rather than rendering a hole.
   expect(windowLabel({ ...w, repoIds: [1, 99] }, label)).toBe("zmaril/powdermonkey");
   expect(windowLabel(newWindow(), label)).toBe("new window");
+});
+
+test("windowWithId: an empty window under a specific id", () => {
+  const w = windowWithId("hash-abc");
+  expect(w.id).toBe("hash-abc");
+  expect(w.repoIds).toEqual([]);
+  expect(w.name).toBeNull();
+  expect(w.layout).toBeNull();
+  expect(w.scratchCursor).toBeNull();
+});
+
+test("planBoot: adopts the first window, spawns the rest", () => {
+  const [a, b, c] = [newWindow([1]), newWindow([2]), newWindow([3])];
+  const plan = planBoot([a, b, c]);
+  expect(plan.minted).toBe(false);
+  expect(plan.adopt).toBe(a);
+  expect(plan.spawn.map((w) => w.id)).toEqual([b.id, c.id]);
+});
+
+test("planBoot: an empty registry mints a fresh unscoped window, nothing to spawn", () => {
+  const plan = planBoot([]);
+  expect(plan.minted).toBe(true);
+  expect(plan.adopt.repoIds).toEqual([]);
+  expect(plan.spawn).toEqual([]);
 });
 
 test("mergeExternalWindows: keeps our active window, adopts the rest", () => {

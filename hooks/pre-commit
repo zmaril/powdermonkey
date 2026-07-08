@@ -1,0 +1,46 @@
+#!/bin/sh
+# PowderMonkey managed hook — pre-commit.
+#
+# Fast, changed-files checks: biome on the staged src files it owns, plus the
+# custom lint scripts (whole-tree but cheap, only when a src/ file is touched).
+# This is the fast gate; the slower typecheck + tests run in pre-push.
+#
+# Bypass once with:  git commit --no-verify
+. "$(dirname "$0")/lib.sh"
+
+pm_has_bun || { pm_warn "pre-commit: bun not on PATH — skipping checks."; exit 0; }
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -n "$staged" ] || exit 0
+
+status=0
+
+# biome check, scoped to the staged files it owns (ts/tsx/js/jsx/json/css under
+# src/). Collect them into positional params, splitting on newline only so paths
+# with spaces survive.
+biome_files=$(printf '%s\n' "$staged" | grep -E '^src/.*\.(ts|tsx|js|jsx|json|jsonc|css)$' || true)
+if [ -n "$biome_files" ]; then
+  set --
+  oldIFS=$IFS
+  IFS='
+'
+  for f in $biome_files; do set -- "$@" "$f"; done
+  IFS=$oldIFS
+  pm_say "pre-commit: biome check ($# staged file(s))"
+  pm_biome check --error-on-warnings "$@" || status=1
+fi
+
+# The custom lint scripts scan the whole src tree (fast, read-only). Only worth
+# running when a staged file could affect them.
+if printf '%s\n' "$staged" | grep -qE '^src/'; then
+  pm_say "pre-commit: lint-strings / lint-dock-theme / lint-spacing"
+  bun run scripts/lint-strings.ts    || status=1
+  bun run scripts/lint-dock-theme.ts || status=1
+  bun run scripts/lint-spacing.ts    || status=1
+fi
+
+if [ "$status" -ne 0 ]; then
+  pm_warn "pre-commit failed — fix the above, or bypass with: git commit --no-verify"
+  exit 1
+fi
+exit 0

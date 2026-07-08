@@ -6,18 +6,20 @@ import {
   type SerializedDockview,
 } from "dockview-react";
 import { type RefObject, useEffect, useRef } from "react";
+import { usePickerBootParam } from "../new-window.ts";
 import { useNeedsInputNotifications } from "../notifications.ts";
+import { RepoPickerModal } from "../picker/RepoPickerModal.tsx";
 import { useRevealEntity } from "../reveal.ts";
 import { useActiveTheme, useStore } from "../store.ts";
 import { ActivityTab, useTabActivity } from "../TabActivity.tsx";
 import { useRunEffect } from "../use-run-effect.ts";
+import { closeCurrentWindow, isDesktop, openNewWindow } from "../window-bridge.ts";
 import { mergeExternalWindows, type PmWindow, resolveActive } from "../windows.ts";
 import { DisconnectBanner } from "./DisconnectBanner.tsx";
 import { buildDefaultLayout, dockComponents, PANE_TITLES } from "./layout.ts";
 import { ReviewOverlay } from "./ReviewOverlay.tsx";
 import { TopBar } from "./TopBar.tsx";
 import { useConnectionWatch } from "./useConnectionWatch.ts";
-import { WindowRail } from "./WindowRail.tsx";
 import { WindowTabs } from "./WindowTabs.tsx";
 
 type ShellReq = {
@@ -100,23 +102,6 @@ export function usePaneLauncher(apiRef: RefObject<DockviewApi | null>, paneReq: 
   }, [paneReq, apiRef]);
 }
 
-/** Pin this browser tab to a window via the URL (`#w=<id>`). On mount a valid hash
- *  wins over the persisted active id — so duplicating the tab, bookmarking it, or
- *  opening the app in a second OS window next to the first lands on the window that
- *  tab was showing (side-by-side, Firefox-style). A stale hash (window since closed)
- *  is a no-op: switchWindow ignores unknown ids and the effect below re-stamps the
- *  hash with the window that actually shows. replaceState, not pushState — switching
- *  windows shouldn't grow the browser history. */
-export function useWindowUrlPin(activeWindowId: string): void {
-  useEffect(() => {
-    const m = window.location.hash.match(/^#w=(.+)$/);
-    if (m) useStore.getState().switchWindow(decodeURIComponent(m[1]));
-  }, []);
-  useEffect(() => {
-    history.replaceState(null, "", `#w=${encodeURIComponent(activeWindowId)}`);
-  }, [activeWindowId]);
-}
-
 /** Adopt window-list changes written by OTHER tabs. Same-origin tabs share the
  *  persisted pm-ui blob but zustand doesn't cross-sync live, so each write persists
  *  the writer's whole (possibly stale) window list — without this, a background tab
@@ -146,23 +131,29 @@ export function useCrossTabWindows(): void {
   }, []);
 }
 
-/** Switching windows swaps the dock wholesale to the incoming window's layout. The
- *  `shownWindowRef` distinguishes a real switch from the initial mount (onReady
- *  already showed the first window) and from unrelated re-renders. The layout
- *  subscription stays live through the swap — the change events it fires just write
- *  the incoming window's own layout back to it. */
-export function useWindowSwitch(
-  apiRef: RefObject<DockviewApi | null>,
-  shownWindowRef: RefObject<string | null>,
-  activeWindowId: string,
-  showWindow: (api: DockviewApi) => void,
-): void {
+/** Window keyboard shortcuts. `Cmd/Ctrl-N` opens a real new window; `Cmd/Ctrl-W`
+ *  closes this one. Both are desktop features: browsers reserve these chords (Cmd-N
+ *  opens a fresh browser window, Cmd-W closes the tab — neither reaches our handler),
+ *  and that native behavior is already the right thing there. The top-bar "New window"
+ *  button is the browser affordance for opening. */
+export function useWindowKeybindings(): void {
   useEffect(() => {
-    const api = apiRef.current;
-    if (!api || shownWindowRef.current === activeWindowId) return;
-    shownWindowRef.current = activeWindowId;
-    showWindow(api);
-  });
+    if (!isDesktop()) return;
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod || e.altKey || e.shiftKey) return;
+      const key = e.key.toLowerCase();
+      if (key === "n") {
+        e.preventDefault();
+        openNewWindow();
+      } else if (key === "w") {
+        e.preventDefault();
+        closeCurrentWindow();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 }
 
 // The single pane of glass. The plan is split into two list panels — a SESSIONS
@@ -172,12 +163,13 @@ export function useWindowSwitch(
 // collections (collections.ts) that sync themselves live from PGlite over /sync —
 // no store data, no poll, no refetch (see plan-data.ts).
 //
-// The dock layout is the *active window's* layout (store.windows, windows.ts) —
-// each Window is a saved view (repo tabs + layout + local scratchpad), persisted
-// per-device by the store's `persist` middleware so the disconnect→reload recovery
-// (and any plain browser refresh) keeps your panes. App mirrors that state onto the
-// dockview api: onReady restores the active window, switching windows swaps the
-// dock wholesale, and onDidLayoutChange writes every change back via setLayout.
+// This webview is exactly ONE window (windows.ts, docs/windows.md) — its own repo
+// set + dock layout, chosen by its `#w=<id>` hash (bootWindow) out of the shared
+// registry. There is no in-app switcher: another window is another real OS window.
+// The dock layout is this window's, persisted per-device by the store's `persist`
+// middleware so the disconnect→reload recovery (and any plain browser refresh) keeps
+// your panes. App mirrors that onto the dockview api: onReady restores this window's
+// layout, and onDidLayoutChange writes every change back via setLayout.
 
 // True when every panel in a saved layout maps to a component we still register, so
 // dockview's fromJSON won't try to mount a panel whose component was renamed away. A
@@ -192,10 +184,6 @@ function layoutIsCompatible(saved: SerializedDockview): boolean {
 export function App() {
   const apiRef = useRef<DockviewApi | null>(null);
   const layoutSubRef = useRef<{ dispose: () => void } | null>(null);
-  // Which window the dock currently shows — lets the switch effect below tell a real
-  // switch apart from the initial mount and from unrelated re-renders.
-  const shownWindowRef = useRef<string | null>(null);
-  const activeWindowId = useStore((s) => s.activeWindowId);
   const shellReq = useStore((s) => s.shellReq);
   const browserReq = useStore((s) => s.browserReq);
   const paneReq = useStore((s) => s.paneReq);
@@ -220,15 +208,18 @@ export function App() {
   // the pane it lives in, scroll it into view, and flash it.
   useRevealEntity(apiRef);
 
-  // Show a window on the dock: restore its saved layout, else lay out the default.
-  // A corrupt/incompatible saved layout (or one that restores to nothing) falls back
-  // to the default so a reload can never leave you staring at a blank dock. A layout
-  // saved before a pane rename can still reference a component id we no longer
-  // register (e.g. the old active/backlog panes) — applying that would render a
-  // broken panel, so we discard it up front and rebuild the default. clear() first:
-  // on a window *switch* the dock still holds the outgoing window's panels, and
-  // buildDefaultLayout on a dirty dock would duplicate them (fromJSON replaces
-  // wholesale, so the clear is only load-bearing on the fallback path).
+  // A `?pick=1` boot — a fresh window spawned onto the picker (openNewWindow stamps
+  // the flag), or a deep-link: open the picker scoped to this webview's window and
+  // clean the URL. See new-window.ts.
+  usePickerBootParam();
+
+  // Show this webview's window on the dock: restore its saved layout, else lay out the
+  // default. A corrupt/incompatible saved layout (or one that restores to nothing)
+  // falls back to the default so a reload can never leave you staring at a blank dock.
+  // A layout saved before a pane rename can still reference a component id we no longer
+  // register (e.g. the old active/backlog panes) — applying that would render a broken
+  // panel, so we discard it up front and rebuild the default. A webview shows exactly
+  // one window for its whole life, so this runs once, from onReady.
   const showWindow = (api: DockviewApi) => {
     const s = useStore.getState();
     const saved = resolveActive(s.windows, s.activeWindowId)?.layout ?? null;
@@ -249,22 +240,20 @@ export function App() {
 
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;
-    shownWindowRef.current = useStore.getState().activeWindowId;
     showWindow(event.api);
     // Mirror every layout change back into the store — add/move/close a panel,
-    // resize, focus a tab — so it persists into the active window and the next load
+    // resize, focus a tab — so it persists into this window and the next load
     // (notably the disconnect→reload) comes back as-is. Subscribed after the initial
     // build so restoring doesn't write over what we just restored.
     layoutSubRef.current = event.api.onDidLayoutChange(() => setLayout(event.api.toJSON()));
   };
 
-  // Switching windows swaps the dock wholesale to the incoming window's layout.
-  useWindowSwitch(apiRef, shownWindowRef, activeWindowId, showWindow);
-
-  // Session restore across browser tabs: pin this tab to its window via the URL, and
-  // merge window-list writes from other tabs instead of clobbering.
-  useWindowUrlPin(activeWindowId);
+  // Keep this webview's registry in sync with window-list writes from other tabs /
+  // native windows, so our own writes never clobber theirs (and vice versa).
   useCrossTabWindows();
+
+  // Cmd/Ctrl-N → open a real new window; Cmd/Ctrl-W → close this one (desktop).
+  useWindowKeybindings();
 
   // Tear the layout subscription down with the component.
   useDisposeOnUnmount(layoutSubRef);
@@ -287,7 +276,6 @@ export function App() {
       {disconnected && <DisconnectBanner />}
       <TopBar />
       <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-        <WindowRail />
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
           <WindowTabs />
           <div className={skinClass} style={{ flex: 1, minHeight: 0 }}>
@@ -301,6 +289,7 @@ export function App() {
         </div>
       </div>
       <ReviewOverlay />
+      <RepoPickerModal />
     </div>
   );
 }

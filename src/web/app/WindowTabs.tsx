@@ -17,6 +17,7 @@ import { WindowName } from "./WindowName.tsx";
 export function WindowTabs() {
   const win = useActiveWindow();
   const setWindowRepos = useStore((s) => s.setWindowRepos);
+  const openRepoPicker = useStore((s) => s.openRepoPicker);
   const repos = useLiveQuery(() => reposCollection);
   if (!win) return null;
   const live = (repos.data ?? []).filter((r) => r.archivedAt == null);
@@ -65,23 +66,25 @@ export function WindowTabs() {
           />
         ))
       )}
-      {addable.length > 0 && (
-        <Menu position="bottom-start" withinPortal>
-          <Menu.Target>
-            <ActionIcon size="sm" variant="subtle" color="gray" aria-label="Add a repo tab">
-              <IconPlus size={13} />
-            </ActionIcon>
-          </Menu.Target>
-          <Menu.Dropdown>
-            <Menu.Label>Add repo to this window</Menu.Label>
-            {addable.map((r) => (
-              <Menu.Item key={r.id} onClick={() => setWindowRepos(win.id, [...win.repoIds, r.id])}>
-                <RepoBadge repo={r} />
-              </Menu.Item>
-            ))}
-          </Menu.Dropdown>
-        </Menu>
-      )}
+      <Menu position="bottom-start" withinPortal>
+        <Menu.Target>
+          <ActionIcon size="sm" variant="subtle" color="gray" aria-label="Add a repo tab">
+            <IconPlus size={13} />
+          </ActionIcon>
+        </Menu.Target>
+        <Menu.Dropdown>
+          <Menu.Label>Add repo to this window</Menu.Label>
+          {addable.map((r) => (
+            <Menu.Item key={r.id} onClick={() => setWindowRepos(win.id, [...win.repoIds, r.id])}>
+              <RepoBadge repo={r} />
+            </Menu.Item>
+          ))}
+          {/* The gh-sourced Blender picker, scoped here: registry-wide sources (your
+              repos, public search, fork-first) with the picks landing as this
+              window's tabs — the follow-up windows.md § Decisions deferred to. */}
+          <Menu.Item onClick={() => openRepoPicker(win.id)}>From GitHub…</Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
     </Group>
   );
 }

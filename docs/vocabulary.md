@@ -122,7 +122,7 @@ scannable at a glance:
   inside them, so a pre-clone icon never makes `git clone` fail on a non-empty dir —
   and served at `/repos/:id/icon`.
 
-Task cards, session panes, and the Windows rail all render a repo's color + icon.
+Task cards, session panes, and a window's repo tab strip all render a repo's color + icon.
 
 ### Session
 One run of work, independent of the hierarchy: `local` (a git worktree) or `remote`
@@ -208,7 +208,9 @@ milestone, `t41` a task, `#137` a phase, `r4` a repo.
 4. **Windows are Firefox windows, not Layouts.** A *Layout* implies a re-applyable template;
    people rarely want templates. A window is a live, disposable view you keep only as long
    as it's useful, and it bundles both its panel arrangement **and** which repos it shows.
-   Session-restored, usually unnamed, lives in an always-open left rail.
+   Session-restored and usually unnamed. Each window is a **real native OS window**
+   (`Cmd/Ctrl-N` opens another) — not an in-app view swapped from a rail; see
+   [windows.md](windows.md).
 
 5. **Cloud-first repos.** A repo is its GitHub identity (`owner/repo`), not a local checkout.
    PowderMonkey keeps only transient cache clones under `~/.powdermonkey/`, cloned on demand

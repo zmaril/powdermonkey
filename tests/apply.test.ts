@@ -5,7 +5,7 @@ const { ready } = await setupTestDb();
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
 const { goalRepo, milestoneRepo, taskRepo, phaseRepo } = await import("../src/server/crud.ts");
 const { createProposal, decideProposal, getProposal } = await import("../src/server/proposals.ts");
-const { applyProposal } = await import("../src/server/apply.ts");
+const { applyProposal, decideChange } = await import("../src/server/apply.ts");
 
 beforeAll(async () => {
   await ready();
@@ -68,6 +68,79 @@ test("approved change-set applies atomically: create + update + archive + reorde
   const fresh = await getProposal(proposal.id);
   expect(fresh?.status).toBe("applied");
   expect(fresh?.appliedAt).toBeTruthy();
+});
+
+test("a create with no position appends to the end of its milestone (ghost's slot)", async () => {
+  await loadPlan(
+    parsePlan({
+      goals: [
+        {
+          title: "Gpos",
+          milestones: [{ title: "Mpos", tasks: [{ title: "A" }, { title: "B" }, { title: "C" }] }],
+        },
+      ],
+    }),
+  );
+  const milestone = (await milestoneRepo.list()).find((m) => m.title === "Mpos");
+  if (!milestone) throw new Error("seed failed");
+  // The three seeded siblings sit at positions 0,1,2 — a ghost renders below them.
+  const siblings = (await taskRepo.list()).filter((t) => t.milestoneId === milestone.id);
+  expect(siblings.map((t) => t.position).sort((a, b) => a - b)).toEqual([0, 1, 2]);
+
+  // Two proposed tasks, neither carrying a position, accepted together.
+  const proposal = await createProposal({
+    changes: [
+      { op: "create", kind: "task", parentId: milestone.id, fields: { title: "Ghost1" } },
+      { op: "create", kind: "task", parentId: milestone.id, fields: { title: "Ghost2" } },
+    ],
+  });
+  await decideProposal(proposal.id, "approved");
+  const result = await applyProposal(proposal.id);
+  expect(result.ok).toBe(true);
+
+  const after = (await taskRepo.list()).filter((t) => t.milestoneId === milestone.id);
+  const g1 = after.find((t) => t.title === "Ghost1");
+  const g2 = after.find((t) => t.title === "Ghost2");
+  // Each lands past the existing siblings, in change order — no jump to the top.
+  expect(g1?.position).toBe(3);
+  expect(g2?.position).toBe(4);
+  // The full order is A,B,C,Ghost1,Ghost2 — every card exactly where its ghost sat.
+  expect([...after].sort((a, b) => a.position - b.position).map((t) => t.title)).toEqual([
+    "A",
+    "B",
+    "C",
+    "Ghost1",
+    "Ghost2",
+  ]);
+});
+
+test("inline accept (decideChange) appends each ghost to its milestone bottom, in order", async () => {
+  await loadPlan(
+    parsePlan({
+      goals: [{ title: "Ginline", milestones: [{ title: "Minline", tasks: [{ title: "A" }] }] }],
+    }),
+  );
+  const milestone = (await milestoneRepo.list()).find((m) => m.title === "Minline");
+  if (!milestone) throw new Error("seed failed");
+
+  const proposal = await createProposal({
+    changes: [
+      { op: "create", kind: "task", parentId: milestone.id, fields: { title: "Ghost1" } },
+      { op: "create", kind: "task", parentId: milestone.id, fields: { title: "Ghost2" } },
+    ],
+  });
+  // Accept them one at a time, as the UI does from each ghost card.
+  expect((await decideChange(proposal.id, 0, "accept")).ok).toBe(true);
+  expect((await decideChange(proposal.id, 0, "accept")).ok).toBe(true);
+
+  const after = (await taskRepo.list()).filter((t) => t.milestoneId === milestone.id);
+  expect(after.find((t) => t.title === "Ghost1")?.position).toBe(1);
+  expect(after.find((t) => t.title === "Ghost2")?.position).toBe(2);
+  expect([...after].sort((a, b) => a.position - b.position).map((t) => t.title)).toEqual([
+    "A",
+    "Ghost1",
+    "Ghost2",
+  ]);
 });
 
 test("archive op soft-deletes the target", async () => {
@@ -135,4 +208,52 @@ test("apply requires approval and is idempotent on re-apply", async () => {
     expect(second.counts).toEqual({ create: 0, update: 0, archive: 0, reorder: 0 });
   }
   expect((await goalRepo.get(goal.id))?.objective).toBe("done");
+});
+
+test("an accepted create-task with no position appends to the end of its milestone (no jump)", async () => {
+  // A ghost renders at the BOTTOM of its milestone; accepting it must land the real task
+  // there too — not at the position-0 default, which would jump it to the top.
+  await loadPlan(
+    parsePlan({
+      goals: [{ title: "GA", milestones: [{ title: "MA", tasks: [{ title: "existing" }] }] }],
+    }),
+  );
+  const milestone = (await milestoneRepo.list()).find((m) => m.title === "MA");
+  if (!milestone) throw new Error("seed failed");
+  const existing = (await taskRepo.list()).find(
+    (t) => t.title === "existing" && t.milestoneId === milestone.id,
+  );
+  if (!existing) throw new Error("seed failed");
+
+  const proposal = await createProposal({
+    title: "add without a position",
+    changes: [
+      { op: "create", kind: "task", parentId: milestone.id, fields: { title: "appended-MA" } },
+    ],
+  });
+  await decideProposal(proposal.id, "approved");
+  const r = await applyProposal(proposal.id);
+  expect(r.ok).toBe(true);
+
+  const added = (await taskRepo.list()).find((t) => t.title === "appended-MA");
+  // Appended right after the existing task — not the position-0 default.
+  expect(added?.position).toBe(existing.position + 1);
+  expect(added?.position).toBeGreaterThan(existing.position);
+});
+
+test("first task created in an empty milestone lands at position 0", async () => {
+  await loadPlan(parsePlan({ goals: [{ title: "GB", milestones: [{ title: "MB" }] }] }));
+  const milestone = (await milestoneRepo.list()).find((m) => m.title === "MB");
+  if (!milestone) throw new Error("seed failed");
+
+  const proposal = await createProposal({
+    changes: [
+      { op: "create", kind: "task", parentId: milestone.id, fields: { title: "first-MB" } },
+    ],
+  });
+  await decideProposal(proposal.id, "approved");
+  await applyProposal(proposal.id);
+
+  const added = (await taskRepo.list()).find((t) => t.title === "first-MB");
+  expect(added?.position).toBe(0);
 });
