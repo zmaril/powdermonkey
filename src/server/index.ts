@@ -4,6 +4,7 @@
 import { app } from "./app.ts";
 import { startAutosync } from "./backup-sync.ts";
 import { ready } from "./db.ts";
+import { pollDisponentUsage } from "./disponent-usage.ts";
 import { gcOrphanedWorkers } from "./exe-dev.ts";
 import { startGithubWatch } from "./github-watch.ts";
 import { reconcile } from "./reconcile.ts";
@@ -82,6 +83,28 @@ if (RECONCILE_MS > 0) {
       running = false;
     }
   }, RECONCILE_MS);
+}
+
+// Fold disponent's Usage event stream onto each remote session's usage/cost
+// meters on a poll loop — additive observation for the status bar, never a gate on
+// progress (that still reads off main's trailers). No-op unless a remote worker
+// exists and disponent is emitting Usage events (see PM_DISPONENT_OTEL_PORT).
+// Overlap-guarded; a failed tick is logged, not fatal. Disable with
+// PM_USAGE_POLL_INTERVAL_MS=0.
+const USAGE_POLL_MS = Number(process.env.PM_USAGE_POLL_INTERVAL_MS ?? 15_000);
+if (USAGE_POLL_MS > 0) {
+  let usageRunning = false;
+  setInterval(async () => {
+    if (usageRunning) return;
+    usageRunning = true;
+    try {
+      await pollDisponentUsage();
+    } catch (e) {
+      console.warn("usage poll tick failed:", e instanceof Error ? e.message : e);
+    } finally {
+      usageRunning = false;
+    }
+  }, USAGE_POLL_MS);
 }
 
 // Autosync: on every store write, produce a snapshot and land it on the durable

@@ -46,6 +46,13 @@ export function getDisponent(cfg: ExeDevConfig = getExeDevConfig()): Disponent {
     // was a "dry-run" test provisioning real VMs).
     setEnv("DISPONENT_CLAUDE_FLAGS", cfg.claudeFlags);
     setEnv("DISPONENT_EXE_TTYD_PORT", String(cfg.ttydPort));
+    // Opt-in, honest edge: only when the operator points us at an OTel port does
+    // disponent's receiver emit real Usage events for the per-backend meters. Left
+    // unset, the meters read a truthful 0 rather than faking a number. Additive —
+    // it changes nothing about provisioning or the progress invariant.
+    if (process.env.PM_DISPONENT_OTEL_PORT) {
+      setEnv("DISPONENT_OTEL_PORT", process.env.PM_DISPONENT_OTEL_PORT);
+    }
     let sink = "none";
     if (process.env.PM_EXE_DRY_RUN) {
       setEnv("DISPONENT_EXE_DRY_RUN", "1");
@@ -85,7 +92,7 @@ async function waitForRunning(d: Disponent, uid: string, timeoutMs: number): Pro
 /** The disponent session backing a worker VM, if the engine knows one. A
  *  reconcile() first adopts anything a previous supervisor left behind, so a
  *  restart doesn't strand teardown. */
-async function sessionForVm(d: Disponent, vmName: string): Promise<DSession | null> {
+export async function sessionForVm(d: Disponent, vmName: string): Promise<DSession | null> {
   const find = async () => {
     const all = await d.sessions();
     return (

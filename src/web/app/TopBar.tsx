@@ -6,8 +6,10 @@ import { useStore } from "../store.ts";
 import { openNewWindow } from "../window-bridge.ts";
 import { PaneButton } from "./PaneButton.tsx";
 import { AgentsCluster } from "./status/AgentsCluster.tsx";
+import { BackendUsageCluster } from "./status/BackendUsageCluster.tsx";
 import { ClaudeUsageCluster } from "./status/ClaudeUsageCluster.tsx";
 import { useAgentsRunning } from "./useAgentsRunning.ts";
+import { useBackendUsage } from "./useBackendUsage.ts";
 import { useClaudeUsage } from "./useClaudeUsage.ts";
 
 // Slim global toolbar: the wordmark, the two always-on-glance status readouts (agents
@@ -27,6 +29,7 @@ export function TopBar() {
   const loading = useLiveQuery(() => tasksCollection).isLoading;
   const running = useAgentsRunning();
   const usage = useClaudeUsage();
+  const backends = useBackendUsage();
   return (
     <div
       style={{
@@ -53,6 +56,7 @@ export function TopBar() {
           <AgentsCluster running={running} />
         </Group>
         <Group gap="hair" wrap="nowrap" align="center">
+          <BackendUsageCluster backends={backends} />
           <ClaudeUsageCluster usage={usage} />
           <Divider orientation="vertical" my="tight" />
           {/* Open a real new OS window (Tauri WebviewWindow / browser window), the

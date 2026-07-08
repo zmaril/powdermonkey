@@ -183,6 +183,13 @@
       "when": 1783463264612,
       "tag": "0025_workable_gateway",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1783541398505,
+      "tag": "0026_sticky_molten_man",
+      "breakpoints": true
     }
   ]
 }
