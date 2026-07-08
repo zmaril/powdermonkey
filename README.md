@@ -84,7 +84,7 @@ bun run build:web       # bundle the Mantine app → public/assets/
 bun run dev             # supervisor + UI on http://localhost:4500 (foreground)
 ```
 
-(`./go_dev.sh` runs `bun install` **and** `bun run hooks:install` for you, so a
+(`./scripts/dev.sh` runs `bun install` **and** `bun run hooks:install` for you, so a
 fresh desktop bring-up installs the hooks in one step.)
 
 #### Git hooks

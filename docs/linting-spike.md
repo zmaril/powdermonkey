@@ -251,7 +251,7 @@ strips types) and the fix is purely process: run the existing `tsc` locally. A
 `pre-push` hook is enough:
 
 ```sh
-# .git/hooks/pre-push  (or wire into go_dev.sh / a bun script)
+# .git/hooks/pre-push  (or wire into scripts/dev.sh / a bun script)
 bun run typecheck || { echo "tsc failed — fix before pushing"; exit 1; }
 ```
 

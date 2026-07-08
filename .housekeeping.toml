@@ -4,3 +4,8 @@ fleet = "zmaril/powderworks"
 [checks]
 # firetheslopcannon.com isn't live yet — flip to "required" when it is
 website = "off"
+
+[scripts]
+# hooks/lib.sh is sourced by the git hooks in hooks/ (never run directly), so it
+# lives beside them rather than under scripts/ — a deliberate keeper.
+allow = ["hooks/lib.sh"]
