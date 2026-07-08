@@ -21,9 +21,11 @@ export function repoColorSeed(repo: { colorSeed?: string | null; slug: string })
 export function hashSeed(seed: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < seed.length; i++) {
+    // biome-ignore lint/suspicious/noBitwiseOperators: FNV-1a XOR step — the algorithm, not a typo.
     h ^= seed.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
+  // biome-ignore lint/suspicious/noBitwiseOperators: coerce to an unsigned 32-bit int, per FNV-1a.
   return h >>> 0;
 }
 

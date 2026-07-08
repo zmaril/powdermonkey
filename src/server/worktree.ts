@@ -179,8 +179,8 @@ export type StopResult =
   | { ok: true; session: Session }
   | { ok: false; error: string; output?: string };
 
-/** Abort a session that's still running. Unlike `land` (graceful teardown of
- *  *finished* work, which refuses a dirty worktree), `stop` is the kill switch: it
+/** Abort a session that's still running. Unlike `land` (graceful teardown
+ *  of *finished* work, which refuses a dirty worktree), `stop` is the kill switch: it
  *  tears the agent down without requiring a clean tree, records the session as
  *  `stopped` + archived, and rolls its still-in-flight tasks back to `pending` so
  *  they can be re-run. Tasks that already reached a terminal status (`merged` —

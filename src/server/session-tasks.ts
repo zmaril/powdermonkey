@@ -27,7 +27,7 @@ export async function taskIdsForSession(sessionId: number): Promise<number[]> {
  *  resolves liveness itself by intersecting with the sessions it holds, so this
  *  serves both the live panes and the archive view from one list. */
 export async function listSessionTasks(): Promise<{ sessionId: number; taskId: number }[]> {
-  return db
+  return await db
     .select({ sessionId: sessionTasks.sessionId, taskId: sessionTasks.taskId })
     .from(sessionTasks)
     .orderBy(sessionTasks.id);

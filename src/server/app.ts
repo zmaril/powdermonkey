@@ -161,11 +161,11 @@ function resource(name: string, repo: Repo, body: { create: TSchema; update: TSc
       query: t.Object({ archived: t.Optional(t.String()) }),
     })
     .get("/:id", async ({ params, set }) => orNotFound(set, await repo.get(Number(params.id))))
-    .post("/", ({ body }) => repo.create(body), { body: body.create })
+    .post("/", ({ body: payload }) => repo.create(payload), { body: body.create })
     .patch(
       "/:id",
-      async ({ params, body, set }) =>
-        orNotFound(set, await repo.update(Number(params.id), body as Record<string, unknown>)),
+      async ({ params, body: payload, set }) =>
+        orNotFound(set, await repo.update(Number(params.id), payload as Record<string, unknown>)),
       { body: body.update },
     )
     .delete("/:id", async ({ params, set }) =>
@@ -701,8 +701,8 @@ export const app = new Elysia()
       // neither session nor cwd is given — the supervisor's own reserved session.
       const { cwd: q, session } = ws.data.query;
       const sessionId = match({ session, q })
-        .with({ session: P.string.minLength(1) }, ({ session }) => {
-          const n = Number(session);
+        .with({ session: P.string.minLength(1) }, ({ session: s }) => {
+          const n = Number(s);
           return Number.isNaN(n) ? null : n;
         })
         .with({ q: P.union(undefined, "") }, () => {

@@ -167,7 +167,7 @@ export async function listProposals(opts?: { status?: string }): Promise<Proposa
 }
 
 export async function listPending(): Promise<Proposal[]> {
-  return db
+  return await db
     .select()
     .from(proposals)
     .where(and(eq(proposals.status, ProposalStatus.Pending), isNull(proposals.archivedAt)));

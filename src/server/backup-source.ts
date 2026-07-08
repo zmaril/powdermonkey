@@ -20,7 +20,7 @@ export function parseSnapshot(json: string): Snapshot {
   try {
     obj = JSON.parse(json);
   } catch (e) {
-    throw new Error(`not valid JSON: ${e instanceof Error ? e.message : e}`);
+    throw new Error(`not valid JSON: ${e instanceof Error ? e.message : e}`, { cause: e });
   }
   const snap = obj as Snapshot;
   if (!snap || typeof snap !== "object" || !snap.data || typeof snap.data !== "object") {

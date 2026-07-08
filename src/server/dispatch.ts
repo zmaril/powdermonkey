@@ -152,8 +152,8 @@ export const CROSS_REPO_ERROR =
  *  that's uniformly repo-less) pass; a null repo is its own bucket, so mixing a repo-less
  *  task with a repo-pinned one is treated as cross-repo. The API rejects this and the UI
  *  blocks the selection — cross-repo work is authored via the task fan-out instead. */
-export function spansRepos(tasks: Task[]): boolean {
-  return new Set(tasks.map((t) => t.repoId ?? null)).size > 1;
+export function spansRepos(taskList: Task[]): boolean {
+  return new Set(taskList.map((task) => task.repoId ?? null)).size > 1;
 }
 
 /** Fetch one or more tasks + their live (non-archived, ordered) phases and build

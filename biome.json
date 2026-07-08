@@ -3,7 +3,21 @@
   "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "linter": {
     "enabled": true,
-    "rules": { "recommended": true }
+    "rules": {
+      "recommended": true,
+      "suspicious": {
+        "noShadow": "error",
+        "useAwait": "error",
+        "noBitwiseOperators": "error"
+      },
+      "style": {
+        "useErrorCause": "error"
+      },
+      "correctness": {
+        "noUnusedInstantiation": "error",
+        "useSingleJsDocAsterisk": "error"
+      }
+    }
   },
   "formatter": {
     "enabled": true,

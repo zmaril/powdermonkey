@@ -35,16 +35,16 @@ const REVIEW_DOCK = { desc: DescriptionPanel, filesdiff: FilesPanel };
 // Default: Description on the left (~1/3), the Files (tree + diff) panel filling the
 // rest (~2/3). Sized after creation off the dockview width.
 function buildReviewLayout(event: DockviewReadyEvent) {
-  const api = event.api;
-  api.addPanel({ id: "desc", component: "desc", title: "Description" });
-  api.addPanel({
+  const dockApi = event.api;
+  dockApi.addPanel({ id: "desc", component: "desc", title: "Description" });
+  dockApi.addPanel({
     id: "filesdiff",
     component: "filesdiff",
     title: "Diff",
     position: { direction: "right", referencePanel: "desc" },
   });
-  const w = api.width || window.innerWidth;
-  api.getPanel("desc")?.api.setSize({ width: Math.round(w / 3) });
+  const w = dockApi.width || window.innerWidth;
+  dockApi.getPanel("desc")?.api.setSize({ width: Math.round(w / 3) });
 }
 
 /** Load the persisted "viewed files" set from localStorage once the PR key is known. */
@@ -114,8 +114,8 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, error } = await api.prs({ number }).review.get();
-    if (error) setError(String((error.value as { error?: string })?.error ?? error.status));
+    const { data, error: err } = await api.prs({ number }).review.get();
+    if (err) setError(String((err.value as { error?: string })?.error ?? err.status));
     else setReview(data as PrReview);
     setLoading(false);
   }, [number]);
@@ -150,7 +150,7 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
     if (!review) return;
     setPosting(true);
     try {
-      const { error } = await api.prs({ number }).comments.post({
+      const { error: err } = await api.prs({ number }).comments.post({
         body,
         commitId: review.headSha,
         path,
@@ -158,8 +158,8 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
         side: anchor.side,
         inReplyTo,
       });
-      if (error) {
-        setError(String((error.value as { error?: string })?.error ?? error.status));
+      if (err) {
+        setError(String((err.value as { error?: string })?.error ?? err.status));
         return;
       }
       await load();
@@ -174,7 +174,7 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
     setSubmitting(true);
     setError(null);
     try {
-      const { error } = await api.prs({ number })["review-submit"].post({
+      const { error: err } = await api.prs({ number })["review-submit"].post({
         event,
         body: summary,
         commitId: review.headSha,
@@ -186,8 +186,8 @@ export function ReviewPane({ number, onClose }: { number: number; onClose?: () =
           body,
         })),
       });
-      if (error) {
-        setError(String((error.value as { error?: string })?.error ?? error.status));
+      if (err) {
+        setError(String((err.value as { error?: string })?.error ?? err.status));
         return;
       }
       setDraft([]);

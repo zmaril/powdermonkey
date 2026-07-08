@@ -12,7 +12,7 @@ import { type TaskComment, taskComments, tasks } from "./schema.ts";
  *  top-to-bottom. Ties on the timestamp (same-instant inserts) fall back to
  *  insertion order via the id. */
 export async function listComments(taskId: number): Promise<TaskComment[]> {
-  return db
+  return await db
     .select()
     .from(taskComments)
     .where(and(eq(taskComments.taskId, taskId), isNull(taskComments.archivedAt)))
