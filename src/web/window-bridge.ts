@@ -47,7 +47,7 @@ export function windowLabel(id: string): string {
 export async function spawnWindow(id: string, opts: { pick?: boolean } = {}): Promise<void> {
   if (isDesktop()) {
     const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    new WebviewWindow(windowLabel(id), {
+    const win = new WebviewWindow(windowLabel(id), {
       url: windowUrl(id, opts),
       title: "PowderMonkey",
       width: 1400,
@@ -55,6 +55,9 @@ export async function spawnWindow(id: string, opts: { pick?: boolean } = {}): Pr
       minWidth: 900,
       minHeight: 600,
     });
+    // A native window can fail to open (bad URL, OS refusal); surface it instead of
+    // silently discarding the handle.
+    win.once("tauri://error", (e) => console.error(`window ${id} failed to spawn`, e.payload));
   } else {
     // A new browser window (not a background tab) — the desktop-window analog. Popup
     // blockers allow this because it's a direct response to the user's click/shortcut.

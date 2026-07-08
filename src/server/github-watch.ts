@@ -308,7 +308,7 @@ async function resolveTaskId(headRefName: string, commitText: string): Promise<n
   if (m) return Number(m[1]);
   const { taskIds, phaseIds } = parseTrailerIds(commitText);
   if (taskIds.length > 0) return taskIds[0];
-  return taskIdForPhaseIds(phaseIds);
+  return await taskIdForPhaseIds(phaseIds);
 }
 
 /** Signature of the fields whose change we care about — drives "did this PR

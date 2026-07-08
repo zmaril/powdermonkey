@@ -14,8 +14,8 @@ import { closeSync, openSync, readFileSync, rmSync, writeSync } from "node:fs";
 // risk emptying it.
 
 export class WriterLockError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "WriterLockError";
   }
 }
@@ -67,6 +67,7 @@ export function acquireWriterLock(dataDir: string): () => void {
       if (holder != null && holder !== process.pid && alive(holder)) {
         throw new WriterLockError(
           `PGlite data dir ${dataDir} is locked by a live writer (pid ${holder}); refusing to open a second writer that could empty the store.`,
+          { cause: e },
         );
       }
       // Stale (the holder pid is gone) or unreadable: steal it and retry.

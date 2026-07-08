@@ -200,7 +200,7 @@ export async function commitFileToBranch(opts: {
 /** Fetch a single branch from origin (best-effort; a missing remote branch is not
  *  fatal). After this, `origin/<branch>` reflects the remote tip if it exists. */
 export async function fetchBranch(branch: string, cwd?: string): Promise<GitResult> {
-  return run(["fetch", "origin", branch], cwd);
+  return await run(["fetch", "origin", branch], cwd);
 }
 
 /** Push a local branch to origin. Tries a plain (fast-forward) push first; on
@@ -215,5 +215,5 @@ export async function pushBranch(branch: string, cwd?: string): Promise<GitResul
 /** Read the contents of `path` at `ref` (e.g. `origin/<branch>:snapshot.json`) —
  *  how import pulls a snapshot straight out of a branch without a checkout. */
 export async function showFile(ref: string, path: string, cwd?: string): Promise<GitResult> {
-  return run(["show", `${ref}:${path}`], cwd);
+  return await run(["show", `${ref}:${path}`], cwd);
 }

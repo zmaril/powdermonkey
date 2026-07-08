@@ -54,7 +54,7 @@ const WATCHED_TABLES: string[] = [
 
 /** Dump the current store to a snapshot, stamped now. */
 export async function currentSnapshot(): Promise<Snapshot> {
-  return dumpSnapshot(pg as unknown as SqlClient, new Date().toISOString());
+  return await dumpSnapshot(pg as unknown as SqlClient, new Date().toISOString());
 }
 
 /** Serialize a snapshot for storage — pretty JSON so it diffs cleanly in git. */

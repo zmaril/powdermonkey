@@ -67,7 +67,7 @@ export async function commentOnPr(
   body: string,
   repo?: string,
 ): Promise<GhResult> {
-  return gh(commentArgs(prNumber, body, repo));
+  return await gh(commentArgs(prNumber, body, repo));
 }
 
 /** Tag a message at `@claude`. Pure; trims so the marker leads the comment, which
@@ -84,5 +84,5 @@ export async function askClaude(
   message: string,
   repo?: string,
 ): Promise<GhResult> {
-  return commentOnPr(prNumber, claudeMessage(message), repo);
+  return await commentOnPr(prNumber, claudeMessage(message), repo);
 }
