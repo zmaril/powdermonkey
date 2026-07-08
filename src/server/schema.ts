@@ -1,4 +1,13 @@
-import { bigint, boolean, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  bigint,
+  boolean,
+  doublePrecision,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core";
 import {
   type AgentState,
   type CheckRollupState,
@@ -127,6 +136,19 @@ export const sessions = pgTable("sessions", {
   // process falls idle after producing output, it's read as "parked at a prompt,
   // waiting for the operator" and surfaced here so the UI can pull them in.
   needsInput: boolean("needs_input").notNull().default(false),
+  // Additive usage/cost meters, accumulated from disponent's Usage event stream
+  // (see disponent-usage.ts). Observation only — these never gate progress, which
+  // still reads off main's trailers; they just power the status bar's per-backend
+  // readout. Tokens are running sums; `usageCostCents` sums fractional cents (a
+  // double, since disponent reports sub-cent costs). `usageEventCursor` is the
+  // highest disponent event idx already drained for this session, so a poll only
+  // folds in new events (null until the first drain). Zero on a session with no
+  // Usage events — honestly, not falsely (disponent only emits them when its OTel
+  // receiver is wired; see PM_DISPONENT_OTEL_PORT).
+  usageInputTokens: integer("usage_input_tokens").notNull().default(0),
+  usageOutputTokens: integer("usage_output_tokens").notNull().default(0),
+  usageCostCents: doublePrecision("usage_cost_cents").notNull().default(0),
+  usageEventCursor: integer("usage_event_cursor"),
   ...timestamps,
 });
 

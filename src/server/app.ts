@@ -36,6 +36,7 @@ import {
 } from "./crud.ts";
 import { pg } from "./db.ts";
 import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
+import { backendUsageSummary } from "./disponent-usage.ts";
 import { openSessionEditor } from "./editor.ts";
 import { getDisponent } from "./exe-dev.ts";
 import { fanOutTasks } from "./fanout.ts";
@@ -492,6 +493,12 @@ export const app = new Elysia()
   // `available: false` with a reason when there's no login / the API is down, never
   // an error. The global status bar polls this. See docs/claude-usage-spike.md.
   .get("/claude/usage", () => getClaudeUsage())
+  // Per-backend usage/cost meters, rolled up from disponent's Usage event stream
+  // (accumulated onto each session by the poll loop — see disponent-usage.ts).
+  // Additive observation: this never gates progress, which reads off main's
+  // trailers. Backends with no Usage events honestly read 0. The status bar polls
+  // this alongside /claude/usage.
+  .get("/backends/usage", async () => ({ backends: await backendUsageSummary() }))
   // Persisted operator settings (single-row, survives restart). `autoRebase` gates the
   // watcher's auto @claude-rebase ask; `syncMode`/`syncBranch` configure data-durability
   // autosync; `dispatchBackend` + `exe*` pick and configure the cloud-dispatch backend.
