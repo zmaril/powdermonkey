@@ -9,16 +9,22 @@ name: Visual (Lost Pixel)
 # image (matched to the lost-pixel version in package.json). That's why this runs the
 # image directly rather than lost-pixel from node_modules.
 #
+# Advisory, off the PR gate: this runs on pushes to main (post-merge) and on a weekly
+# schedule, not on pull_request — so a flaky pixel diff can't block a merge. It catches
+# visual drift after it lands (and on the weekly sweep); the diff image is uploaded so
+# the regression is visible on the run.
+#
 # Baselines are seeded once, by hand: run this workflow via "Run workflow"
 # (workflow_dispatch) on the branch. That renders the current stories in the pinned
-# image and commits them as the baseline. Until then the pull_request run is a no-op
-# (it just tells you to seed), so it never blocks the PR. After seeding, every PR
-# compares against those baselines. To accept an intended visual change, re-run the
-# dispatch to refresh the baselines and commit.
+# image and commits them as the baseline. Until then the compare run is a no-op (it
+# just tells you to seed). To accept an intended visual change, re-run the dispatch to
+# refresh the baselines and commit.
 
 on:
-  pull_request:
+  push:
     branches: [main]
+  schedule:
+    - cron: "0 8 * * 1" # weekly visual-drift sweep
   workflow_dispatch:
 
 concurrency:
@@ -38,8 +44,6 @@ jobs:
       contents: write # only used by the manual seed step to commit baselines
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.head_ref }}
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -70,9 +74,9 @@ jobs:
             echo "Baselines already up to date."
           fi
 
-      # PR run: compare against the committed baselines (once they exist).
+      # Post-merge / scheduled run: compare against the committed baselines (once they exist).
       - name: Compare against baselines
-        if: github.event_name == 'pull_request'
+        if: github.event_name != 'workflow_dispatch'
         run: |
           if [ -z "$(ls -A .lostpixel/baseline 2>/dev/null)" ]; then
             echo "::notice title=Lost Pixel::No baselines yet. Run this workflow via 'Run workflow' (workflow_dispatch) on this branch to seed them."
