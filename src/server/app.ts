@@ -23,7 +23,7 @@ import {
 } from "./backup-sync.ts";
 import { getClaudeUsage } from "./claude-usage.ts";
 import { appendComment, archiveComment, listComments, updateComment } from "./comments.ts";
-import { cancelTask, completePhase, completeTask, reopenPhase, reopenTask } from "./completion.ts";
+import { completePhase, reopenPhase, reopenTask } from "./completion.ts";
 import { cors } from "./cors.ts";
 import {
   goalRepo,
@@ -35,7 +35,7 @@ import {
   taskRepo,
 } from "./crud.ts";
 import { pg } from "./db.ts";
-import { dispatchTask, loadTaskPrompt } from "./dispatch.ts";
+import { loadTaskPrompt } from "./dispatch.ts";
 import { backendUsageSummary } from "./disponent-usage.ts";
 import { openSessionEditor } from "./editor.ts";
 import { getDisponent } from "./exe-dev.ts";
@@ -43,20 +43,27 @@ import { fanOutTasks } from "./fanout.ts";
 import { proposeFollowup } from "./followups.ts";
 import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
 import { models, taskKindSchema } from "./models.ts";
+import {
+  buildContext,
+  planLoad,
+  proposalsPending,
+  reconcileOp,
+  taskCancel,
+  taskComplete,
+  taskDispatch,
+} from "./ops/index.ts";
 import { PUBLIC_DIR } from "./paths.ts";
-import { loadPlan, planSchema } from "./plan.ts";
+import { planSchema } from "./plan.ts";
 import { getFileContents, getPrReview, postPrComment, submitReview } from "./pr-review.ts";
 import {
   type CreateProposalInput,
   createProposal,
   decideProposal,
   getProposal,
-  listPending,
   listProposals,
   proposalCreateBody,
 } from "./proposals.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
-import { reconcile } from "./reconcile.ts";
 import { repoIconResponse } from "./repo-icon.ts";
 import { listMyRepos, searchRepos } from "./repo-picker.ts";
 import { registerRepo } from "./repo-register.ts";
@@ -107,6 +114,12 @@ const ptys = new Map<object, PtyHandle>();
 // Per-socket teardown for /sync: each connection owns one PGlite live.changes
 // subscription, dropped when the socket closes.
 const syncSubs = new Map<object, () => void>();
+
+// The shared op context (db + disponent handle). The control routes below delegate
+// to the op-table's handlers (src/server/ops) — the SAME handlers the `pm mcp` stdio
+// server registers as tools — so one op definition backs both the REST route and the
+// MCP tool. Built once; within this process it resolves to this server's store.
+const opCtx = buildContext();
 
 // The tables the browser mirrors as TanStack DB collections. The SELECT and the
 // primary-key column are derived from the Drizzle schema — adding a table here is the
@@ -222,7 +235,14 @@ const tasksGroup = resource("tasks", taskRepo, models.tasks)
   .post(
     "/:id/dispatch",
     async ({ params, body, set }) =>
-      orBadRequest(set, await dispatchTask(launchIds(params.id, body), body?.comment)),
+      orBadRequest(
+        set,
+        await taskDispatch.handler(opCtx, {
+          taskId: Number(params.id),
+          taskIds: body?.taskIds,
+          comment: body?.comment,
+        }),
+      ),
     { body: launchBody },
   )
   // Start a local session: worktree on pm/task-<id> + a session row + trailer block.
@@ -253,13 +273,25 @@ const tasksGroup = resource("tasks", taskRepo, models.tasks)
   .post(
     "/:id/complete",
     async ({ params, body, set }) =>
-      orNotFound(set, await completeTask(Number(params.id), decisionSource(body))),
+      orNotFound(
+        set,
+        await taskComplete.handler(opCtx, {
+          taskId: Number(params.id),
+          source: decisionSource(body),
+        }),
+      ),
     { body: sourceBody },
   )
   .post(
     "/:id/cancel",
     async ({ params, body, set }) =>
-      orNotFound(set, await cancelTask(Number(params.id), decisionSource(body))),
+      orNotFound(
+        set,
+        await taskCancel.handler(opCtx, {
+          taskId: Number(params.id),
+          source: decisionSource(body),
+        }),
+      ),
     { body: sourceBody },
   )
   .post("/:id/reopen", async ({ params, set }) =>
@@ -351,7 +383,7 @@ const reposGroup = resource("repos", repoRepo, models.repos)
 // apply logic lives in proposals.ts / apply.ts.
 const proposalsGroup = new Elysia({ prefix: "/proposals" })
   // List pending — the operator's decision queue. Before "/:id" so it wins the route.
-  .get("/pending", () => listPending())
+  .get("/pending", () => proposalsPending.handler(opCtx, {}))
   .get("/", ({ query }) => listProposals({ status: query.status }), {
     query: t.Object({ status: t.Optional(t.String()) }),
   })
@@ -437,9 +469,9 @@ export const app = new Elysia()
   .get("/health", () => ({ ok: true }))
   // Nested, id-less plan loader — Elysia validates the body against the TypeBox
   // plan schema before the handler runs.
-  .post("/plan", ({ body }) => loadPlan(body), { body: planSchema })
+  .post("/plan", ({ body }) => planLoad.handler(opCtx, body), { body: planSchema })
   // Reconcile progress from PM trailers on main. Also runs on a poll loop.
-  .post("/reconcile", () => reconcile())
+  .post("/reconcile", () => reconcileOp.handler(opCtx, {}))
   // Poll GitHub for pm/task-* PRs now (set prUrl, wake reconcile on merge). The
   // github-watch loop does this every 10s; this triggers a pass on demand.
   .post("/github-sync", () => syncCloudPrs())
