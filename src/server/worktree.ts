@@ -6,6 +6,7 @@ import { db } from "./db.ts";
 import { CROSS_REPO_ERROR, loadTaskPrompt, spansRepos } from "./dispatch.ts";
 import { teardownRemoteWorker } from "./exe-dev.ts";
 import { worktreeAdd, worktreeAddRemote, worktreeRemove } from "./git.ts";
+import { cancelLocalWorker, provisionLocalWorker, teardownLocalWorker } from "./local-disponent.ts";
 import { repoDirForTask, supervisorRepoDir } from "./repo-cache.ts";
 import { type Session, sessions, tasks } from "./schema.ts";
 import { killSessionPty, startSessionPty } from "./session-pty.ts";
@@ -15,6 +16,24 @@ import { linkSessionTasks, taskIdsForSession } from "./session-tasks.ts";
 // worktree on `pm/task-<id>`, branched off main, where work happens without
 // touching the supervisor's main checkout. When the branch lands on main with
 // PM-Phase trailers, reconciliation marks the work done — same as a cloud session.
+//
+// Provisioning has two selectable paths (slice 2 of issue 152). The DEFAULT stays pm's
+// own git worktree + interactive tmux PTY (startLocalViaWorktree). Opting in with
+// PM_LOCAL_BACKEND=disponent routes the default start through disponent's local
+// tmux backend instead (local-disponent.ts): the engine cuts the worktree with
+// `isolation: "worktree"` off pm's repo cache clone, drops the brief in, and runs
+// the agent in its own `tmux -L disponent` session. Land reaps it (worktree gone,
+// branch kept); stop cancels it (agent gone, worktree kept). TELEPORT always keeps
+// the pm-owned path: disponent's local backend can't fetch a remote branch or run
+// `claude --teleport`. (A later slice flips the default + retires the pm path once
+// teleport is migrated.)
+
+/** Which backend a plain `start-local` uses: the pm-owned git worktree + PTY
+ *  (default), or disponent's local tmux worktree backend (PM_LOCAL_BACKEND=disponent).
+ *  Teleport ignores this — it always needs the pm-owned path. */
+function localDisponentEnabled(): boolean {
+  return process.env.PM_LOCAL_BACKEND === "disponent";
+}
 
 const MAIN_BRANCH = process.env.PM_MAIN_BRANCH ?? "main";
 
@@ -106,6 +125,91 @@ export async function startLocalSession(
 
   // One worktree + branch for all selected tasks, named after the primary task.
   const branch = opts.branch ?? `pm/task-${primary}`;
+  const ctx: LaunchCtx = { ids, primary, branch, repoCwd, prompt, trailers };
+
+  // Teleport (a custom startup, and possibly a remote branch to fetch) always uses
+  // pm's own worktree + PTY. A plain start-local uses disponent's local backend
+  // when opted in (PM_LOCAL_BACKEND=disponent), else the pm-owned path — see the
+  // module comment.
+  const viaDisponent = !opts.fetchRemote && !opts.startup && localDisponentEnabled();
+  return viaDisponent ? startLocalViaDisponent(ctx) : startLocalViaWorktree(ctx, baseRef, opts);
+}
+
+/** The resolved launch inputs both provisioning paths share. */
+type LaunchCtx = {
+  ids: number[];
+  primary: number;
+  branch: string;
+  repoCwd: string;
+  prompt: string;
+  trailers: string[];
+};
+
+/** Insert the session row, link its tasks, and mark them all `Dispatched` — the
+ *  identical bookkeeping tail both provisioning paths run once their worker is up.
+ *  The only per-path difference is the insert `values` (disponent adds `vmName`). */
+async function recordDispatchedSession(
+  values: typeof sessions.$inferInsert,
+  ids: number[],
+): Promise<Session> {
+  const [session] = await db.insert(sessions).values(values).returning();
+  await linkSessionTasks(session.id, ids);
+  await db
+    .update(tasks)
+    .set({ status: TaskStatus.Dispatched, updatedAt: new Date() })
+    .where(inArray(tasks.id, ids));
+  return session;
+}
+
+/** Provision through disponent's local tmux backend: the engine cuts the worktree
+ *  (isolation "worktree", branch `pm/task-<id>` off the cache clone) and runs the
+ *  agent in tmux. pm keeps a tracking row — branch + worktree_path + the engine
+ *  session uid in vm_name (so land/stop reap/cancel it). No pm-owned git or PTY. */
+async function startLocalViaDisponent(ctx: LaunchCtx): Promise<StartLocalResult> {
+  const { ids, primary, branch, repoCwd, prompt, trailers } = ctx;
+
+  const prov = await provisionLocalWorker({
+    taskId: primary,
+    repoDir: repoCwd,
+    branch,
+    brief: prompt,
+  });
+  if (!prov.ok) return { ok: false, error: prov.error, output: prov.output };
+
+  // disponent's local layout puts the worktree at `<workDir>/task`; store that as
+  // the session's worktree_path (what the UI's shell fallback opens), and the
+  // engine session uid in vm_name so land (reap) / stop (cancel) reach the engine.
+  const worktreePath = join(prov.workDir, "task"); // lint-allow-string: path segment, not TaskKind
+  const session = await recordDispatchedSession(
+    {
+      kind: SessionKind.Local,
+      state: SessionState.Running,
+      branch,
+      worktreePath,
+      vmName: prov.uid,
+    },
+    ids,
+  );
+
+  // TERMINAL-ATTACH SEAM (deferred — see PR/report): the agent runs under
+  // `tmux -L ${prov.handle.socket} attach -t ${prov.handle.tmux}`. Pointing pm's
+  // browser terminal at THAT tmux (rather than spawning its own via
+  // startSessionPty) is not yet wired; until then /pty falls back to a fresh shell
+  // in `worktreePath`. Provisioning + lifecycle are the solid, tested surface here.
+
+  return { ok: true, session, worktreePath, branch, prompt, trailers };
+}
+
+/** Provision with pm's own git worktree + interactive tmux PTY. The teleport path:
+ *  it may fetch a remote branch (fetchRemote) and runs a bespoke startup command
+ *  (`claude --teleport <id>`), neither of which disponent's local backend supports. */
+async function startLocalViaWorktree(
+  ctx: LaunchCtx,
+  baseRef: string,
+  opts: StartLocalOpts,
+): Promise<StartLocalResult> {
+  const { ids, primary, branch, repoCwd, prompt, trailers } = ctx;
+
   const worktreePath = worktreePathFor(primary);
   mkdirSync(worktreeBase(), { recursive: true });
 
@@ -116,15 +220,10 @@ export async function startLocalSession(
 
   // One session row for all the tasks, linked through the session_tasks join; each
   // task is marked dispatched so the whole batch moves to Active together.
-  const [session] = await db
-    .insert(sessions)
-    .values({ kind: SessionKind.Local, state: SessionState.Running, branch, worktreePath })
-    .returning();
-  await linkSessionTasks(session.id, ids);
-  await db
-    .update(tasks)
-    .set({ status: TaskStatus.Dispatched, updatedAt: new Date() })
-    .where(inArray(tasks.id, ids));
+  const session = await recordDispatchedSession(
+    { kind: SessionKind.Local, state: SessionState.Running, branch, worktreePath },
+    ids,
+  );
 
   // Stash the prompt where the startup command can reach it, then bring up the
   // session's persistent interactive PTY in the worktree. Clients attach to this
@@ -137,6 +236,33 @@ export async function startLocalSession(
   return { ok: true, session, worktreePath, branch, prompt, trailers };
 }
 
+/** A local session provisioned through disponent (as opposed to pm's own worktree,
+ *  the teleport path). Distinguished by the engine session uid parked in vm_name. */
+function isDisponentLocal(session: Session): boolean {
+  return session.kind === SessionKind.Local && session.vmName != null;
+}
+
+/** Load a session by id, or the "unknown session" error that land, stop, and the
+ *  editor opener all return when it's gone. */
+export async function requireSession(
+  sessionId: number,
+): Promise<{ ok: true; session: Session } | { ok: false; error: string }> {
+  const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+  if (!session) return { ok: false, error: `unknown session "${sessionId}"` };
+  return { ok: true, session };
+}
+
+/** Flip a session into a terminal state and archive it (land → idle, stop →
+ *  stopped), returning the updated row — the shared closing move of both paths. */
+async function archiveSession(sessionId: number, state: SessionState): Promise<Session> {
+  const [updated] = await db
+    .update(sessions)
+    .set({ state, archivedAt: new Date(), updatedAt: new Date() })
+    .where(eq(sessions.id, sessionId))
+    .returning();
+  return updated;
+}
+
 export type LandResult =
   | { ok: true; session: Session }
   | { ok: false; error: string; output?: string };
@@ -145,33 +271,38 @@ export type LandResult =
  *  merge of its branch into main is a normal git action; reconciliation then reads
  *  the trailers off main. Fails if the worktree has uncommitted changes. */
 export async function landSession(sessionId: number): Promise<LandResult> {
-  const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId));
-  if (!session) return { ok: false, error: `unknown session "${sessionId}"` };
+  const found = await requireSession(sessionId);
+  if (!found.ok) return found;
+  const { session } = found;
 
-  // Tear down the live PTY (if any) before removing its worktree out from under it.
-  killSessionPty(sessionId);
+  if (isDisponentLocal(session)) {
+    // The engine owns teardown: reap kills the tmux agent and removes the
+    // worktree (keeping the branch's committed work). No pm PTY / git here.
+    const r = await teardownLocalWorker(session.vmName as string);
+    if (!r.ok) return { ok: false, error: "disponent reap failed", output: r.output };
+  } else {
+    // pm-owned local (teleport) or remote. Tear down the live PTY (if any) before
+    // removing its worktree out from under it.
+    killSessionPty(sessionId);
 
-  if (session.worktreePath) {
-    const rm = await worktreeRemove(session.worktreePath, {
-      cwd: await repoDirForSession(sessionId),
-    });
-    if (!rm.ok) {
-      return {
-        ok: false,
-        error: "git worktree remove failed (commit or clean the worktree first)",
-        output: rm.output,
-      };
+    if (session.worktreePath) {
+      const rm = await worktreeRemove(session.worktreePath, {
+        cwd: await repoDirForSession(sessionId),
+      });
+      if (!rm.ok) {
+        return {
+          ok: false,
+          error: "git worktree remove failed (commit or clean the worktree first)",
+          output: rm.output,
+        };
+      }
     }
+
+    // Remote exe.dev worker (no worktree): delete its VM. No-op for claude --remote.
+    await teardownRemoteWorker(session);
   }
 
-  // Remote exe.dev worker (no worktree): delete its VM. No-op for local / claude --remote.
-  await teardownRemoteWorker(session);
-
-  const [updated] = await db
-    .update(sessions)
-    .set({ state: SessionState.Idle, archivedAt: new Date(), updatedAt: new Date() })
-    .where(eq(sessions.id, sessionId))
-    .returning();
+  const updated = await archiveSession(sessionId, SessionState.Idle);
   return { ok: true, session: updated };
 }
 
@@ -193,10 +324,17 @@ export type StopResult =
  *  - remote: we can't reach the cloud run from here, so all we can do is record it
  *    as stopped; the operator stops the actual run in the Claude web UI. */
 export async function stopSession(sessionId: number): Promise<StopResult> {
-  const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId));
-  if (!session) return { ok: false, error: `unknown session "${sessionId}"` };
+  const found = await requireSession(sessionId);
+  if (!found.ok) return found;
+  const { session } = found;
 
-  if (session.kind === SessionKind.Local) {
+  if (isDisponentLocal(session)) {
+    // Abort through the engine: cancel kills the tmux agent and LEAVES the
+    // worktree in place for inspection (reap, on land, is what removes it). A
+    // failed cancel is logged, never fatal — the point is to stop the agent.
+    const r = await cancelLocalWorker(session.vmName as string);
+    if (!r.ok) console.warn(`stop: disponent cancel (non-fatal): ${r.output}`);
+  } else if (session.kind === SessionKind.Local) {
     // Kill the live agent first, then drop its worktree out from under it. The
     // force-remove can still fail (e.g. the path is already gone); that's logged
     // but never blocks the abort — the point is to stop the agent, not to garbage
@@ -214,11 +352,7 @@ export async function stopSession(sessionId: number): Promise<StopResult> {
   // Remote exe.dev worker: delete its VM (best-effort). No-op for local / claude --remote.
   await teardownRemoteWorker(session);
 
-  const [updated] = await db
-    .update(sessions)
-    .set({ state: SessionState.Stopped, archivedAt: new Date(), updatedAt: new Date() })
-    .where(eq(sessions.id, sessionId))
-    .returning();
+  const updated = await archiveSession(sessionId, SessionState.Stopped);
 
   // Roll every still-in-flight task this session was working back to pending so
   // they're dispatchable again, and clear the runtime session fields that pointed

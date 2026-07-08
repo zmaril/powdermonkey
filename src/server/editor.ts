@@ -1,9 +1,10 @@
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { match } from "ts-pattern";
 import { SessionKind } from "../shared/types.ts";
 import { db } from "./db.ts";
-import { sessions, tasks } from "./schema.ts";
+import { tasks } from "./schema.ts";
 import { taskIdsForSession } from "./session-tasks.ts";
+import { requireSession } from "./worktree.ts";
 
 // Open a session's work in VS Code on the operator's machine. The supervisor runs
 // locally, so it can spawn GUI apps directly. A `local` session opens its git
@@ -30,8 +31,9 @@ function spawnDetached(cmd: string[]): void {
 }
 
 export async function openSessionEditor(sessionId: number): Promise<OpenEditorResult> {
-  const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId));
-  if (!session) return { ok: false, error: `unknown session "${sessionId}"` };
+  const found = await requireSession(sessionId);
+  if (!found.ok) return found;
+  const { session } = found;
 
   // Exhaustive over SessionKind: adding a kind makes this a compile error until
   // it's handled here, so a new session type can never silently fall through.
