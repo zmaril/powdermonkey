@@ -1,6 +1,7 @@
 import { Anchor, Box, Card, Group, Stack, Text } from "@mantine/core";
 import { IconExternalLink } from "@tabler/icons-react";
 import type { Session, Task } from "../../../server/schema.ts";
+import { SessionKind } from "../../../shared/types.ts";
 import { Markdown } from "../../markdown.tsx";
 import type { Indexes } from "../../plan-data.ts";
 import {
@@ -14,6 +15,8 @@ import {
 import { timeAgo } from "../../time.ts";
 import { ColumnLabel } from "./ColumnLabel.tsx";
 import { contextOf, workerPrs } from "./grouping.ts";
+import { SessionComposer } from "./SessionComposer.tsx";
+import { SessionEventFeed } from "./SessionEventFeed.tsx";
 import { TaskLine } from "./TaskLine.tsx";
 
 /** One worker = one card. The header holds everything session-level (kind · state ·
@@ -89,34 +92,48 @@ export function WorkerCard({
           </Stack>
         </Stack>
         <Stack gap="snug" style={{ minWidth: 0 }}>
-          <Group gap="snug" justify="space-between" wrap="nowrap">
-            <Group gap="snug" wrap="nowrap">
+          {session.kind === SessionKind.Remote ? (
+            // A disponent-managed worker surfaces its LIVE event feed (drained from
+            // disponent's stream — see disponent-feed.ts) plus a composer to send it
+            // input, instead of relying on PR comments alone. The composer only shows
+            // on a live session; a historical one keeps the feed as a read-only record.
+            <>
               <ColumnLabel>Agent Status</ColumnLabel>
-              {commentPr?.lastCommentUrl && (
-                <Anchor
-                  href={commentPr.lastCommentUrl}
-                  target="_blank"
-                  title="View on GitHub"
-                  style={{ display: "inline-flex", lineHeight: 1 }}
-                >
-                  <IconExternalLink size={14} />
-                </Anchor>
-              )}
-            </Group>
-            {commentPr?.lastCommentAt && (
-              <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
-                {timeAgo(commentPr.lastCommentAt)}
-              </Text>
-            )}
-          </Group>
-          {commentPr?.lastComment ? (
-            <Box style={{ maxHeight: 240, overflowY: "auto" }}>
-              <Markdown source={commentPr.lastComment} />
-            </Box>
+              <SessionEventFeed session={session} />
+              {live && <SessionComposer session={session} />}
+            </>
           ) : (
-            <Text size="xs" c="dimmed">
-              — nothing yet
-            </Text>
+            <>
+              <Group gap="snug" justify="space-between" wrap="nowrap">
+                <Group gap="snug" wrap="nowrap">
+                  <ColumnLabel>Agent Status</ColumnLabel>
+                  {commentPr?.lastCommentUrl && (
+                    <Anchor
+                      href={commentPr.lastCommentUrl}
+                      target="_blank"
+                      title="View on GitHub"
+                      style={{ display: "inline-flex", lineHeight: 1 }}
+                    >
+                      <IconExternalLink size={14} />
+                    </Anchor>
+                  )}
+                </Group>
+                {commentPr?.lastCommentAt && (
+                  <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
+                    {timeAgo(commentPr.lastCommentAt)}
+                  </Text>
+                )}
+              </Group>
+              {commentPr?.lastComment ? (
+                <Box style={{ maxHeight: 240, overflowY: "auto" }}>
+                  <Markdown source={commentPr.lastComment} />
+                </Box>
+              ) : (
+                <Text size="xs" c="dimmed">
+                  — nothing yet
+                </Text>
+              )}
+            </>
           )}
         </Stack>
       </Group>

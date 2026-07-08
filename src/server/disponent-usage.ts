@@ -10,7 +10,7 @@
 // two Disponent instances on one SQLite sink would contend, so we never open a
 // second one.
 
-import type { Event } from "@disponent/node";
+import type { Event, EventKind } from "@disponent/node";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { SessionKind } from "../shared/types.ts";
 import { db as realDb } from "./db.ts";
@@ -58,14 +58,17 @@ export function accumulateUsage(prev: UsageTotals, events: Event[]): Accumulated
  *  stream we pump until it returns null, so a runaway backend can't spin us. */
 const DRAIN_CAP = 10_000;
 
-/** Drain the currently-available Usage events for a disponent session after
- *  `afterIdx`, in order. Pumps `events(...).next()` until it resolves null. */
-export async function drainUsageEvents(
+/** Drain the currently-available events for a disponent session after `afterIdx`, in
+ *  order, restricted to `kinds`. Pumps `events(...).next()` until it resolves null.
+ *  `kinds` defaults to [Usage] so the usage poller's behavior is unchanged; the feed
+ *  poller (disponent-feed.ts) passes the complement so the two drains share one pump. */
+export async function drainSessionEvents(
   d: ReturnType<typeof getDisponent>,
   sessionUid: string,
   afterIdx?: number,
+  kinds: EventKind[] = ["usage"], // lint-allow-string: disponent EventKind token, not a pm enum
 ): Promise<Event[]> {
-  const stream = d.events({ sessionUid, afterIdx, kinds: ["usage"] }); // lint-allow-string: disponent EventKind token, not a pm enum
+  const stream = d.events({ sessionUid, afterIdx, kinds });
   const out: Event[] = [];
   for (let i = 0; i < DRAIN_CAP; i++) {
     const ev = await stream.next();
@@ -73,6 +76,16 @@ export async function drainUsageEvents(
     out.push(ev);
   }
   return out;
+}
+
+/** Drain the currently-available Usage events — the slice-3 default over the shared
+ *  pump above. Kept as a named seam so the usage poller and its test read unchanged. */
+export function drainUsageEvents(
+  d: ReturnType<typeof getDisponent>,
+  sessionUid: string,
+  afterIdx?: number,
+): Promise<Event[]> {
+  return drainSessionEvents(d, sessionUid, afterIdx, ["usage"]); // lint-allow-string: disponent EventKind token, not a pm enum
 }
 
 /** Injectable seams — real implementations by default, overridable in tests. */
@@ -83,6 +96,47 @@ export type PollDeps = {
 };
 
 const defaultDeps: PollDeps = { db: realDb, getDisponent, sessionForVm };
+
+/** The predicate that selects a live, disponent-managed session backed by a worker VM:
+ *  a non-archived Remote session with a vmName. Both poll loops (usage + feed) drive off
+ *  exactly this set, so the definition of "a session worth draining" lives in one place. */
+export function liveRemoteVmSessions() {
+  return and(
+    eq(sessions.kind, SessionKind.Remote),
+    isNull(sessions.archivedAt),
+    isNotNull(sessions.vmName),
+  );
+}
+
+/** The shared poll-tick scaffolding both drains ride on: open the engine ONCE, then for
+ *  each already-selected session resolve its disponent handle and hand it to `handle`.
+ *  Best-effort — each row's work is wrapped so one failure can't abort the tick, and a
+ *  row with no vmName or no resolvable disponent session is skipped. Factored out so the
+ *  usage and feed pollers share one loop (one engine, one per-row discipline) and differ
+ *  only in what they drain and persist. */
+export async function forEachRemoteVmSession<Row extends { vmName: string | null }>(
+  deps: Pick<PollDeps, "getDisponent" | "sessionForVm">,
+  rows: Row[],
+  label: string,
+  handle: (
+    row: Row,
+    d: ReturnType<PollDeps["getDisponent"]>,
+    dsession: NonNullable<Awaited<ReturnType<PollDeps["sessionForVm"]>>>,
+  ) => Promise<void>,
+): Promise<void> {
+  if (rows.length === 0) return;
+  const d = deps.getDisponent();
+  for (const row of rows) {
+    if (!row.vmName) continue;
+    try {
+      const dsession = await deps.sessionForVm(d, row.vmName);
+      if (!dsession) continue;
+      await handle(row, d, dsession);
+    } catch (e) {
+      console.warn(`${label}: poll ${row.vmName} (non-fatal): ${e}`);
+    }
+  }
+}
 
 /** One usage-poll tick: for every live remote pm session backed by a worker VM,
  *  resolve its disponent session, drain the Usage events past the stored cursor,
@@ -103,23 +157,15 @@ export async function pollDisponentUsage(deps: PollDeps = defaultDeps): Promise<
       cursor: sessions.usageEventCursor,
     })
     .from(sessions)
-    .where(
-      and(
-        eq(sessions.kind, SessionKind.Remote),
-        isNull(sessions.archivedAt),
-        isNotNull(sessions.vmName),
-      ),
-    );
-  if (rows.length === 0) return;
+    .where(liveRemoteVmSessions());
 
-  const d = getD();
-  for (const row of rows) {
-    if (!row.vmName) continue;
-    try {
-      const dsession = await forVm(d, row.vmName);
-      if (!dsession) continue;
+  await forEachRemoteVmSession(
+    { getDisponent: getD, sessionForVm: forVm },
+    rows,
+    "disponent-usage",
+    async (row, d, dsession) => {
       const events = await drainUsageEvents(d, dsession.uid, row.cursor ?? undefined);
-      if (events.length === 0) continue;
+      if (events.length === 0) return;
       const next = accumulateUsage(
         { inputTokens: row.inputTokens, outputTokens: row.outputTokens, costCents: row.costCents },
         events,
@@ -133,10 +179,8 @@ export async function pollDisponentUsage(deps: PollDeps = defaultDeps): Promise<
           usageEventCursor: next.maxIdx ?? row.cursor,
         })
         .where(eq(sessions.id, row.id));
-    } catch (e) {
-      console.warn(`disponent-usage: poll ${row.vmName} (non-fatal): ${e}`);
-    }
-  }
+    },
+  );
 }
 
 /** One backend's rolled-up usage: how many live sessions it has and their summed

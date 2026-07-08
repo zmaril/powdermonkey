@@ -4,6 +4,7 @@
 import { app } from "./app.ts";
 import { startAutosync } from "./backup-sync.ts";
 import { ready } from "./db.ts";
+import { pollDisponentFeed } from "./disponent-feed.ts";
 import { pollDisponentUsage } from "./disponent-usage.ts";
 import { gcOrphanedWorkers } from "./exe-dev.ts";
 import { startGithubWatch } from "./github-watch.ts";
@@ -99,6 +100,7 @@ if (USAGE_POLL_MS > 0) {
     usageRunning = true;
     try {
       await pollDisponentUsage();
+      await pollDisponentFeed();
     } catch (e) {
       console.warn("usage poll tick failed:", e instanceof Error ? e.message : e);
     } finally {
