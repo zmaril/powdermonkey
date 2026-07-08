@@ -17,7 +17,7 @@ import { linkSessionTasks, taskIdsForSession } from "./session-tasks.ts";
 // touching the supervisor's main checkout. When the branch lands on main with
 // PM-Phase trailers, reconciliation marks the work done — same as a cloud session.
 //
-// Provisioning has two selectable paths (slice 2 of #152). The DEFAULT stays pm's
+// Provisioning has two selectable paths (slice 2 of issue 152). The DEFAULT stays pm's
 // own git worktree + interactive tmux PTY (startLocalViaWorktree). Opting in with
 // PM_LOCAL_BACKEND=disponent routes the default start through disponent's local
 // tmux backend instead (local-disponent.ts): the engine cuts the worktree with
@@ -145,6 +145,22 @@ type LaunchCtx = {
   trailers: string[];
 };
 
+/** Insert the session row, link its tasks, and mark them all `Dispatched` — the
+ *  identical bookkeeping tail both provisioning paths run once their worker is up.
+ *  The only per-path difference is the insert `values` (disponent adds `vmName`). */
+async function recordDispatchedSession(
+  values: typeof sessions.$inferInsert,
+  ids: number[],
+): Promise<Session> {
+  const [session] = await db.insert(sessions).values(values).returning();
+  await linkSessionTasks(session.id, ids);
+  await db
+    .update(tasks)
+    .set({ status: TaskStatus.Dispatched, updatedAt: new Date() })
+    .where(inArray(tasks.id, ids));
+  return session;
+}
+
 /** Provision through disponent's local tmux backend: the engine cuts the worktree
  *  (isolation "worktree", branch `pm/task-<id>` off the cache clone) and runs the
  *  agent in tmux. pm keeps a tracking row — branch + worktree_path + the engine
@@ -164,21 +180,16 @@ async function startLocalViaDisponent(ctx: LaunchCtx): Promise<StartLocalResult>
   // the session's worktree_path (what the UI's shell fallback opens), and the
   // engine session uid in vm_name so land (reap) / stop (cancel) reach the engine.
   const worktreePath = join(prov.workDir, "task"); // lint-allow-string: path segment, not TaskKind
-  const [session] = await db
-    .insert(sessions)
-    .values({
+  const session = await recordDispatchedSession(
+    {
       kind: SessionKind.Local,
       state: SessionState.Running,
       branch,
       worktreePath,
       vmName: prov.uid,
-    })
-    .returning();
-  await linkSessionTasks(session.id, ids);
-  await db
-    .update(tasks)
-    .set({ status: TaskStatus.Dispatched, updatedAt: new Date() })
-    .where(inArray(tasks.id, ids));
+    },
+    ids,
+  );
 
   // TERMINAL-ATTACH SEAM (deferred — see PR/report): the agent runs under
   // `tmux -L ${prov.handle.socket} attach -t ${prov.handle.tmux}`. Pointing pm's
@@ -209,15 +220,10 @@ async function startLocalViaWorktree(
 
   // One session row for all the tasks, linked through the session_tasks join; each
   // task is marked dispatched so the whole batch moves to Active together.
-  const [session] = await db
-    .insert(sessions)
-    .values({ kind: SessionKind.Local, state: SessionState.Running, branch, worktreePath })
-    .returning();
-  await linkSessionTasks(session.id, ids);
-  await db
-    .update(tasks)
-    .set({ status: TaskStatus.Dispatched, updatedAt: new Date() })
-    .where(inArray(tasks.id, ids));
+  const session = await recordDispatchedSession(
+    { kind: SessionKind.Local, state: SessionState.Running, branch, worktreePath },
+    ids,
+  );
 
   // Stash the prompt where the startup command can reach it, then bring up the
   // session's persistent interactive PTY in the worktree. Clients attach to this
@@ -236,6 +242,27 @@ function isDisponentLocal(session: Session): boolean {
   return session.kind === SessionKind.Local && session.vmName != null;
 }
 
+/** Load a session by id, or the "unknown session" error that land, stop, and the
+ *  editor opener all return when it's gone. */
+export async function requireSession(
+  sessionId: number,
+): Promise<{ ok: true; session: Session } | { ok: false; error: string }> {
+  const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+  if (!session) return { ok: false, error: `unknown session "${sessionId}"` };
+  return { ok: true, session };
+}
+
+/** Flip a session into a terminal state and archive it (land → idle, stop →
+ *  stopped), returning the updated row — the shared closing move of both paths. */
+async function archiveSession(sessionId: number, state: SessionState): Promise<Session> {
+  const [updated] = await db
+    .update(sessions)
+    .set({ state, archivedAt: new Date(), updatedAt: new Date() })
+    .where(eq(sessions.id, sessionId))
+    .returning();
+  return updated;
+}
+
 export type LandResult =
   | { ok: true; session: Session }
   | { ok: false; error: string; output?: string };
@@ -244,8 +271,9 @@ export type LandResult =
  *  merge of its branch into main is a normal git action; reconciliation then reads
  *  the trailers off main. Fails if the worktree has uncommitted changes. */
 export async function landSession(sessionId: number): Promise<LandResult> {
-  const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId));
-  if (!session) return { ok: false, error: `unknown session "${sessionId}"` };
+  const found = await requireSession(sessionId);
+  if (!found.ok) return found;
+  const { session } = found;
 
   if (isDisponentLocal(session)) {
     // The engine owns teardown: reap kills the tmux agent and removes the
@@ -274,11 +302,7 @@ export async function landSession(sessionId: number): Promise<LandResult> {
     await teardownRemoteWorker(session);
   }
 
-  const [updated] = await db
-    .update(sessions)
-    .set({ state: SessionState.Idle, archivedAt: new Date(), updatedAt: new Date() })
-    .where(eq(sessions.id, sessionId))
-    .returning();
+  const updated = await archiveSession(sessionId, SessionState.Idle);
   return { ok: true, session: updated };
 }
 
@@ -300,8 +324,9 @@ export type StopResult =
  *  - remote: we can't reach the cloud run from here, so all we can do is record it
  *    as stopped; the operator stops the actual run in the Claude web UI. */
 export async function stopSession(sessionId: number): Promise<StopResult> {
-  const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId));
-  if (!session) return { ok: false, error: `unknown session "${sessionId}"` };
+  const found = await requireSession(sessionId);
+  if (!found.ok) return found;
+  const { session } = found;
 
   if (isDisponentLocal(session)) {
     // Abort through the engine: cancel kills the tmux agent and LEAVES the
@@ -327,11 +352,7 @@ export async function stopSession(sessionId: number): Promise<StopResult> {
   // Remote exe.dev worker: delete its VM (best-effort). No-op for local / claude --remote.
   await teardownRemoteWorker(session);
 
-  const [updated] = await db
-    .update(sessions)
-    .set({ state: SessionState.Stopped, archivedAt: new Date(), updatedAt: new Date() })
-    .where(eq(sessions.id, sessionId))
-    .returning();
+  const updated = await archiveSession(sessionId, SessionState.Stopped);
 
   // Roll every still-in-flight task this session was working back to pending so
   // they're dispatchable again, and clear the runtime session fields that pointed

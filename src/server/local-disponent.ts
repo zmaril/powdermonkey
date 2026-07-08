@@ -1,5 +1,5 @@
-import { type Session as DSession, SessionState as DState, IsolationKind } from "@disponent/node";
-import { getDisponent, STATE_NAMES, waitForRunning } from "./disponent.ts";
+import { IsolationKind } from "@disponent/node";
+import { dispatchAndAwaitRunning, getDisponent } from "./disponent.ts";
 
 // The local dispatch backend — a thin adapter over disponent's local tmux
 // backend (github.com/zmaril/disponent). Where the exe.dev adapter (exe-dev.ts)
@@ -57,31 +57,23 @@ export async function provisionLocalWorker(
   const { taskId, repoDir, branch, brief } = args;
   const d = getDisponent();
 
-  let dispatched: DSession;
-  try {
-    dispatched = await d.dispatch({
+  const started = await dispatchAndAwaitRunning(
+    d,
+    taskId,
+    {
       brief,
       env: "local", // lint-allow-string: disponent's environment slug, not pm's SessionKind
       repo: repoDir,
       isolation: IsolationKind.Worktree,
       gitRef: branch,
-      title: `pm-task-${taskId}`,
-      labels: JSON.stringify({ pmTask: taskId }),
-    });
-  } catch (e) {
-    return { ok: false, error: `disponent dispatch: ${e instanceof Error ? e.message : e}` };
-  }
-
-  const settled = await waitForRunning(d, dispatched.uid, PROVISION_TIMEOUT_MS);
-  if (settled.state !== DState.Running || !settled.envHandle) {
-    return {
-      ok: false,
-      error: `local worker never came up (${STATE_NAMES[settled.state] ?? settled.state})`,
-      output: settled.exitDetail ?? undefined,
-    };
-  }
-  const handle = JSON.parse(settled.envHandle) as LocalHandle;
-  return { ok: true, uid: dispatched.uid, workDir: handle.workDir, handle };
+    },
+    { timeoutMs: PROVISION_TIMEOUT_MS, label: "local worker" },
+  );
+  if (!started.ok) return started;
+  const { session } = started;
+  // envHandle is non-null by the readiness gate in dispatchAndAwaitRunning.
+  const handle = JSON.parse(session.envHandle as string) as LocalHandle;
+  return { ok: true, uid: session.uid, workDir: handle.workDir, handle };
 }
 
 export type LocalCmdResult = { ok: boolean; output: string };

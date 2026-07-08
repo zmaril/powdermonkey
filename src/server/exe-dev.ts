@@ -3,7 +3,7 @@ import { type Disponent, type Session as DSession, SessionState as DState } from
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { SessionKind } from "../shared/types.ts";
 import { db } from "./db.ts";
-import { getDisponent, STATE_NAMES, waitForRunning } from "./disponent.ts";
+import { dispatchAndAwaitRunning, getDisponent } from "./disponent.ts";
 import { sessions } from "./schema.ts";
 import { type ExeDevConfig, getExeDevConfig } from "./settings.ts";
 
@@ -71,29 +71,26 @@ export async function provisionWorker(args: ProvisionArgs): Promise<ProvisionRes
   const d = getDisponent(cfg);
   const brief = readFileSync(promptPath, "utf8");
 
-  let dispatched: DSession;
-  try {
-    dispatched = await d.dispatch({
+  const started = await dispatchAndAwaitRunning(
+    d,
+    taskId,
+    {
       brief,
       env: "exe-dev", // lint-allow-string: disponent's environment slug, not pm's DispatchBackend
       repo: slug,
       template: cfg.template,
-      title: `pm-task-${taskId}`,
-      labels: JSON.stringify({ pmTask: taskId }),
-    });
-  } catch (e) {
-    return { ok: false, error: `disponent dispatch: ${e instanceof Error ? e.message : e}` };
-  }
-
-  const settled = await waitForRunning(d, dispatched.uid, PROVISION_TIMEOUT_MS);
-  if (settled.state !== DState.Running || !settled.envHandle || !settled.url) {
-    return {
-      ok: false,
-      error: `worker never came up (${STATE_NAMES[settled.state] ?? settled.state})`,
-      output: settled.exitDetail ?? undefined,
-    };
-  }
-  return { ok: true, vmName: JSON.parse(settled.envHandle).vmName, url: settled.url };
+    },
+    // exe.dev isn't up until its ttyd URL is published, too.
+    { timeoutMs: PROVISION_TIMEOUT_MS, label: "worker", ready: (s) => s.url != null },
+  );
+  if (!started.ok) return started;
+  const { session } = started;
+  // Non-null by the readiness gate above (Running + envHandle + url).
+  return {
+    ok: true,
+    vmName: JSON.parse(session.envHandle as string).vmName,
+    url: session.url as string,
+  };
 }
 
 /** Delete a worker VM (disponent reap: resources torn down, ledger archived). */

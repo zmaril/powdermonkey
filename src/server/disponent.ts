@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
+  type DispatchSpec,
   Disponent,
   type Session as DSession,
   SessionState as DState,
@@ -64,6 +65,29 @@ export const STATE_NAMES: Record<number, string> = Object.fromEntries(
   Object.entries(DState).map(([name, value]) => [value as number, name]),
 );
 
+/** Dispatch one worker for a pm task, turning a thrown engine error into the
+ *  `{ok:false}` failure report both backends surface. It stamps the identifying
+ *  `title` / `labels` both backends share (`pm-task-<id>` + `{pmTask:id}`), so the
+ *  caller only supplies the backend-specific spec (exe.dev: env/repo/template/…;
+ *  local: env "local"/isolation/gitRef/repo/…). On success the started session
+ *  rides back on `.session`. */
+export async function tryDispatch(
+  d: Disponent,
+  taskId: number,
+  spec: Omit<DispatchSpec, "title" | "labels">,
+): Promise<{ ok: true; session: DSession } | { ok: false; error: string }> {
+  try {
+    const session = await d.dispatch({
+      ...spec,
+      title: `pm-task-${taskId}`,
+      labels: JSON.stringify({ pmTask: taskId }),
+    });
+    return { ok: true, session };
+  } catch (e) {
+    return { ok: false, error: `disponent dispatch: ${e instanceof Error ? e.message : e}` };
+  }
+}
+
 /** Poll until the session leaves queued/provisioning (disponent provisions on a
  *  background thread; its `wait()` waits for *terminal*, which a healthy worker
  *  never reaches — running is the success here). Shared by both backends. */
@@ -80,4 +104,34 @@ export async function waitForRunning(
     if (!settling || Date.now() >= deadline) return s;
     await new Promise((r) => setTimeout(r, 500));
   }
+}
+
+/** The shared provisioning spine of both backends: dispatch a worker (`tryDispatch`),
+ *  wait until it settles (`waitForRunning`), and confirm it actually came up —
+ *  Running, with an env handle, plus whatever `ready` additionally demands (exe.dev
+ *  also needs its ttyd `url`). Returns the settled session, or the `{ok:false}`
+ *  report — a dispatch throw, or a "<label> never came up (<state>)" — that each
+ *  provisioner surfaces verbatim. The caller reads its backend-specific fields
+ *  (vmName/url, or workDir/handle) off the returned session. */
+export async function dispatchAndAwaitRunning(
+  d: Disponent,
+  taskId: number,
+  spec: Omit<DispatchSpec, "title" | "labels">,
+  opts: { timeoutMs: number; label: string; ready?: (s: DSession) => boolean },
+): Promise<{ ok: true; session: DSession } | { ok: false; error: string; output?: string }> {
+  const disp = await tryDispatch(d, taskId, spec);
+  if (!disp.ok) return disp;
+  const settled = await waitForRunning(d, disp.session.uid, opts.timeoutMs);
+  const up =
+    settled.state === DState.Running &&
+    settled.envHandle != null &&
+    (opts.ready?.(settled) ?? true);
+  if (!up) {
+    return {
+      ok: false,
+      error: `${opts.label} never came up (${STATE_NAMES[settled.state] ?? settled.state})`,
+      output: settled.exitDetail ?? undefined,
+    };
+  }
+  return { ok: true, session: settled };
 }
