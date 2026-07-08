@@ -6,6 +6,12 @@
 # Bypass with `git push --no-verify`. Activate with:
 #   git config core.hooksPath .githooks
 set -e
+# Hooks inherit GIT_DIR/GIT_WORK_TREE from the invoking git — ABSOLUTE paths
+# when pushing from a worktree — and they leak into every git subprocess the
+# test suites spawn in their temp repos, silently pointing those at THIS repo
+# (reconcile reads the wrong history, and the temp repos' commits land on the
+# real branch). Sanitize so the suites see the same world as a terminal run.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 run() { printf '\n\033[1m▶ %s\033[0m\n' "$*"; "$@"; }
 
 run bun run test
