@@ -67,7 +67,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ../disponent
-      - name: Build @disponent/node (sibling file: dep)
+      - name: "Build @disponent/node (sibling file: dep)"
         env:
           DISPONENT_REF: f7d7277408d9884fdf921f6fbcc9c20d3ba2cda3
         run: |
@@ -100,7 +100,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ../disponent
-      - name: Build @disponent/node (sibling file: dep)
+      - name: "Build @disponent/node (sibling file: dep)"
         env:
           DISPONENT_REF: f7d7277408d9884fdf921f6fbcc9c20d3ba2cda3
         run: |
@@ -139,7 +139,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ../disponent
-      - name: Build @disponent/node (sibling file: dep)
+      - name: "Build @disponent/node (sibling file: dep)"
         env:
           DISPONENT_REF: f7d7277408d9884fdf921f6fbcc9c20d3ba2cda3
         run: |
