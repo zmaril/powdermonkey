@@ -128,9 +128,12 @@ export const sessions = pgTable("sessions", {
   branch: text("branch"),
   worktreePath: text("worktree_path"),
   url: text("url"),
-  // The exe.dev worker VM backing this session (only set when the remote dispatch
-  // backend is exe.dev). Held so teardown can `exe.dev rm` it when the session ends;
-  // `url` is the ttyd view, not a stable VM handle. Null for local + `claude --remote`.
+  // The disponent session handle backing this session, held so teardown can reach
+  // the engine when the session ends. Two shapes ride this one column: for a remote
+  // exe.dev session it's the worker VM name (`url` is the ttyd view, not a stable VM
+  // handle); for a local session provisioned through disponent's tmux worktree
+  // backend it's the engine session uid (land → reap, stop → cancel). Null for a
+  // `claude --remote` session and a pm-owned local worktree (teleport).
   vmName: text("vm_name"),
   // A local session runs an interactive `claude` PTY in its worktree. When that
   // process falls idle after producing output, it's read as "parked at a prompt,

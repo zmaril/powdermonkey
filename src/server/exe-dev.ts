@@ -1,29 +1,27 @@
-import { mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import {
-  Disponent,
-  type Session as DSession,
-  SessionState as DState,
-  setEnv,
-} from "@disponent/node";
-import { and, isNotNull, isNull } from "drizzle-orm";
+import { readFileSync } from "node:fs";
+import { type Disponent, type Session as DSession, SessionState as DState } from "@disponent/node";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { SessionKind } from "../shared/types.ts";
 import { db } from "./db.ts";
-import { supervisorRepoDir } from "./repo-cache.ts";
+import { getDisponent, STATE_NAMES, waitForRunning } from "./disponent.ts";
 import { sessions } from "./schema.ts";
 import { type ExeDevConfig, getExeDevConfig } from "./settings.ts";
 
-// The exe.dev cloud-dispatch backend — now a thin adapter over disponent
+// The exe.dev cloud-dispatch backend — a thin adapter over disponent
 // (github.com/zmaril/disponent), the engine that owns worker provisioning,
 // observation, reconcile-adoption, and teardown. PowderMonkey hands it a
 // brief + repo slug + template VM name; disponent copies the template, clones
 // the repo, starts the agent in tmux behind a ttyd URL, and remembers the
 // session in its own ledger. What PowderMonkey keeps is its own tracking row
 // (SessionKind.Remote + vmName) — progress still reads off main's trailers,
-// agent- and engine-agnostic.
+// agent- and engine-agnostic. The engine itself is opened in ./disponent.ts and
+// shared with the local backend (local-disponent.ts).
 //
 // Test seam: PM_EXE_DRY_RUN maps onto disponent's dry-run backend
 // (DISPONENT_EXE_DRY_RUN) — every VM operation is fabricated, nothing spawns.
+
+// Re-exported for callers that reach the engine through this module (tests).
+export { getDisponent, resetDisponent } from "./disponent.ts";
 
 /** How long a real provision may take before we call it failed (template copy
  *  + VM boot + clone). The dry-run backend settles in milliseconds. */
@@ -32,62 +30,6 @@ const PROVISION_TIMEOUT_MS = 300_000;
 /** Orphaned-worker grace: a just-provisioned VM whose pm session row isn't
  *  written yet must never be swept. */
 const GC_GRACE_MS = Number(process.env.PM_EXE_GC_GRACE_MS ?? 5 * 60_000);
-
-let engine: Disponent | null = null;
-
-/** The disponent engine, opened lazily. Backend knobs (claude flags, ttyd
- *  port) ride env vars read once at open — mirrored from Settings here; call
- *  `resetDisponent()` after changing exe.dev settings so the next use reopens
- *  with the new values. Dry-run tests keep the ledger in memory. */
-export function getDisponent(cfg: ExeDevConfig = getExeDevConfig()): Disponent {
-  if (!engine) {
-    // setEnv, not process.env: under Bun, JS-side env writes never reach the
-    // native engine (they configure nothing — the hard way we learned this
-    // was a "dry-run" test provisioning real VMs).
-    setEnv("DISPONENT_CLAUDE_FLAGS", cfg.claudeFlags);
-    setEnv("DISPONENT_EXE_TTYD_PORT", String(cfg.ttydPort));
-    // Opt-in, honest edge: only when the operator points us at an OTel port does
-    // disponent's receiver emit real Usage events for the per-backend meters. Left
-    // unset, the meters read a truthful 0 rather than faking a number. Additive —
-    // it changes nothing about provisioning or the progress invariant.
-    if (process.env.PM_DISPONENT_OTEL_PORT) {
-      setEnv("DISPONENT_OTEL_PORT", process.env.PM_DISPONENT_OTEL_PORT);
-    }
-    let sink = "none";
-    if (process.env.PM_EXE_DRY_RUN) {
-      setEnv("DISPONENT_EXE_DRY_RUN", "1");
-    } else {
-      const dataDir = join(supervisorRepoDir(), "data");
-      mkdirSync(dataDir, { recursive: true });
-      sink = join(dataDir, "disponent.sqlite3");
-    }
-    engine = new Disponent({ sink });
-  }
-  return engine;
-}
-
-/** Drop the engine so the next use reopens (settings changed, tests). */
-export function resetDisponent(): void {
-  engine = null;
-}
-
-const STATE_NAMES: Record<number, string> = Object.fromEntries(
-  Object.entries(DState).map(([name, value]) => [value as number, name]),
-);
-
-/** Poll until the session leaves queued/provisioning (disponent provisions on
- *  a background thread; its `wait()` waits for *terminal*, which a healthy
- *  worker never reaches — running is the success here). */
-async function waitForRunning(d: Disponent, uid: string, timeoutMs: number): Promise<DSession> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const s = await d.session(uid);
-    if (!s) throw new Error(`disponent lost session ${uid}`);
-    const settling = s.state === DState.Queued || s.state === DState.Provisioning;
-    if (!settling || Date.now() >= deadline) return s;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-}
 
 /** The disponent session backing a worker VM, if the engine knows one. A
  *  reconcile() first adopts anything a previous supervisor left behind, so a
@@ -190,10 +132,13 @@ export async function teardownRemoteWorker(session: {
  *  engine). Returns the number removed. */
 export async function gcOrphanedWorkers(nowMs: number = Date.now()): Promise<number> {
   if (!getExeDevConfig().autoTeardown) return 0;
+  // Only exe.dev (remote) sessions carry a VM name here; a local-disponent
+  // session reuses `vm_name` for its engine session uid, so scope this guard to
+  // remote rows — a pure-local user must never touch the engine in GC.
   const [ever] = await db
     .select({ vmName: sessions.vmName })
     .from(sessions)
-    .where(isNotNull(sessions.vmName))
+    .where(and(eq(sessions.kind, SessionKind.Remote), isNotNull(sessions.vmName)))
     .limit(1);
   if (!ever) return 0;
 
