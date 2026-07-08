@@ -103,14 +103,14 @@ async function withReconcileRetry(
 
 /** Tear down a local worktree session (disponent reap: tmux agent killed, the
  *  worktree deregistered + removed; the branch's committed work is kept). */
-export async function teardownLocalWorker(uid: string): Promise<LocalCmdResult> {
+export function teardownLocalWorker(uid: string): Promise<LocalCmdResult> {
   const d = getDisponent();
   return withReconcileRetry((u) => d.reap(u), uid, "reaped");
 }
 
 /** Abort a local worktree session (disponent cancel: tmux agent killed, the
  *  worktree left in place for inspection). */
-export async function cancelLocalWorker(uid: string): Promise<LocalCmdResult> {
+export function cancelLocalWorker(uid: string): Promise<LocalCmdResult> {
   const d = getDisponent();
   // The "cancelled" below is a log verb, not a SessionState.
   return withReconcileRetry((u) => d.cancel(u), uid, "cancelled"); // lint-allow-string: log verb
