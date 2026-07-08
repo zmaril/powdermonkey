@@ -1,140 +1,111 @@
-import { basename } from "node:path";
+import { mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  Disponent,
+  type Session as DSession,
+  SessionState as DState,
+  setEnv,
+} from "@disponent/node";
 import { and, isNotNull, isNull } from "drizzle-orm";
 import { SessionKind } from "../shared/types.ts";
 import { db } from "./db.ts";
-import { spawnCapture } from "./proc.ts";
+import { supervisorRepoDir } from "./repo-cache.ts";
 import { sessions } from "./schema.ts";
 import { type ExeDevConfig, getExeDevConfig } from "./settings.ts";
-import { shq } from "./tmux.ts";
 
-// The exe.dev cloud-dispatch backend. A "Dispatch remote" launch with this backend
-// selected provisions a throwaway VM per task: copy an already-authed template VM
-// (so claude + gh auth, git identity, bun and ttyd come along), clone the task's repo
-// on it, and start claude in a tmux session exposed over ttyd. The session URL the
-// operator sees is that ttyd view; the VM is torn down when the session ends.
+// The exe.dev cloud-dispatch backend — now a thin adapter over disponent
+// (github.com/zmaril/disponent), the engine that owns worker provisioning,
+// observation, reconcile-adoption, and teardown. PowderMonkey hands it a
+// brief + repo slug + template VM name; disponent copies the template, clones
+// the repo, starts the agent in tmux behind a ttyd URL, and remembers the
+// session in its own ledger. What PowderMonkey keeps is its own tracking row
+// (SessionKind.Remote + vmName) — progress still reads off main's trailers,
+// agent- and engine-agnostic.
 //
-// Everything shells out to the exe.dev CLI, which is itself just `ssh exe.dev <cmd>`
-// (and `ssh <vm>.exe.xyz` to reach a worker). We reuse `spawnCapture` (argv arrays,
-// no shell quoting) and the house `{ ok, output }` result convention. Arg-building
-// and the remote bootstrap script are pure exported functions so they're unit-tested
-// without touching the network; only the thin spawn wrappers go untested.
+// Test seam: PM_EXE_DRY_RUN maps onto disponent's dry-run backend
+// (DISPONENT_EXE_DRY_RUN) — every VM operation is fabricated, nothing spawns.
 
-const SSH = process.env.PM_EXE_SSH ?? "ssh";
-const SCP = process.env.PM_EXE_SCP ?? "scp";
-// The exe.dev control endpoint and the per-VM host suffix. Overridable so tests can
-// point at a local fake, and so a future self-host can retarget without code changes.
-const CONTROL = process.env.PM_EXE_CONTROL ?? "exe.dev";
-const HOST_SUFFIX = process.env.PM_EXE_HOST_SUFFIX ?? ".exe.xyz";
-// Test seam: skip every spawn and fabricate a result (mirrors PM_DISPATCH_DRY_RUN).
-const DRY_RUN = Boolean(process.env.PM_EXE_DRY_RUN);
+/** How long a real provision may take before we call it failed (template copy
+ *  + VM boot + clone). The dry-run backend settles in milliseconds. */
+const PROVISION_TIMEOUT_MS = 300_000;
 
-const SSH_OPTS = ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"];
+/** Orphaned-worker grace: a just-provisioned VM whose pm session row isn't
+ *  written yet must never be swept. */
+const GC_GRACE_MS = Number(process.env.PM_EXE_GC_GRACE_MS ?? 5 * 60_000);
+
+let engine: Disponent | null = null;
+
+/** The disponent engine, opened lazily. Backend knobs (claude flags, ttyd
+ *  port) ride env vars read once at open — mirrored from Settings here; call
+ *  `resetDisponent()` after changing exe.dev settings so the next use reopens
+ *  with the new values. Dry-run tests keep the ledger in memory. */
+export function getDisponent(cfg: ExeDevConfig = getExeDevConfig()): Disponent {
+  if (!engine) {
+    // setEnv, not process.env: under Bun, JS-side env writes never reach the
+    // native engine (they configure nothing — the hard way we learned this
+    // was a "dry-run" test provisioning real VMs).
+    setEnv("DISPONENT_CLAUDE_FLAGS", cfg.claudeFlags);
+    setEnv("DISPONENT_EXE_TTYD_PORT", String(cfg.ttydPort));
+    let sink = "none";
+    if (process.env.PM_EXE_DRY_RUN) {
+      setEnv("DISPONENT_EXE_DRY_RUN", "1");
+    } else {
+      const dataDir = join(supervisorRepoDir(), "data");
+      mkdirSync(dataDir, { recursive: true });
+      sink = join(dataDir, "disponent.sqlite3");
+    }
+    engine = new Disponent({ sink });
+  }
+  return engine;
+}
+
+/** Drop the engine so the next use reopens (settings changed, tests). */
+export function resetDisponent(): void {
+  engine = null;
+}
+
+const STATE_NAMES: Record<number, string> = Object.fromEntries(
+  Object.entries(DState).map(([name, value]) => [value as number, name]),
+);
+
+/** Poll until the session leaves queued/provisioning (disponent provisions on
+ *  a background thread; its `wait()` waits for *terminal*, which a healthy
+ *  worker never reaches — running is the success here). */
+async function waitForRunning(d: Disponent, uid: string, timeoutMs: number): Promise<DSession> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const s = await d.session(uid);
+    if (!s) throw new Error(`disponent lost session ${uid}`);
+    const settling = s.state === DState.Queued || s.state === DState.Provisioning;
+    if (!settling || Date.now() >= deadline) return s;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
+/** The disponent session backing a worker VM, if the engine knows one. A
+ *  reconcile() first adopts anything a previous supervisor left behind, so a
+ *  restart doesn't strand teardown. */
+async function sessionForVm(d: Disponent, vmName: string): Promise<DSession | null> {
+  const find = async () => {
+    const all = await d.sessions();
+    return (
+      all.find((s) => {
+        try {
+          return s.envHandle != null && JSON.parse(s.envHandle).vmName === vmName;
+        } catch {
+          return false;
+        }
+      }) ?? null
+    );
+  };
+  return (await find()) ?? (await d.reconcile().then(find));
+}
 
 export type ProvisionResult =
   | { ok: true; vmName: string; url: string }
   | { ok: false; error: string; output?: string };
 
 export type CmdResult = { ok: boolean; output: string };
-
-/** Run a binary, catching a synchronous spawn throw (missing `ssh`/`scp`) so a bad
- *  PATH never crashes the caller — the house degrade-cleanly convention. Merges and
- *  trims stdout+stderr into `output`, like git.ts. */
-async function run(cmd: string[], stdin?: string): Promise<CmdResult> {
-  try {
-    const { code, stdout, stderr } = await spawnCapture(cmd, stdin != null ? { stdin } : {});
-    return { ok: code === 0, output: `${stdout}${stderr}`.trim() };
-  } catch (e) {
-    return { ok: false, output: e instanceof Error ? e.message : String(e) };
-  }
-}
-
-/** `ssh exe.dev <args>` — an exe.dev control-plane command (cp, tag, rm, ls, …). */
-function sshControl(args: string[]): Promise<CmdResult> {
-  return run([SSH, ...SSH_OPTS, CONTROL, ...args]);
-}
-
-/** `ssh <host> <args>` against a worker VM, optionally feeding it a script on stdin. */
-function sshWorker(host: string, args: string[], stdin?: string): Promise<CmdResult> {
-  return run([SSH, ...SSH_OPTS, host, ...args], stdin);
-}
-
-// ── Pure helpers (unit-tested) ───────────────────────────────────────────────────
-
-/** Lowercase to a DNS-safe token: keep [a-z0-9-], drop everything else. */
-export function sanitize(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9-]/g, "");
-}
-
-/** A unique, DNS-safe worker VM name for a task: `pm-<repo>-<taskId>-<rand>` (≤60).
- *  The random suffix lets the same task be re-dispatched without colliding with a
- *  still-running worker. `rand` is passed in so the function stays pure/testable. */
-export function workerName(slug: string, taskId: number, rand: number): string {
-  const repo = sanitize(basename(slug)) || "repo";
-  return `pm-${repo}-${taskId}-${rand}`.slice(0, 60);
-}
-
-/** The reachable ssh/https host for a worker VM name. */
-export function workerHost(vmName: string): string {
-  return `${vmName}${HOST_SUFFIX}`;
-}
-
-/** The ttyd web-terminal URL for a worker — the session URL the operator opens. */
-export function ttydUrl(host: string, port: number): string {
-  return `https://${host}:${port}/`;
-}
-
-/** The remote `bash -s` script that turns a fresh worker into a running session:
- *  clone the repo (via `gh`, so private repos work), write a runner, launch claude in
- *  a detached tmux session (autonomous per `cfg.claudeFlags`, attachable), and expose
- *  it over ttyd. Injected values are single-quoted (shq) so a repo slug or operator
- *  flag string can't break out. The runner keeps the prompt out of the tmux command
- *  string by `cat`-ing it at run time. */
-export function bootstrapScript(cfg: ExeDevConfig, slug: string, workDir: string): string {
-  const header = [
-    `REPO_SLUG=${shq(slug)}`,
-    `WORK_NAME=${shq(workDir)}`,
-    `CLAUDE_FLAGS=${shq(cfg.claudeFlags)}`,
-    `TTYD_PORT=${shq(String(cfg.ttydPort))}`,
-  ].join("\n");
-  // Note the escaping in the runner-emitting block: $CLAUDE_FLAGS expands now (so the
-  // flags are baked in), but \"\$(cat …)\" stays literal so the prompt is read on the
-  // worker at launch, never shell-quoted through layers.
-  const body = String.raw`
-set -e
-export PATH="$HOME/.bun/bin:$PATH"
-work="$HOME/work/$WORK_NAME"
-rm -rf "$work"; mkdir -p "$HOME/work"
-gh repo clone "$REPO_SLUG" "$work"
-{
-  echo '#!/usr/bin/env bash'
-  echo 'export PATH="$HOME/.bun/bin:$PATH"'
-  echo 'cd "$1"'
-  echo "claude $CLAUDE_FLAGS \"\$(cat /tmp/pm-prompt.md)\" || true"
-  echo 'exec bash'
-} > "$HOME/pm-run.sh"
-chmod +x "$HOME/pm-run.sh"
-tmux -L pm kill-session -t worker 2>/dev/null || true
-tmux -L pm new-session -d -s worker -x 220 -y 50 "$HOME/pm-run.sh \"$work\""
-if command -v ttyd >/dev/null; then
-  pkill -f "ttyd .*$TTYD_PORT" 2>/dev/null || true
-  setsid ttyd -p "$TTYD_PORT" -W tmux -L pm attach -t worker >/tmp/ttyd.log 2>&1 &
-fi
-`;
-  return `${header}\n${body}`;
-}
-
-// ── Orchestration ────────────────────────────────────────────────────────────────
-
-/** Wait until a freshly-copied worker's sshd answers (a `cp` returns before the VM is
- *  fully up). Polls `ssh <host> true` up to ~90s. */
-async function waitSshReady(host: string): Promise<boolean> {
-  for (let i = 0; i < 45; i++) {
-    const r = await run([SSH, ...SSH_OPTS, "-o", "ConnectTimeout=5", host, "true"]);
-    if (r.ok) return true;
-    await new Promise((res) => setTimeout(res, 2000));
-  }
-  return false;
-}
 
 export type ProvisionArgs = {
   slug: string;
@@ -143,58 +114,57 @@ export type ProvisionArgs = {
   cfg: ExeDevConfig;
 };
 
-/** Provision a worker VM for a task and start its claude session. Returns the VM name
- *  (for teardown) and the ttyd session URL, or a staged failure. Each step early-exits
- *  with a stage-prefixed error carrying the failed command's output. */
+/** Provision a worker VM for a task and start its claude session — one
+ *  disponent dispatch. Returns the VM name (for teardown) and the ttyd
+ *  session URL, or the engine's failure report. */
 export async function provisionWorker(args: ProvisionArgs): Promise<ProvisionResult> {
   const { slug, taskId, promptPath, cfg } = args;
-  const rand = Math.floor(Math.random() * 100000);
-  const vmName = workerName(slug, taskId, rand);
-  const host = workerHost(vmName);
-  const url = ttydUrl(host, cfg.ttydPort);
+  const d = getDisponent(cfg);
+  const brief = readFileSync(promptPath, "utf8");
 
-  if (DRY_RUN) return { ok: true, vmName, url };
-
-  // 1. Copy the authed template → worker VM (inherits claude + gh auth, bun, ttyd).
-  const cp = await sshControl(["cp", cfg.template, vmName]);
-  if (!cp.ok) return { ok: false, error: `exe.dev cp failed`, output: cp.output };
-
-  // 2. Tag it so `ssh exe.dev ls` maps VM → task/repo. Best-effort; never fatal.
-  const repo = sanitize(basename(slug)) || "repo";
-  const tag = await sshControl([
-    "tag",
-    vmName,
-    `pm-task-${taskId}`,
-    `pm-repo-${repo}`,
-    "pm-worker",
-  ]);
-  if (!tag.ok) console.warn(`exe-dev: tag ${vmName} (non-fatal): ${tag.output}`);
-
-  // 3. Wait for the worker to accept ssh.
-  if (!(await waitSshReady(host))) {
-    return { ok: false, error: `worker ${host} never came up` };
+  let dispatched: DSession;
+  try {
+    dispatched = await d.dispatch({
+      brief,
+      env: "exe-dev", // lint-allow-string: disponent's environment slug, not pm's DispatchBackend
+      repo: slug,
+      template: cfg.template,
+      title: `pm-task-${taskId}`,
+      labels: JSON.stringify({ pmTask: taskId }),
+    });
+  } catch (e) {
+    return { ok: false, error: `disponent dispatch: ${e instanceof Error ? e.message : e}` };
   }
 
-  // 4. Push the prompt.
-  const scp = await run([SCP, ...SSH_OPTS, promptPath, `${host}:/tmp/pm-prompt.md`]);
-  if (!scp.ok) return { ok: false, error: `scp prompt failed`, output: scp.output };
-
-  // 5. Clone the repo + launch claude in tmux + ttyd.
-  const boot = await sshWorker(host, ["bash", "-s"], bootstrapScript(cfg, slug, repo));
-  if (!boot.ok) return { ok: false, error: `worker bootstrap failed`, output: boot.output };
-
-  return { ok: true, vmName, url };
+  const settled = await waitForRunning(d, dispatched.uid, PROVISION_TIMEOUT_MS);
+  if (settled.state !== DState.Running || !settled.envHandle || !settled.url) {
+    return {
+      ok: false,
+      error: `worker never came up (${STATE_NAMES[settled.state] ?? settled.state})`,
+      output: settled.exitDetail ?? undefined,
+    };
+  }
+  return { ok: true, vmName: JSON.parse(settled.envHandle).vmName, url: settled.url };
 }
 
-/** Delete a worker VM. */
-export function teardownWorker(vmName: string): Promise<CmdResult> {
-  if (DRY_RUN) return Promise.resolve({ ok: true, output: `dry-run rm ${vmName}` });
-  return sshControl(["rm", vmName]);
+/** Delete a worker VM (disponent reap: resources torn down, ledger archived). */
+export async function teardownWorker(vmName: string): Promise<CmdResult> {
+  const d = getDisponent();
+  const session = await sessionForVm(d, vmName);
+  if (!session) return { ok: false, output: `disponent knows no worker ${vmName}` };
+  if (session.reapedAt) return { ok: true, output: `already reaped ${vmName}` };
+  try {
+    await d.reap(session.uid);
+    return { ok: true, output: `reaped ${vmName}` };
+  } catch (e) {
+    return { ok: false, output: e instanceof Error ? e.message : String(e) };
+  }
 }
 
-/** Tear down the exe.dev worker backing a session, if any. A no-op unless the session
- *  is a remote exe.dev run (has a `vmName`) and auto-teardown is enabled; a failed
- *  `rm` is logged, never thrown — teardown must not block a land/stop/reconcile. */
+/** Tear down the exe.dev worker backing a session, if any. A no-op unless the
+ *  session is a remote exe.dev run (has a `vmName`) and auto-teardown is
+ *  enabled; a failed reap is logged, never thrown — teardown must not block a
+ *  land/stop/reconcile. */
 export async function teardownRemoteWorker(session: {
   kind: SessionKind;
   vmName: string | null;
@@ -202,76 +172,17 @@ export async function teardownRemoteWorker(session: {
   if (session.kind !== SessionKind.Remote || !session.vmName) return;
   if (!getExeDevConfig().autoTeardown) return;
   const r = await teardownWorker(session.vmName);
-  if (!r.ok) console.warn(`exe-dev: rm ${session.vmName} (non-fatal): ${r.output}`);
+  if (!r.ok) console.warn(`exe-dev: teardown ${session.vmName} (non-fatal): ${r.output}`);
 }
 
-// ── Orphaned-worker GC ───────────────────────────────────────────────────────────
-// A safety net for teardown misses (a supervisor crash mid-dispatch, an error path, a
-// session that never reaches a terminal state): periodically delete pm-worker VMs that
-// no live session is backing. Every worker is tagged `pm-worker` at provision time, so
-// the sweep can find them without guessing from names, and an age grace keeps an
-// in-flight dispatch (whose session row isn't written yet) from being swept.
-
-const WORKER_TAG = "pm-worker";
-const GC_GRACE_MS = Number(process.env.PM_EXE_GC_GRACE_MS ?? 5 * 60_000);
-
-export type Worker = { vmName: string; tags: string[]; createdAtMs: number };
-
-/** Parse `exe.dev ls --json`, keeping only PowderMonkey worker VMs (tagged pm-worker).
- *  Malformed JSON or unexpected shape → [] (degrade cleanly). Pure. */
-export function parseWorkerList(jsonText: string): Worker[] {
-  let data: unknown;
-  try {
-    data = JSON.parse(jsonText);
-  } catch {
-    return [];
-  }
-  const vms = (data as { vms?: unknown }).vms;
-  if (!Array.isArray(vms)) return [];
-  const out: Worker[] = [];
-  for (const vm of vms) {
-    const v = vm as { vm_name?: unknown; tags?: unknown; created_at?: unknown };
-    const tags = Array.isArray(v.tags)
-      ? v.tags.filter((t): t is string => typeof t === "string")
-      : [];
-    if (typeof v.vm_name !== "string" || !tags.includes(WORKER_TAG)) continue;
-    const t = typeof v.created_at === "string" ? Date.parse(v.created_at) : Number.NaN;
-    out.push({ vmName: v.vm_name, tags, createdAtMs: Number.isNaN(t) ? 0 : t });
-  }
-  return out;
-}
-
-/** Which workers are orphaned: not backed by a live session AND older than the grace
- *  period (so a just-provisioned VM whose session row isn't committed yet is never
- *  swept). Pure. */
-export function selectOrphans(
-  workers: Worker[],
-  liveVmNames: Set<string>,
-  nowMs: number,
-  graceMs: number = GC_GRACE_MS,
-): string[] {
-  return workers
-    .filter((w) => !liveVmNames.has(w.vmName) && nowMs - w.createdAtMs > graceMs)
-    .map((w) => w.vmName);
-}
-
-/** List PowderMonkey worker VMs (tagged pm-worker) currently on exe.dev. */
-export async function listWorkers(): Promise<Worker[]> {
-  if (DRY_RUN) return [];
-  const r = await sshControl(["ls", "--json"]);
-  if (!r.ok) {
-    console.warn(`exe-dev: ls --json (non-fatal): ${r.output}`);
-    return [];
-  }
-  return parseWorkerList(r.output);
-}
-
-/** Garbage-collect leaked worker VMs. No-op when auto-teardown is off or this
- *  supervisor has never provisioned a worker (so a pure claude-remote/local user never
- *  pings exe.dev). Returns the number removed. */
+/** Garbage-collect leaked worker VMs: disponent adopts anything tagged that
+ *  it doesn't know (a crashed supervisor's workers), then any running worker
+ *  no live pm session references — and older than the grace window — is
+ *  reaped. No-op when auto-teardown is off or this supervisor has never
+ *  provisioned a worker (so a pure claude-remote/local user never touches the
+ *  engine). Returns the number removed. */
 export async function gcOrphanedWorkers(nowMs: number = Date.now()): Promise<number> {
   if (!getExeDevConfig().autoTeardown) return 0;
-  // Never used exe.dev on this supervisor? Skip the ssh entirely.
   const [ever] = await db
     .select({ vmName: sessions.vmName })
     .from(sessions)
@@ -279,8 +190,10 @@ export async function gcOrphanedWorkers(nowMs: number = Date.now()): Promise<num
     .limit(1);
   if (!ever) return 0;
 
-  const workers = await listWorkers();
-  if (workers.length === 0) return 0;
+  const d = getDisponent();
+  await d.reconcile();
+  const running = await d.sessions({ state: DState.Running });
+  if (running.length === 0) return 0;
 
   const rows = await db
     .select({ vmName: sessions.vmName })
@@ -288,12 +201,23 @@ export async function gcOrphanedWorkers(nowMs: number = Date.now()): Promise<num
     .where(and(isNull(sessions.archivedAt), isNotNull(sessions.vmName)));
   const live = new Set(rows.map((r) => r.vmName).filter((n): n is string => n != null));
 
-  const orphans = selectOrphans(workers, live, nowMs);
   let removed = 0;
-  for (const vm of orphans) {
-    const r = await teardownWorker(vm);
-    if (r.ok) removed++;
-    else console.warn(`exe-dev: gc rm ${vm} (non-fatal): ${r.output}`);
+  for (const s of running) {
+    let vmName: string | null = null;
+    try {
+      vmName = s.envHandle ? JSON.parse(s.envHandle).vmName : null;
+    } catch {
+      /* not an exe.dev handle */
+    }
+    if (!vmName || live.has(vmName)) continue;
+    const bornMs = s.startedAt ? Date.parse(s.startedAt) : 0;
+    if (nowMs - bornMs <= GC_GRACE_MS) continue;
+    try {
+      await d.reap(s.uid);
+      removed++;
+    } catch (e) {
+      console.warn(`exe-dev: gc reap ${vmName} (non-fatal): ${e}`);
+    }
   }
   if (removed > 0) console.log(`exe-dev: garbage-collected ${removed} orphaned worker VM(s)`);
   return removed;
