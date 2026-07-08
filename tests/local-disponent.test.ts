@@ -221,3 +221,47 @@ test("teleport opts route through disponent: fetchRemote + startup map to the di
     (d as any).dispatch = orig;
   }
 });
+
+// The land/stop task-status guards, migrated from the retired tests/worktree.test.ts
+// (Stage 3): they live in stopSession/landSession, which every local session — now
+// always disponent-backed — runs. The engine teardown (reap/cancel) is dry-run.
+
+test("stop does NOT un-merge an already-merged task on a multi-task disponent session", async () => {
+  // One session spanning two tasks; the first merges while the second is still in
+  // flight. Aborting the shared session must re-pend only the unfinished task — the
+  // merged one is done regardless of the session ending.
+  const all = (await taskRepo.list()).sort((a, b) => a.id - b.id);
+  const [merged, unfinished] = all;
+
+  const started = await startLocalSession([merged.id, unfinished.id]);
+  if (!started.ok) throw new Error(started.error);
+
+  // The first task merged mid-session (reconcile read its trailer off main).
+  await taskRepo.update(merged.id, { status: "merged" });
+
+  const result = await stopSession(started.session.id);
+  if (!result.ok) throw new Error(`${result.error}: ${result.output ?? ""}`);
+
+  // Merged work survives the abort; only the in-flight task rolls back to pending.
+  expect((await taskRepo.get(merged.id))?.status).toBe("merged");
+  expect((await taskRepo.get(unfinished.id))?.status).toBe("pending");
+});
+
+test("land tears down a merged task's disponent session without regressing its status", async () => {
+  // The graceful teardown path: a merged task's session is landed (engine reap, row
+  // archived). Unlike stop, land never touches task status — a finished task must stay
+  // merged when its shared session ends.
+  const [task] = await taskRepo.list();
+  const started = await startLocalSession(task.id);
+  if (!started.ok) throw new Error(started.error);
+  const uid = started.session.vmName as string;
+  await taskRepo.update(task.id, { status: "merged" });
+
+  const result = await landSession(started.session.id);
+  if (!result.ok) throw new Error(`${result.error}: ${result.output ?? ""}`);
+
+  const d = getDisponent();
+  expect((await d.session(uid))?.reapedAt).toBeTruthy();
+  expect((await sessionRepo.get(started.session.id))?.archivedAt).toBeTruthy();
+  expect((await taskRepo.get(task.id))?.status).toBe("merged");
+});

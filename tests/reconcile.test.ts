@@ -1,16 +1,15 @@
 import { beforeAll, expect, test } from "bun:test";
-import { join } from "node:path";
 import { setupTestDb, tmp } from "./db-harness.ts";
 
 const repoDir = tmp("pm-repo-");
 process.env.PM_REPO_DIR = repoDir;
 process.env.PM_MAIN_BRANCH = "main";
-process.env.PM_WORKTREE_DIR = join(tmp("pm-wt-"), "wt");
-// Isolate the tmux socket + skip launching a real `claude` so the local-session
-// teardown path (landSession) doesn't touch the operator's real sessions. See the
-// matching note in worktree.test.ts.
+// Isolate the tmux socket so nothing touches the operator's real sessions.
 process.env.PM_TMUX_SOCKET = `pm-test-${process.pid}`;
-process.env.PM_SESSION_CMD = "";
+// Local dispatch rides disponent (the default since Stage 3); dry-run its local
+// backend so start-local / landSession-reap fabricate every git/tmux op — nothing
+// spawns, and reconcile's local-session teardown stays in-process.
+process.env.PM_LOCAL_DRY_RUN = "1";
 // A remote exe.dev session's archive path tears down its worker VM — fabricate that
 // so reconcile never runs a real `ssh exe.dev rm`.
 process.env.PM_EXE_DRY_RUN = "1";
@@ -119,7 +118,7 @@ test("merging a task archives its live sessions; non-merged tasks are untouched"
   const runningTask = all.find((t) => t.title === "still-running");
   if (!localTask || !remoteTask || !runningTask) throw new Error("seed failed");
 
-  // A real local session (worktree + PTY) for the task we're about to merge.
+  // A disponent-local session (dry-run) for the task we're about to merge.
   const started = await startLocalSession(localTask.id);
   if (!started.ok) throw new Error(`start failed: ${started.error}`);
   const localSession = started.session;
@@ -154,7 +153,7 @@ test("merging a task archives its live sessions; non-merged tasks are untouched"
   expect(local?.state).toBe("idle");
   expect(remote?.archivedAt).not.toBeNull();
   expect(remote?.state).toBe("idle");
-  // The local session's worktree was torn down.
+  // The local session was reaped via the engine (worktree torn down there).
   expect((await taskRepo.get(localTask.id))?.status).toBe("merged");
 
   // The still-running task's session is left alone.

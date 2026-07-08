@@ -36,11 +36,6 @@ export async function commitBodies(branch: string): Promise<string> {
   return r.ok ? r.output : "";
 }
 
-export async function branchExists(branch: string, cwd?: string): Promise<boolean> {
-  const r = await run(["rev-parse", "--verify", "--quiet", branch], cwd);
-  return r.ok;
-}
-
 /** Clone `url` into `dir` (a fresh cache clone). The target path is absolute, so
  *  this is cwd-independent. */
 export function cloneRepo(url: string, dir: string): Promise<GitResult> {
@@ -54,18 +49,6 @@ export function fetchRepo(dir: string): Promise<GitResult> {
   return run(["fetch", "--prune", "origin"], dir);
 }
 
-/** Add a worktree at `path`; create `branch` off `baseRef` if it doesn't exist yet.
- *  `cwd` selects the repo the worktree is cut from (default: the supervisor's own). */
-export async function worktreeAdd(
-  path: string,
-  branch: string,
-  baseRef: string,
-  cwd?: string,
-): Promise<GitResult> {
-  if (await branchExists(branch, cwd)) return run(["worktree", "add", path, branch], cwd);
-  return run(["worktree", "add", "-b", branch, path, baseRef], cwd);
-}
-
 /** List remote branch names (without the `refs/heads/` prefix) matching `pattern`,
  *  e.g. `refs/heads/pm/task-12*`. Returns [] when the remote has no match (or the
  *  call fails). Used to discover the branch a cloud worker pushed for a task. */
@@ -77,24 +60,6 @@ export async function lsRemoteHeads(pattern: string): Promise<string[]> {
     .map((line) => line.split("\t")[1])
     .filter((ref): ref is string => Boolean(ref))
     .map((ref) => ref.replace(/^refs\/heads\//, ""));
-}
-
-/** Add a worktree checked out to `branch`, which may exist only on the remote (the
- *  cloud worker pushed it but we've never fetched it). Fetch origin/<branch> first,
- *  then: use a local branch if one exists, else create a local branch tracking the
- *  fetched remote one, else fall back to creating <branch> off `baseRef` (nothing
- *  was pushed). The fetch is best-effort — a missing remote branch is not fatal. */
-export async function worktreeAddRemote(
-  path: string,
-  branch: string,
-  baseRef: string,
-  cwd?: string,
-): Promise<GitResult> {
-  await run(["fetch", "origin", branch], cwd);
-  if (await branchExists(branch, cwd)) return run(["worktree", "add", path, branch], cwd);
-  if (await branchExists(`origin/${branch}`, cwd))
-    return run(["worktree", "add", "-b", branch, path, `origin/${branch}`], cwd);
-  return run(["worktree", "add", "-b", branch, path, baseRef], cwd);
 }
 
 /** Remove a worktree. Not forced by default — fails if it has uncommitted changes,

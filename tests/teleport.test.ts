@@ -1,16 +1,19 @@
 import { beforeAll, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { setupTestDb, tmp } from "./db-harness.ts";
 
 const repoDir = tmp("pm-repo-");
 const bareDir = tmp("pm-bare-");
 process.env.PM_REPO_DIR = repoDir;
 process.env.PM_MAIN_BRANCH = "main";
-process.env.PM_WORKTREE_DIR = join(tmp("pm-wt-"), "wt");
-// Isolate the tmux socket; the teleport startup override (`claude --teleport`) runs
-// in a detached session on this private socket, never the operator's.
+// Isolate the tmux socket so nothing touches the operator's real sessions.
 process.env.PM_TMUX_SOCKET = `pm-test-${process.pid}`;
+// Teleport rides disponent's local backend (Stage 3): its remote-branch fetch maps
+// onto `fetchRemote` and its `claude --teleport <id>` startup onto `agentCmd`.
+// Dry-run that backend so nothing spawns; the on-disk checkout is disponent's
+// contract (covered by disponent's own suite + the Stage-2b rendered proof), so here
+// we assert teleport's ORCHESTRATION: branch discovery, disponent routing, and the
+// remote→local session swap.
+process.env.PM_LOCAL_DRY_RUN = "1";
 
 const { ready } = await setupTestDb();
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
@@ -19,7 +22,7 @@ const { parseTeleportId, pickWorkerBranch, teleportTask } = await import(
   "../src/server/teleport.ts"
 );
 const { linkSessionTasks, taskIdsForSession } = await import("../src/server/session-tasks.ts");
-const { killSessionPty } = await import("../src/server/session-pty.ts");
+const { getDisponent } = await import("../src/server/disponent.ts");
 
 import { git } from "./git-helper.ts";
 
@@ -86,8 +89,9 @@ test("teleport falls back to a fresh pm/task-<id> branch when nothing was pushed
 
   expect(result.branch).toBe(`pm/task-${task.id}`);
   expect(result.teleportId).toBe("session_fallback1");
-  expect(existsSync(result.session.worktreePath ?? "")).toBe(true);
+  // The teleported session is disponent-local (engine uid parked in vm_name).
   expect(result.session.kind).toBe("local");
+  expect(result.session.vmName).toBeTruthy();
 
   // Remote session archived, replaced by the new local one — which is linked to
   // the same task through the join.
@@ -96,21 +100,17 @@ test("teleport falls back to a fresh pm/task-<id> branch when nothing was pushed
   expect(await taskIdsForSession(result.session.id)).toContain(task.id);
   // Task's remote runtime state cleared.
   expect((await taskRepo.get(task.id))?.sessionState).toBeNull();
-
-  killSessionPty(result.session.id);
 });
 
-test("teleport discovers and checks out the cloud worker's pushed branch", async () => {
+test("teleport discovers the cloud worker's pushed branch and hands it to disponent to fetch", async () => {
   const tasks = (await taskRepo.list()).sort((a, b) => a.id - b.id);
   const task = tasks[1];
   const branch = `pm/task-${task.id}-feature`;
 
-  // Simulate the cloud worker: push a descriptive branch carrying a unique file,
-  // then drop it locally so only the remote has it (forces the fetch path).
+  // Simulate the cloud worker: push a descriptive branch, then drop it locally so
+  // only the remote has it — teleport must discover it via `git ls-remote`.
   await git(repoDir, "checkout", "-b", branch);
-  await Bun.write(join(repoDir, "worker.txt"), "from cloud worker\n");
-  await git(repoDir, "add", "worker.txt");
-  await git(repoDir, "commit", "-m", "worker change");
+  await git(repoDir, "commit", "--allow-empty", "-m", "worker change");
   await git(repoDir, "push", "origin", branch);
   await git(repoDir, "checkout", "main");
   await git(repoDir, "branch", "-D", branch);
@@ -126,14 +126,32 @@ test("teleport discovers and checks out the cloud worker's pushed branch", async
     status: "dispatched",
   });
 
-  const result = await teleportTask(task.id);
-  if (!result.ok) throw new Error(`${result.error}: ${result.output ?? ""}`);
+  // Spy the engine dispatch: teleport must fetch the discovered branch (fetchRemote)
+  // off the clone's origin and resume the cloud run (agentCmd) — disponent then cuts
+  // the worktree at the fetched tip (its contract, proven in its own suite).
+  const d = getDisponent();
+  const orig = d.dispatch.bind(d);
+  // biome-ignore lint/suspicious/noExplicitAny: test spy over the native dispatch.
+  const specs: any[] = [];
+  // biome-ignore lint/suspicious/noExplicitAny: test spy over the native dispatch.
+  (d as any).dispatch = (spec: any) => {
+    specs.push(spec);
+    return orig(spec);
+  };
+  try {
+    const result = await teleportTask(task.id);
+    if (!result.ok) throw new Error(`${result.error}: ${result.output ?? ""}`);
 
-  expect(result.branch).toBe(branch);
-  // The worktree was checked out at the worker's commit, not a fresh main branch.
-  const wt = result.session.worktreePath ?? "";
-  expect(existsSync(join(wt, "worker.txt"))).toBe(true);
-  expect(readFileSync(join(wt, "worker.txt"), "utf8")).toBe("from cloud worker\n");
-
-  killSessionPty(result.session.id);
+    // Discovery picked the descriptive branch the worker pushed.
+    expect(result.branch).toBe(branch);
+    expect(result.session.vmName).toBeTruthy();
+    // …and pm handed disponent the fetch of THAT branch plus the teleport resume.
+    const spec = specs.at(-1);
+    expect(spec.fetchRemote).toBe(true);
+    expect(spec.gitRef).toBe(branch);
+    expect(spec.agentCmd).toBe(`claude --teleport ${result.teleportId}`);
+  } finally {
+    // biome-ignore lint/suspicious/noExplicitAny: restore the native dispatch.
+    (d as any).dispatch = orig;
+  }
 });

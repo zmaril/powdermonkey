@@ -1,15 +1,14 @@
-import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { SessionKind, SessionState, TaskStatus } from "../shared/types.ts";
 import { db } from "./db.ts";
 import { CROSS_REPO_ERROR, loadTaskPrompt, spansRepos } from "./dispatch.ts";
 import { teardownRemoteWorker } from "./exe-dev.ts";
-import { worktreeAdd, worktreeAddRemote, worktreeRemove } from "./git.ts";
+import { worktreeRemove } from "./git.ts";
 import { cancelLocalWorker, provisionLocalWorker, teardownLocalWorker } from "./local-disponent.ts";
 import { repoDirForTask, supervisorRepoDir } from "./repo-cache.ts";
 import { type Session, sessions, tasks } from "./schema.ts";
-import { killSessionPty, startSessionPty } from "./session-pty.ts";
+import { killSessionPty } from "./session-pty.ts";
 import { linkSessionTasks, taskIdsForSession } from "./session-tasks.ts";
 
 // A local session is the on-laptop mirror of `claude --remote`: an isolated git
@@ -17,68 +16,30 @@ import { linkSessionTasks, taskIdsForSession } from "./session-tasks.ts";
 // touching the supervisor's main checkout. When the branch lands on main with
 // PM-Phase trailers, reconciliation marks the work done — same as a cloud session.
 //
-// Provisioning has two selectable paths (issue 152). The DEFAULT stays pm's own git
-// worktree + interactive tmux PTY (startLocalViaWorktree). Opting in with
-// PM_LOCAL_BACKEND=disponent routes the start through disponent's local tmux backend
-// instead (local-disponent.ts): the engine cuts the worktree with
+// Every local start — plain start-local AND teleport — runs through disponent's
+// local tmux backend (local-disponent.ts): the engine cuts the worktree with
 // `isolation: "worktree"` off pm's repo cache clone, drops the brief in, and runs
 // the agent in its own `tmux -L disponent` session. Land reaps it (worktree gone,
-// branch kept); stop cancels it (agent gone, worktree kept). TELEPORT rides the same
-// backend now (Stage 2b): its remote-branch fetch maps onto disponent's per-dispatch
-// `fetchRemote`, and its `claude --teleport <id>` startup onto `agentCmd`. (A later
-// stage flips the default + retires the pm-owned path.)
-
-/** Which backend a local start (plain start-local OR teleport) uses: the pm-owned git
- *  worktree + PTY (default), or disponent's local tmux worktree backend
- *  (PM_LOCAL_BACKEND=disponent). */
-function localDisponentEnabled(): boolean {
-  return process.env.PM_LOCAL_BACKEND === "disponent";
-}
-
-const MAIN_BRANCH = process.env.PM_MAIN_BRANCH ?? "main";
-
-function worktreeBase(): string {
-  const repo = process.env.PM_REPO_DIR ?? process.cwd();
-  return process.env.PM_WORKTREE_DIR ?? join(repo, "..", "pm-worktrees");
-}
-
-/** The on-disk worktree path a task's local session lives in. */
-function worktreePathFor(taskId: number): string {
-  return join(worktreeBase(), `task-${taskId}`);
-}
+// branch kept); stop cancels it (agent gone, worktree kept). Teleport rides the same
+// backend: its remote-branch fetch maps onto disponent's per-dispatch `fetchRemote`,
+// and its `claude --teleport <id>` startup onto `agentCmd`. (Stage 3 retired the old
+// pm-owned git-worktree + PTY provisioning path; disponent owns local dispatch now.)
 
 /** The repo dir that owns a session's worktree — the cache clone of its (first) task's
- *  repo, or the supervisor's own checkout when the task is repo-less. Teardown runs
- *  `git worktree remove` from here: a worktree cut from a cache clone can't be removed
- *  from the supervisor's repo. Path-only (no clone/fetch) — the clone already exists. */
+ *  repo, or the supervisor's own checkout when the task is repo-less. `land`/`stop`
+ *  run `git worktree remove` from here for a REMOTE session's (absent) worktree or a
+ *  pre-Stage-3 pm-owned local row; a disponent-local session's worktree is the
+ *  engine's to remove. Path-only (no clone/fetch) — the clone already exists. */
 async function repoDirForSession(sessionId: number): Promise<string> {
   const ids = await taskIdsForSession(sessionId);
   if (ids.length === 0) return supervisorRepoDir();
   return (await repoDirForTask(ids[0])).dir;
 }
 
-// Where per-session prompt files live (outside any worktree so the agent never
-// commits them). The startup command can `cat` this to seed the session.
-function promptDir(): string {
-  const repo = process.env.PM_REPO_DIR ?? process.cwd();
-  return join(repo, "data", "prompts");
-}
-
-// The command the session's PTY runs in the worktree. By default we hand the
-// generated prompt (task + phases + trailer block) straight to `claude` as its
-// opening message, so the worker knows what to build and starts immediately —
-// no copy/paste. The `{prompt_file}` placeholder is replaced with the absolute
-// prompt path; set PM_SESSION_CMD to override (e.g. PM_SESSION_CMD='claude' for a
-// bare session where you paste the prompt yourself).
-function sessionStartup(promptPath: string, override?: string): string {
-  const tmpl = override ?? process.env.PM_SESSION_CMD ?? `claude "$(cat {prompt_file})"`;
-  return tmpl.replaceAll("{prompt_file}", promptPath);
-}
-
-/** Overrides for a non-default local session. Plain `start-local` passes none and
- *  gets a fresh `pm/task-<id>` branch off main running the task prompt. Teleport
- *  passes a discovered cloud branch (fetched from the remote) and a
- *  `claude --teleport` startup. */
+/** Overrides for a local session. Plain `start-local` passes none and gets a fresh
+ *  `pm/task-<id>` branch off the clone's HEAD running the task prompt. Teleport passes
+ *  a discovered cloud branch (fetched from the remote) and a `claude --teleport`
+ *  startup. */
 export type StartLocalOpts = {
   // Branch to check out (default `pm/task-<id>`).
   branch?: string;
@@ -121,21 +82,16 @@ export async function startLocalSession(
   if (repo.error)
     return { ok: false, error: `repo cache unavailable: ${repo.error}`, output: repo.output };
   const repoCwd = repo.dir;
-  const baseRef = repo.baseBranch ?? MAIN_BRANCH;
 
   // One worktree + branch for all selected tasks, named after the primary task.
   const branch = opts.branch ?? `pm/task-${primary}`;
   const ctx: LaunchCtx = { ids, primary, branch, repoCwd, prompt, trailers };
 
-  // With the backend opted in (PM_LOCAL_BACKEND=disponent), BOTH plain start-local
-  // and teleport ride disponent's local backend: teleport's remote-branch fetch and
-  // its bespoke `claude --teleport <id>` startup now map onto disponent's per-dispatch
-  // `fetchRemote` + `agentCmd` (Stage 2b). Off (the default), everything stays on the
-  // pm-owned git worktree + PTY path — see the module comment.
-  const viaDisponent = localDisponentEnabled();
-  return viaDisponent
-    ? startLocalViaDisponent(ctx, opts)
-    : startLocalViaWorktree(ctx, baseRef, opts);
+  // Every local start rides disponent's local backend (Stage 3): plain start-local
+  // cuts a fresh `pm/task-<id>` worktree off the clone's HEAD; teleport's remote-branch
+  // fetch + `claude --teleport <id>` startup map onto disponent's `fetchRemote` +
+  // `agentCmd`. See the module comment.
+  return startLocalViaDisponent(ctx, opts);
 }
 
 /** The resolved launch inputs both provisioning paths share. */
@@ -212,44 +168,10 @@ async function startLocalViaDisponent(
   return { ok: true, session, worktreePath, branch, prompt, trailers };
 }
 
-/** Provision with pm's own git worktree + interactive tmux PTY. The teleport path:
- *  it may fetch a remote branch (fetchRemote) and runs a bespoke startup command
- *  (`claude --teleport <id>`), neither of which disponent's local backend supports. */
-async function startLocalViaWorktree(
-  ctx: LaunchCtx,
-  baseRef: string,
-  opts: StartLocalOpts,
-): Promise<StartLocalResult> {
-  const { ids, primary, branch, repoCwd, prompt, trailers } = ctx;
-
-  const worktreePath = worktreePathFor(primary);
-  mkdirSync(worktreeBase(), { recursive: true });
-
-  const add = opts.fetchRemote
-    ? await worktreeAddRemote(worktreePath, branch, baseRef, repoCwd)
-    : await worktreeAdd(worktreePath, branch, baseRef, repoCwd);
-  if (!add.ok) return { ok: false, error: "git worktree add failed", output: add.output };
-
-  // One session row for all the tasks, linked through the session_tasks join; each
-  // task is marked dispatched so the whole batch moves to Active together.
-  const session = await recordDispatchedSession(
-    { kind: SessionKind.Local, state: SessionState.Running, branch, worktreePath },
-    ids,
-  );
-
-  // Stash the prompt where the startup command can reach it, then bring up the
-  // session's persistent interactive PTY in the worktree. Clients attach to this
-  // via /pty?session=<id>; it outlives any single browser connection.
-  mkdirSync(promptDir(), { recursive: true });
-  const promptPath = join(promptDir(), `session-${session.id}.md`);
-  writeFileSync(promptPath, `${prompt}\n`);
-  startSessionPty(session.id, worktreePath, sessionStartup(promptPath, opts.startup));
-
-  return { ok: true, session, worktreePath, branch, prompt, trailers };
-}
-
-/** A local session provisioned through disponent (as opposed to pm's own worktree,
- *  the teleport path). Distinguished by the engine session uid parked in vm_name. */
+/** A local session — always provisioned through disponent since Stage 3, so its
+ *  engine session uid is parked in vm_name (a plain remote session has none). Kept as
+ *  a predicate because `land`/`stop` also see REMOTE sessions and any pre-Stage-3
+ *  pm-owned local rows, which take the non-engine teardown branch. */
 export function isDisponentLocal(session: Session): boolean {
   return session.kind === SessionKind.Local && session.vmName != null;
 }
@@ -293,8 +215,9 @@ export async function landSession(sessionId: number): Promise<LandResult> {
     const r = await teardownLocalWorker(session.vmName as string);
     if (!r.ok) return { ok: false, error: "disponent reap failed", output: r.output };
   } else {
-    // pm-owned local (teleport) or remote. Tear down the live PTY (if any) before
-    // removing its worktree out from under it.
+    // Remote (exe.dev / claude --remote), or a pre-Stage-3 pm-owned local row that
+    // predates the disponent flip. Tear down the live PTY (if any — a no-op for
+    // remote) before removing any pm-owned worktree out from under it.
     killSessionPty(sessionId);
 
     if (session.worktreePath) {
@@ -347,10 +270,10 @@ export async function stopSession(sessionId: number): Promise<StopResult> {
     const r = await cancelLocalWorker(session.vmName as string);
     if (!r.ok) console.warn(`stop: disponent cancel (non-fatal): ${r.output}`);
   } else if (session.kind === SessionKind.Local) {
-    // Kill the live agent first, then drop its worktree out from under it. The
-    // force-remove can still fail (e.g. the path is already gone); that's logged
-    // but never blocks the abort — the point is to stop the agent, not to garbage
-    // collect perfectly.
+    // A pre-Stage-3 pm-owned local row (no engine uid): kill the live agent first,
+    // then force-drop its worktree. The force-remove can still fail (e.g. the path is
+    // already gone); that's logged but never blocks the abort — the point is to stop
+    // the agent, not to garbage collect perfectly.
     killSessionPty(sessionId);
     if (session.worktreePath) {
       const rm = await worktreeRemove(session.worktreePath, {
