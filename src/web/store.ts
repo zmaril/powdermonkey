@@ -5,6 +5,7 @@ import type { Note, TaskComment } from "../server/schema.ts";
 import {
   type Decision,
   DispatchBackend,
+  type EnvCapability,
   type Offering,
   type SyncMode,
   type TaskKind,
@@ -105,6 +106,10 @@ export type State = {
   // from /offerings by loadSettings. Drives the Settings dispatch picker instead of
   // hardcoded backend literals. Server runtime data, never persisted.
   offerings: Offering[];
+  // pm's per-env capability registry — what each dispatch environment can do
+  // (disponent's env_capabilities edge), fetched from /capabilities by loadSettings.
+  // The dispatch picker shows these per backend. Server runtime data, never persisted.
+  capabilities: EnvCapability[];
   setDispatchSettings: (next: Partial<DispatchSettingsPatch>) => Promise<void>;
   error: string | null;
   // In-flight slow actions, keyed `${action}:${taskId}` (e.g. `dispatch:7`). A button
@@ -345,6 +350,7 @@ export const useStore = create<State>()(
       exeClaudeFlags: "--dangerously-skip-permissions",
       exeAutoTeardown: true,
       offerings: [],
+      capabilities: [],
       error: null,
       pending: {},
       lastStart: null,
@@ -451,6 +457,13 @@ export const useStore = create<State>()(
         // back to its known backends — never blocks the rest of settings from loading.
         const off = await api.offerings.get();
         if (!off.error && Array.isArray(off.data)) set({ offerings: off.data as Offering[] });
+        // The per-env capability registry (disponent's env_capabilities edge). Same
+        // non-fatal contract: a failure leaves capabilities empty and the picker just
+        // omits the caps line.
+        const caps = await api.capabilities.get();
+        if (!caps.error && Array.isArray(caps.data)) {
+          set({ capabilities: caps.data as EnvCapability[] });
+        }
       },
       ensureScratch: () => ensureScratch((e) => set({ error: e })),
       saveNote: async (id, values) => {

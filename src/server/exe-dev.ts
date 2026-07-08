@@ -21,7 +21,7 @@ import { type ExeDevConfig, getExeDevConfig } from "./settings.ts";
 // (DISPONENT_EXE_DRY_RUN) — every VM operation is fabricated, nothing spawns.
 
 // Re-exported for callers that reach the engine through this module (tests).
-export { getDisponent, resetDisponent } from "./disponent.ts";
+export { capabilities, getDisponent, resetDisponent } from "./disponent.ts";
 
 /** How long a real provision may take before we call it failed (template copy
  *  + VM boot + clone). The dry-run backend settles in milliseconds. */

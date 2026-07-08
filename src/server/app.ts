@@ -38,7 +38,7 @@ import { pg } from "./db.ts";
 import { loadTaskPrompt } from "./dispatch.ts";
 import { backendUsageSummary } from "./disponent-usage.ts";
 import { openSessionEditor } from "./editor.ts";
-import { getDisponent } from "./exe-dev.ts";
+import { capabilities, getDisponent } from "./exe-dev.ts";
 import { fanOutTasks } from "./fanout.ts";
 import { proposeFollowup } from "./followups.ts";
 import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
@@ -546,6 +546,20 @@ export const app = new Elysia()
       return await getDisponent().offerings();
     } catch (e) {
       console.warn("offerings unavailable (non-fatal):", e instanceof Error ? e.message : e);
+      return [];
+    }
+  })
+  // pm's per-env capability registry: what each dispatch environment can do
+  // (disponent's env_capabilities edge — dispatch/observe/isolation/…), read live
+  // from the engine. Parallels /offerings — the picker shows these per backend so
+  // the operator sees what each environment supports. Same non-fatal contract: a
+  // disponent hiccup returns an empty list and the picker simply omits the caps
+  // line rather than blanking the settings pane.
+  .get("/capabilities", async () => {
+    try {
+      return await capabilities();
+    } catch (e) {
+      console.warn("capabilities unavailable (non-fatal):", e instanceof Error ? e.message : e);
       return [];
     }
   })

@@ -1,5 +1,14 @@
-import { NumberInput, SegmentedControl, Stack, Switch, Text, TextInput } from "@mantine/core";
-import { DispatchBackend, type Offering } from "../../../shared/types.ts";
+import {
+  Badge,
+  Group,
+  NumberInput,
+  SegmentedControl,
+  Stack,
+  Switch,
+  Text,
+  TextInput,
+} from "@mantine/core";
+import { DispatchBackend, type EnvCapability, type Offering } from "../../../shared/types.ts";
 import { useStore } from "../../store.ts";
 
 // Cloud-dispatch settings: what "Dispatch remote" launches, and how the exe.dev VM
@@ -49,6 +58,22 @@ function backendsFromOfferings(
   return byBackend;
 }
 
+// The per-env capabilities folded onto the backend they map to (same slice-1
+// bridge as the models). Each backend gets the deduped set of capability tokens
+// disponent advertises for its env(s), in first-seen order so the badges are
+// stable. Empty when the registry hasn't loaded — the picker then omits the caps
+// line rather than implying a backend can do nothing.
+function capabilitiesByBackend(caps: EnvCapability[]): Map<DispatchBackend, string[]> {
+  const byBackend = new Map<DispatchBackend, string[]>();
+  for (const c of caps) {
+    const backend = backendForEnv(c.envSlug);
+    const list = byBackend.get(backend) ?? [];
+    if (!list.includes(c.capability)) list.push(c.capability);
+    byBackend.set(backend, list);
+  }
+  return byBackend;
+}
+
 export function DispatchControl() {
   const backend = useStore((s) => s.dispatchBackend);
   const template = useStore((s) => s.exeTemplate);
@@ -56,12 +81,14 @@ export function DispatchControl() {
   const claudeFlags = useStore((s) => s.exeClaudeFlags);
   const autoTeardown = useStore((s) => s.exeAutoTeardown);
   const offerings = useStore((s) => s.offerings);
+  const capabilities = useStore((s) => s.capabilities);
   const save = useStore((s) => s.setDispatchSettings);
 
   const isExe = backend === DispatchBackend.ExeDev;
   const byBackend = backendsFromOfferings(offerings);
   const data = [...byBackend.keys()].map((b) => ({ label: BACKEND_LABEL[b], value: b }));
   const models = byBackend.get(backend)?.models ?? [];
+  const caps = capabilitiesByBackend(capabilities).get(backend) ?? [];
 
   return (
     <Stack gap="snug">
@@ -90,6 +117,25 @@ export function DispatchControl() {
           {models[0].agentName} ·{" "}
           {models.map((m) => (m.isDefault ? `${m.modelId} (default)` : m.modelId)).join(", ")}
         </Text>
+      )}
+
+      {/* What this backend's environment can do, straight from disponent's
+          env_capabilities edge (GET /capabilities) — honest display, only what
+          disponent advertises. One badge per capability token. Hidden until the
+          registry loads. */}
+      {caps.length > 0 && (
+        <Stack gap="tight">
+          <Text size="xs" c="dimmed">
+            Capabilities
+          </Text>
+          <Group gap="hair">
+            {caps.map((c) => (
+              <Badge key={c} size="xs" variant="light" radius="sm" tt="none" fw={500}>
+                {c}
+              </Badge>
+            ))}
+          </Group>
+        </Stack>
       )}
 
       {isExe && (

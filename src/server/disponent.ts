@@ -1,12 +1,14 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
+  CapabilityKind,
   type DispatchSpec,
   Disponent,
   type Session as DSession,
   SessionState as DState,
   setEnv,
 } from "@disponent/node";
+import type { EnvCapability } from "../shared/types.ts";
 import { supervisorRepoDir } from "./repo-cache.ts";
 import { type ExeDevConfig, getExeDevConfig } from "./settings.ts";
 
@@ -58,6 +60,45 @@ export function getDisponent(cfg: ExeDevConfig = getExeDevConfig()): Disponent {
 /** Drop the engine so the next use reopens (settings changed, tests). */
 export function resetDisponent(): void {
   engine = null;
+}
+
+// disponent hands capabilities back as the numeric `CapabilityKind` enum (its
+// napi members aren't enumerable, so we can't reflect a reverse map). Key the
+// name map off the *named* members instead of literal integers, so it stays
+// correct if disponent ever renumbers the enum — only a renamed/removed member
+// would need a matching edit here. An unknown kind (a disponent that advertises
+// something this pin doesn't know) falls through to its raw code rather than
+// being hidden or faked — honest capability edge.
+const CAPABILITY_NAME: Record<number, string> = {
+  [CapabilityKind.Dispatch]: "dispatch",
+  [CapabilityKind.Interact]: "interact",
+  [CapabilityKind.ObserveStream]: "observe_stream",
+  [CapabilityKind.ObservePoll]: "observe_poll",
+  [CapabilityKind.ListSessions]: "list_sessions",
+  [CapabilityKind.Resume]: "resume",
+  [CapabilityKind.Cancel]: "cancel",
+  [CapabilityKind.Teardown]: "teardown",
+  [CapabilityKind.IsolationWorktree]: "isolation_worktree",
+  [CapabilityKind.IsolationContainer]: "isolation_container",
+  [CapabilityKind.IsolationVm]: "isolation_vm",
+  [CapabilityKind.Templates]: "templates",
+  [CapabilityKind.ArtifactFetch]: "artifact_fetch",
+  [CapabilityKind.UsageReport]: "usage_report",
+};
+
+/** pm's per-env capability registry — what each environment disponent knows can
+ *  do (its env_capabilities edge), read live from the engine. Parallels
+ *  `offerings()`: the numeric `CapabilityKind` is lowered to disponent's
+ *  snake_case token so the wire (and the UI) speaks readable names. The Settings
+ *  dispatch picker shows these per backend so the operator sees what each
+ *  environment can actually do. */
+export async function capabilities(): Promise<EnvCapability[]> {
+  const rows = await getDisponent().capabilities();
+  return rows.map((r) => ({
+    envSlug: r.envSlug,
+    capability: CAPABILITY_NAME[r.capability] ?? String(r.capability),
+    ...(r.detail != null ? { detail: r.detail } : {}),
+  }));
 }
 
 /** SessionState value → name, for readable "never came up" errors. */

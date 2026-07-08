@@ -129,13 +129,31 @@ export type DispatchBackend = ValueOf<typeof DispatchBackend>;
  * marks the pick for a dispatch that names only the environment. The Settings
  * dispatch picker is driven from this registry instead of hardcoded backend
  * literals — see docs/agents-and-models.md for where the full env × agent ×
- * model × effort model is headed. Capabilities are deferred (not in this op yet).
+ * model × effort model is headed. What each environment can *do* (as opposed to
+ * what it can *run*) is a sibling registry — see `EnvCapability` below.
  */
 export type Offering = {
   envSlug: string;
   agentName: string;
   modelId: string;
   isDefault: boolean;
+};
+
+/**
+ * One row of pm's per-env capability registry: something a dispatch environment
+ * can do, sourced live from disponent's `env_capabilities` edge (see GET
+ * /capabilities, which calls `capabilities()` in src/server/disponent.ts).
+ * `capability` is disponent's closed-vocabulary `CapabilityKind` token (e.g.
+ * `dispatch`, `observe_poll`, `isolation_worktree`), lowered from the binding's
+ * numeric enum to its readable name server-side; `detail` is optional
+ * env-specific texture. The Settings dispatch picker shows these per backend so
+ * the operator sees what each environment actually supports — honest display,
+ * only what disponent advertises.
+ */
+export type EnvCapability = {
+  envSlug: string;
+  capability: string;
+  detail?: string;
 };
 
 // GitHub PR state, bounded to the values GitHub's GraphQL actually returns. Same
