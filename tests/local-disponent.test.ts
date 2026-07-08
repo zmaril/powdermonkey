@@ -176,3 +176,48 @@ test("start-local with several task ids starts ONE disponent session for all", a
 
   await landSession(result.session.id);
 });
+
+test("teleport opts route through disponent: fetchRemote + startup map to the dispatch spec", async () => {
+  const [task] = await taskRepo.list();
+
+  // Spy on the engine's dispatch to capture the exact spec pm hands it.
+  const d = getDisponent();
+  const orig = d.dispatch.bind(d);
+  // biome-ignore lint/suspicious/noExplicitAny: test spy over the native dispatch.
+  const specs: any[] = [];
+  // biome-ignore lint/suspicious/noExplicitAny: test spy over the native dispatch.
+  (d as any).dispatch = (spec: any) => {
+    specs.push(spec);
+    return orig(spec);
+  };
+  try {
+    // Teleport-shaped opts (what teleportTask passes): a discovered remote branch to
+    // fetch, and a bespoke `claude --teleport <id>` startup with no {prompt_file}.
+    const teleport = await startLocalSession(task.id, {
+      branch: "pm/task-1-demo",
+      fetchRemote: true,
+      startup: "claude --teleport session_demo",
+    });
+    if (!teleport.ok) throw new Error(teleport.error);
+    // It went via disponent (engine uid on the row), NOT pm's own worktree.
+    expect(teleport.session.vmName).toBeTruthy();
+    // …and the teleport opts landed on the dispatch spec verbatim.
+    const spec = specs.at(-1);
+    expect(spec.fetchRemote).toBe(true);
+    expect(spec.agentCmd).toBe("claude --teleport session_demo");
+    expect(spec.gitRef).toBe("pm/task-1-demo");
+    await landSession(teleport.session.id);
+
+    // A plain start-local (no teleport opts) leaves both new fields unset, so the
+    // spec is identical to before this stage.
+    const plain = await startLocalSession(task.id);
+    if (!plain.ok) throw new Error(plain.error);
+    const plainSpec = specs.at(-1);
+    expect(plainSpec.fetchRemote).toBeUndefined();
+    expect(plainSpec.agentCmd).toBeUndefined();
+    await landSession(plain.session.id);
+  } finally {
+    // biome-ignore lint/suspicious/noExplicitAny: restore the native dispatch.
+    (d as any).dispatch = orig;
+  }
+});
