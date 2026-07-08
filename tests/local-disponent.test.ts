@@ -22,9 +22,8 @@ const { ready } = await setupTestDb();
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
 const { taskRepo, sessionRepo } = await import("../src/server/crud.ts");
 const { startLocalSession, landSession, stopSession } = await import("../src/server/worktree.ts");
-const { provisionLocalWorker, teardownLocalWorker, cancelLocalWorker } = await import(
-  "../src/server/local-disponent.ts"
-);
+const { provisionLocalWorker, teardownLocalWorker, cancelLocalWorker, resolveLocalAttachTarget } =
+  await import("../src/server/local-disponent.ts");
 const { getDisponent } = await import("../src/server/disponent.ts");
 const { SessionState: DState } = await import("@disponent/node");
 
@@ -77,6 +76,28 @@ test("provisionLocalWorker dispatches env=local, isolation=worktree, gitRef=bran
   const torn = await teardownLocalWorker(res.uid);
   expect(torn.ok).toBe(true);
   expect((await d.session(res.uid))?.reapedAt).toBeTruthy();
+});
+
+test("resolveLocalAttachTarget reads disponent's typed tmux attach fields", async () => {
+  const res = await provisionLocalWorker({
+    taskId: 7,
+    repoDir,
+    branch: "pm/task-7",
+    brief: "do the work",
+  });
+  if (!res.ok) throw new Error(res.error);
+
+  // The attach target the browser terminal points at comes from disponent's typed
+  // Session fields (attachTmuxSocket / attachTmuxSession) — and matches the socket +
+  // dsp-<uid> tmux the local agent actually runs under (the untyped envHandle).
+  const target = await resolveLocalAttachTarget(res.uid);
+  expect(target).toEqual({ socket: res.handle.socket, tmuxSession: res.handle.tmux });
+  expect(target?.tmuxSession).toBe(`dsp-${res.uid}`);
+
+  // An unknown uid resolves to null (no attach target) rather than throwing.
+  expect(await resolveLocalAttachTarget("no-such-uid")).toBeNull();
+
+  await teardownLocalWorker(res.uid);
 });
 
 test("start-local routes through disponent: session row carries branch + engine uid", async () => {

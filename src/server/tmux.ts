@@ -8,9 +8,11 @@ export const SOCKET = process.env.PM_TMUX_SOCKET ?? "powdermonkey";
 
 export type TmuxResult = { ok: boolean; stdout: string; stderr: string };
 
-/** Run a tmux control command on our private socket, synchronously. */
-export function tmux(...args: string[]): TmuxResult {
-  const r = Bun.spawnSync([TMUX_BIN, "-L", SOCKET, ...args]);
+/** Run a tmux control command on an ARBITRARY socket, synchronously. Used to reach
+ *  a tmux server pm doesn't own — e.g. disponent's `-L disponent` socket, where a
+ *  local-backend agent lives — while `tmux()` below stays pinned to pm's own. */
+export function tmuxOn(socket: string, ...args: string[]): TmuxResult {
+  const r = Bun.spawnSync([TMUX_BIN, "-L", socket, ...args]);
   return {
     ok: r.exitCode === 0,
     stdout: r.stdout.toString(),
@@ -18,9 +20,19 @@ export function tmux(...args: string[]): TmuxResult {
   };
 }
 
+/** Run a tmux control command on our private socket, synchronously. */
+export function tmux(...args: string[]): TmuxResult {
+  return tmuxOn(SOCKET, ...args);
+}
+
+/** True while a tmux session of the given name is alive on the given socket. */
+export function hasSessionOn(socket: string, name: string): boolean {
+  return tmuxOn(socket, "has-session", "-t", name).ok;
+}
+
 /** True while a tmux session of the given name is alive on our socket. */
 export function hasSession(name: string): boolean {
-  return tmux("has-session", "-t", name).ok;
+  return hasSessionOn(SOCKET, name);
 }
 
 /** Single-quote a string for safe interpolation into a `sh -c` command. */

@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "./db.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { sessions } from "./schema.ts";
-import { hasSession, SOCKET, shq, TMUX_BIN, tmux } from "./tmux.ts";
+import { hasSession, hasSessionOn, SOCKET, shq, TMUX_BIN, tmux } from "./tmux.ts";
 
 // One long-lived `claude` per local session, run inside tmux so it OUTLIVES the
 // supervisor. The supervisor is started with `--watch`; editing PowderMonkey's own
@@ -69,6 +69,18 @@ function repoDir(): string {
 
 function sessionName(id: number): string {
   return `pm-session-${id}`;
+}
+
+/** Where an attach PTY points: a tmux socket + session name. pm's own worker
+ *  sessions live on our private socket (`SOCKET`) as `pm-session-<id>`; a session
+ *  dispatched through disponent's local backend instead lives in disponent's own
+ *  tmux (its `-L <socket>` + `dsp-<uid>`), and the attach target carries that so
+ *  the browser terminal reaches the REAL agent rather than a fresh shell. */
+export type AttachTarget = { socket: string; tmuxSession: string };
+
+/** pm's own durable session for an id, on pm's private socket. */
+function pmTarget(id: number): AttachTarget {
+  return { socket: SOCKET, tmuxSession: sessionName(id) };
 }
 
 /** True while the durable tmux session (and thus its agent) is alive. */
@@ -141,9 +153,10 @@ export function startSupervisorPty(): void {
   startSessionPty(SUPERVISOR_ID, repoDir(), SUPERVISOR_CMD);
 }
 
-/** Spawn the supervisor-side attach PTY for a live session and register it. */
-function createAttachEntry(sessionId: number): Entry {
-  const name = sessionName(sessionId);
+/** Spawn the supervisor-side attach PTY for a live session and register it. The
+ *  `target` says which tmux (socket + session) to attach to — pm's own by default,
+ *  or disponent's for a local-backend session. */
+function createAttachEntry(sessionId: number, target: AttachTarget): Entry {
   const entry: Entry = {
     proc: null,
     chunks: [],
@@ -169,7 +182,7 @@ function createAttachEntry(sessionId: number): Entry {
       setNeedsInput(sessionId, false);
       armIdle(sessionId);
     },
-    `exec ${TMUX_BIN} -L ${SOCKET} attach -t ${name}`,
+    `exec ${TMUX_BIN} -L ${target.socket} attach -t ${target.tmuxSession}`,
   );
   armIdle(sessionId);
   // The attach PTY exiting while it's still the registered entry means the durable
@@ -202,16 +215,20 @@ function notifyEnded(sessionId: number): void {
  *  the first time, across tabs, and after a supervisor restart. `onEnd` (optional)
  *  fires once if the durable session ends while subscribed (so the UI can show an
  *  end-state rather than a dead terminal). Returns an unsubscribe fn, or null if no
- *  live session exists. */
+ *  live session exists. `target` overrides which tmux to attach to (default: pm's
+ *  own `pm-session-<id>` on pm's socket); a disponent-local session passes
+ *  disponent's socket + `dsp-<uid>` so the terminal reaches the real agent. */
 export function attachSessionPty(
   sessionId: number,
   onData: (b: Uint8Array) => void,
   onEnd?: () => void,
+  target?: AttachTarget,
 ): (() => void) | null {
   let entry = registry.get(sessionId);
   if (!entry) {
-    if (!hasSessionPty(sessionId)) return null;
-    entry = createAttachEntry(sessionId);
+    const tgt = target ?? pmTarget(sessionId);
+    if (!hasSessionOn(tgt.socket, tgt.tmuxSession)) return null;
+    entry = createAttachEntry(sessionId, tgt);
   }
   const e = entry;
   for (const c of e.chunks) {

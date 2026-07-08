@@ -42,6 +42,7 @@ import { getDisponent } from "./exe-dev.ts";
 import { fanOutTasks } from "./fanout.ts";
 import { proposeFollowup } from "./followups.ts";
 import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
+import { resolveLocalAttachTarget } from "./local-disponent.ts";
 import { models, taskKindSchema } from "./models.ts";
 import {
   buildContext,
@@ -81,6 +82,7 @@ import {
   tasks as tasksTable,
 } from "./schema.ts";
 import {
+  type AttachTarget,
   attachSessionPty,
   resizeSessionPty,
   SUPERVISOR_ID,
@@ -90,7 +92,7 @@ import {
 import { listSessionTasks } from "./session-tasks.ts";
 import { getSettings, patchSettings } from "./settings.ts";
 import { teleportTask } from "./teleport.ts";
-import { landSession, startLocalSession, stopSession } from "./worktree.ts";
+import { isDisponentLocal, landSession, startLocalSession, stopSession } from "./worktree.ts";
 
 // Full CRUD for every vocab entity, plus the nested plan loader and the runtime
 // dispatch/status routes. Eden Treaty consumes `App` (exported below) so the
@@ -751,18 +753,40 @@ export const app = new Elysia()
         .otherwise(() => null);
 
       if (sessionId != null) {
-        const detach = attachSessionPty(sessionId, send, sendEnded);
+        const isSupervisor = sessionId === SUPERVISOR_ID;
+        const row = isSupervisor ? null : await sessionRepo.get(sessionId);
+
+        // A disponent-local session's agent lives in DISPONENT's tmux (its socket +
+        // `dsp-<uid>`), not pm's `pm-session-<id>`. Resolve that attach target from
+        // disponent's typed Session fields so the terminal reaches the real agent.
+        let target: AttachTarget | undefined;
+        if (row && isDisponentLocal(row) && row.vmName) {
+          const resolved = await resolveLocalAttachTarget(row.vmName);
+          target = resolved ?? undefined;
+          // Disponent-local + still running but no attach target resolvable — this
+          // shouldn't happen for a live local session. Fail honestly rather than
+          // silently dropping into an unrelated fresh shell in the worktree.
+          if (!target && row.state === SessionState.Running && !row.archivedAt) {
+            send(
+              new TextEncoder().encode(
+                "\x1b[2m[disponent agent tmux not resolvable — cannot attach]\x1b[0m\r\n",
+              ),
+            );
+            sendEnded();
+            return;
+          }
+        }
+
+        const detach = attachSessionPty(sessionId, send, sendEnded, target);
         if (detach) {
           ptys.set(ws.raw, { kind: "attach", sessionId, detach });
           return;
         }
-        const isSupervisor = sessionId === SUPERVISOR_ID;
         // No live PTY and this is a worker session that has already ended (landed,
         // stopped, or merge-archived): don't quietly spawn a fresh shell on a dead
         // session — tell the client so it shows the end-state. The supervisor (id 0)
         // never ends, so it always falls through to the recovery shell below.
         if (!isSupervisor) {
-          const row = await sessionRepo.get(sessionId);
           if (
             !row ||
             row.archivedAt ||
@@ -778,9 +802,7 @@ export const app = new Elysia()
         // at the repo dir; a worker gets a plain shell in its worktree.
         const cwd = isSupervisor
           ? process.env.PM_REPO_DIR || process.cwd()
-          : (await sessionRepo.get(sessionId))?.worktreePath ||
-            process.env.PM_REPO_DIR ||
-            process.cwd();
+          : row?.worktreePath || process.env.PM_REPO_DIR || process.cwd();
         if (!isSupervisor) {
           send(
             new TextEncoder().encode(

@@ -191,11 +191,12 @@ async function startLocalViaDisponent(ctx: LaunchCtx): Promise<StartLocalResult>
     ids,
   );
 
-  // TERMINAL-ATTACH SEAM (deferred — see PR/report): the agent runs under
-  // `tmux -L ${prov.handle.socket} attach -t ${prov.handle.tmux}`. Pointing pm's
-  // browser terminal at THAT tmux (rather than spawning its own via
-  // startSessionPty) is not yet wired; until then /pty falls back to a fresh shell
-  // in `worktreePath`. Provisioning + lifecycle are the solid, tested surface here.
+  // TERMINAL-ATTACH: the agent runs under `tmux -L ${prov.handle.socket} attach -t
+  // ${prov.handle.tmux}` (disponent's own tmux, not pm's). We do NOT spawn a
+  // pm-session-<id> here — instead /pty (app.ts) resolves this session's attach
+  // target from disponent's typed Session fields (resolveLocalAttachTarget) and
+  // attaches the browser terminal straight to that tmux, so the operator sees the
+  // real agent rather than a fresh shell.
 
   return { ok: true, session, worktreePath, branch, prompt, trailers };
 }
@@ -238,7 +239,7 @@ async function startLocalViaWorktree(
 
 /** A local session provisioned through disponent (as opposed to pm's own worktree,
  *  the teleport path). Distinguished by the engine session uid parked in vm_name. */
-function isDisponentLocal(session: Session): boolean {
+export function isDisponentLocal(session: Session): boolean {
   return session.kind === SessionKind.Local && session.vmName != null;
 }
 

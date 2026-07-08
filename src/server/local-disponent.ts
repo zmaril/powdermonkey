@@ -76,6 +76,32 @@ export async function provisionLocalWorker(
   return { ok: true, uid: session.uid, workDir: handle.workDir, handle };
 }
 
+/** The tmux attach target (socket + session name) a disponent-local agent runs
+ *  under — what pm's browser terminal attaches to instead of spawning its own. */
+export type LocalAttachTarget = { socket: string; tmuxSession: string };
+
+/** Resolve the tmux attach target for a disponent-local session from disponent's
+ *  TYPED session fields (`attachTmuxSocket` / `attachTmuxSession`) — the first-class
+ *  surface the local-tmux backend populates (null for exe.dev). Preferred over
+ *  re-parsing the untyped `envHandle` JSON: it's the hardened API and survives a
+ *  handle-shape change. Returns null if the session is gone or carries no attach
+ *  target (e.g. it isn't a local-tmux session). A first miss reconciles once, since
+ *  a reopened engine (post supervisor restart) may not yet know a prior uid. */
+export async function resolveLocalAttachTarget(uid: string): Promise<LocalAttachTarget | null> {
+  const d = getDisponent();
+  let session = await d.session(uid);
+  if (!session) {
+    try {
+      await d.reconcile();
+    } catch {}
+    session = await d.session(uid);
+  }
+  const socket = session?.attachTmuxSocket;
+  const tmuxSession = session?.attachTmuxSession;
+  if (!socket || !tmuxSession) return null;
+  return { socket, tmuxSession };
+}
+
 export type LocalCmdResult = { ok: boolean; output: string };
 
 /** Reconcile-then-retry a teardown op on the engine: after a supervisor restart
