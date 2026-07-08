@@ -34,7 +34,7 @@ jobs:
           workspaces: ../disponent
       - name: "Build @disponent/node (sibling file: dep)"
         env:
-          DISPONENT_REF: b41c7e2e733d3f2e97926e41bad72aff67ee1d1b
+          DISPONENT_REF: 7bdcce78ebbf27fbe1f71fc96153014aa1c08f76
         run: |
           git init -q ../disponent
           git -C ../disponent fetch -q --depth 1 https://github.com/zmaril/disponent "$DISPONENT_REF"
