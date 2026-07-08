@@ -1,0 +1,27 @@
+#!/bin/sh
+# PowderMonkey managed hook — pre-push.
+#
+# Mirror the CI gate exactly (`bun run typecheck` + `bun run test`) so a push can't
+# turn CI red on those two checks. Typecheck runs first for fast feedback; tests
+# only run if it passes.
+#
+# Bypass once with:  git push --no-verify
+. "$(dirname "$0")/lib.sh"
+
+pm_has_bun || { pm_warn "pre-push: bun not on PATH — skipping typecheck/tests."; exit 0; }
+
+status=0
+
+pm_say "pre-push: bun run typecheck"
+bun run typecheck || status=1
+
+if [ "$status" -eq 0 ]; then
+  pm_say "pre-push: bun run test"
+  bun run test || status=1
+fi
+
+if [ "$status" -ne 0 ]; then
+  pm_warn "pre-push failed — fix it, or bypass with: git push --no-verify"
+  exit 1
+fi
+exit 0

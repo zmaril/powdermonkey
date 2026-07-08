@@ -24,6 +24,7 @@
     "desktop:build": "tauri build",
     "build:compile": "bun run build:web && rm -rf dist && mkdir -p dist && bun build --compile bin/powdermonkey.ts --outfile dist/powdermonkey && cp -r public drizzle dist/ && cp node_modules/@electric-sql/pglite/dist/pglite.wasm node_modules/@electric-sql/pglite/dist/pglite.data node_modules/@electric-sql/pglite/dist/initdb.wasm dist/",
     "db:generate": "drizzle-kit generate",
+    "hooks:install": "bun run scripts/install-hooks.ts",
     "typecheck": "tsc --noEmit",
     "check": "biome check --error-on-warnings src && bun run scripts/lint-strings.ts && bun run scripts/lint-dock-theme.ts && bun run scripts/lint-spacing.ts",
     "size": "git ls-files 'src/**/*.ts' 'src/**/*.tsx' | xargs wc -l | tail -1",
