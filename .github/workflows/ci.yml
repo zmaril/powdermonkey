@@ -63,17 +63,16 @@ jobs:
       # the engine that provisions exe.dev workers. Clone it at the pin and
       # build the napi addon so bun install can vendor it. Bump DISPONENT_REF
       # deliberately when adopting a new engine.
-      # Pinned to disponent #36 (chore/adopt-fluessig-string-enums) at 56c6999 — its
-      # node binding returns capability/state as snake_case strings (via fluessig #21),
-      # which this build's disponent.ts consumes directly. Merge order: fluessig #21 →
-      # disponent #36 → then repin this to disponent main. Bump this SHA to adopt a newer engine.
+      # Pinned to disponent main, which carries the capabilities op plus the
+      # snake_case string-enum node binding (via fluessig #21) that this build's
+      # disponent.ts consumes directly. Bump this SHA to adopt a newer engine.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ../disponent
       - name: "Build @disponent/node (sibling file: dep)"
         env:
-          DISPONENT_REF: 56c699986704d07f8a2986f0d578eddd234568b7
+          DISPONENT_REF: 91a53b52ec92f859fe94b8023e1c49cd4cb67463
         run: |
           git init -q ../disponent
           git -C ../disponent fetch -q --depth 1 https://github.com/zmaril/disponent "$DISPONENT_REF"
@@ -100,17 +99,16 @@ jobs:
       # the engine that provisions exe.dev workers. Clone it at the pin and
       # build the napi addon so bun install can vendor it. Bump DISPONENT_REF
       # deliberately when adopting a new engine.
-      # Pinned to disponent #36 (chore/adopt-fluessig-string-enums) at 56c6999 — its
-      # node binding returns capability/state as snake_case strings (via fluessig #21),
-      # which this build's disponent.ts consumes directly. Merge order: fluessig #21 →
-      # disponent #36 → then repin this to disponent main. Bump this SHA to adopt a newer engine.
+      # Pinned to disponent main, which carries the capabilities op plus the
+      # snake_case string-enum node binding (via fluessig #21) that this build's
+      # disponent.ts consumes directly. Bump this SHA to adopt a newer engine.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ../disponent
       - name: "Build @disponent/node (sibling file: dep)"
         env:
-          DISPONENT_REF: 56c699986704d07f8a2986f0d578eddd234568b7
+          DISPONENT_REF: 91a53b52ec92f859fe94b8023e1c49cd4cb67463
         run: |
           git init -q ../disponent
           git -C ../disponent fetch -q --depth 1 https://github.com/zmaril/disponent "$DISPONENT_REF"
@@ -143,17 +141,16 @@ jobs:
       # the engine that provisions exe.dev workers. Clone it at the pin and
       # build the napi addon so bun install can vendor it. Bump DISPONENT_REF
       # deliberately when adopting a new engine.
-      # Pinned to disponent #36 (chore/adopt-fluessig-string-enums) at 56c6999 — its
-      # node binding returns capability/state as snake_case strings (via fluessig #21),
-      # which this build's disponent.ts consumes directly. Merge order: fluessig #21 →
-      # disponent #36 → then repin this to disponent main. Bump this SHA to adopt a newer engine.
+      # Pinned to disponent main, which carries the capabilities op plus the
+      # snake_case string-enum node binding (via fluessig #21) that this build's
+      # disponent.ts consumes directly. Bump this SHA to adopt a newer engine.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ../disponent
       - name: "Build @disponent/node (sibling file: dep)"
         env:
-          DISPONENT_REF: 56c699986704d07f8a2986f0d578eddd234568b7
+          DISPONENT_REF: 91a53b52ec92f859fe94b8023e1c49cd4cb67463
         run: |
           git init -q ../disponent
           git -C ../disponent fetch -q --depth 1 https://github.com/zmaril/disponent "$DISPONENT_REF"
