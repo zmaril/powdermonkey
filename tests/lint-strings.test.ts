@@ -6,33 +6,33 @@ import { scanText, stringLiterals } from "../scripts/lint-strings.ts";
 // (and JSX tags) for real strings. These lock in the cases that bit us.
 describe("stringLiterals", () => {
   test("extracts plain string values with line numbers", () => {
-    const lits = stringLiterals('const a = "one";\nconst b = "two";');
-    expect(lits).toEqual([
+    const literals = stringLiterals('const a = "one";\nconst b = "two";');
+    expect(literals).toEqual([
       { value: "one", line: 1 },
       { value: "two", line: 2 },
     ]);
   });
 
   test("ignores line and block comments", () => {
-    const lits = stringLiterals('// "nope"\n/* "also nope" */\nconst x = "yes";');
-    expect(lits.map((l) => l.value)).toEqual(["yes"]);
+    const literals = stringLiterals('// "nope"\n/* "also nope" */\nconst x = "yes";');
+    expect(literals.map((l) => l.value)).toEqual(["yes"]);
   });
 
   test("ignores template literals", () => {
-    const lits = stringLiterals('const x = `a ${"nested"} b`;\nconst y = "real";');
-    expect(lits.map((l) => l.value)).toEqual(["real"]);
+    const literals = stringLiterals('const x = `a ${"nested"} b`;\nconst y = "real";');
+    expect(literals.map((l) => l.value)).toEqual(["real"]);
   });
 
   test("skips a regex literal whose body contains a backtick and quotes", () => {
     // The real desync: `.replace(/[*`>]/g, "")` — the backtick inside the regex
     // must not open a template, and the `"` after it is the real (empty) string.
-    const lits = stringLiterals('line.replace(/[*`>]/g, "").replace(/x/, "keep");');
-    expect(lits.map((l) => l.value)).toEqual(["", "keep"]);
+    const literals = stringLiterals('line.replace(/[*`>]/g, "").replace(/x/, "keep");');
+    expect(literals.map((l) => l.value)).toEqual(["", "keep"]);
   });
 
   test("treats `/` after a value as division, not a regex", () => {
-    const lits = stringLiterals('const r = a / b;\nconst s = "after";');
-    expect(lits.map((l) => l.value)).toEqual(["after"]);
+    const literals = stringLiterals('const r = a / b;\nconst s = "after";');
+    expect(literals.map((l) => l.value)).toEqual(["after"]);
   });
 
   test("handles JSX closing tags without desyncing (TSX)", () => {
