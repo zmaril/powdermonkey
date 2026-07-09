@@ -10,7 +10,7 @@
 // two Disponent instances on one SQLite sink would contend, so we never open a
 // second one.
 
-import { type Event, EventKind } from "@disponent/node";
+import type { Event } from "@disponent/node";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { SessionKind } from "../shared/types.ts";
 import { db as realDb } from "./db.ts";
@@ -40,7 +40,7 @@ export function accumulateUsage(prev: UsageTotals, events: Event[]): Accumulated
   let maxIdx: number | null = null;
   for (const ev of events) {
     if (maxIdx === null || ev.idx > maxIdx) maxIdx = ev.idx;
-    if (ev.kind !== EventKind.Usage) continue;
+    if (ev.kind !== "usage") continue; // lint-allow-string: disponent EventKind token, not a pm enum
     let delta: { inputTokens?: number; outputTokens?: number; costCents?: string };
     try {
       delta = JSON.parse(ev.payload);
@@ -65,7 +65,7 @@ export async function drainUsageEvents(
   sessionUid: string,
   afterIdx?: number,
 ): Promise<Event[]> {
-  const stream = d.events({ sessionUid, afterIdx, kinds: [EventKind.Usage] });
+  const stream = d.events({ sessionUid, afterIdx, kinds: ["usage"] }); // lint-allow-string: disponent EventKind token, not a pm enum
   const out: Event[] = [];
   for (let i = 0; i < DRAIN_CAP; i++) {
     const ev = await stream.next();

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { type Disponent, type Session as DSession, SessionState as DState } from "@disponent/node";
+import type { Disponent, Session as DSession } from "@disponent/node";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { SessionKind } from "../shared/types.ts";
 import { db } from "./db.ts";
@@ -21,7 +21,7 @@ import { type ExeDevConfig, getExeDevConfig } from "./settings.ts";
 // (DISPONENT_EXE_DRY_RUN) — every VM operation is fabricated, nothing spawns.
 
 // Re-exported for callers that reach the engine through this module (tests).
-export { getDisponent, resetDisponent } from "./disponent.ts";
+export { capabilities, getDisponent, resetDisponent } from "./disponent.ts";
 
 /** How long a real provision may take before we call it failed (template copy
  *  + VM boot + clone). The dry-run backend settles in milliseconds. */
@@ -141,7 +141,7 @@ export async function gcOrphanedWorkers(nowMs: number = Date.now()): Promise<num
 
   const d = getDisponent();
   await d.reconcile();
-  const running = await d.sessions({ state: DState.Running });
+  const running = await d.sessions({ state: "running" }); // lint-allow-string: disponent SessionState token, not pm's SessionState.Running
   if (running.length === 0) return 0;
 
   const rows = await db
