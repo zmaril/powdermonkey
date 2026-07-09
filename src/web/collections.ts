@@ -8,6 +8,7 @@ import type {
   Proposal,
   Repo,
   Session,
+  SessionEvent,
   Task,
   TaskComment,
 } from "../server/schema.ts";
@@ -90,6 +91,7 @@ export const milestonesCollection = syncedCollection<Milestone>("milestones", "i
 export const tasksCollection = syncedCollection<Task>("tasks", "id");
 export const phasesCollection = syncedCollection<Phase>("phases", "id");
 export const sessionsCollection = syncedCollection<Session>("sessions", "id");
+export const sessionEventsCollection = syncedCollection<SessionEvent>("session_events", "id");
 export const sessionTasksCollection = syncedCollection<SessionLink & { id: number }>(
   "session_tasks",
   "id",

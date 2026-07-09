@@ -10,6 +10,7 @@ import {
   DispatchBackend,
   OverrideSource,
   ProposalStatus,
+  SessionKind,
   SessionState,
   SyncMode,
 } from "../shared/types.ts";
@@ -38,7 +39,7 @@ import { pg } from "./db.ts";
 import { loadTaskPrompt } from "./dispatch.ts";
 import { backendUsageSummary } from "./disponent-usage.ts";
 import { openSessionEditor } from "./editor.ts";
-import { capabilities, getDisponent } from "./exe-dev.ts";
+import { capabilities, getDisponent, sessionForVm } from "./exe-dev.ts";
 import { fanOutTasks } from "./fanout.ts";
 import { proposeFollowup } from "./followups.ts";
 import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
@@ -75,6 +76,7 @@ import {
   proposals as proposalsTable,
   pullRequests as pullRequestsTable,
   repos as reposTable,
+  sessionEvents as sessionEventsTable,
   sessions as sessionsTable,
   sessionTasks as sessionTasksTable,
   taskComments as taskCommentsTable,
@@ -133,6 +135,7 @@ const SYNC_TABLES: Record<string, { sql: string; key: string }> = Object.fromEnt
     tasksTable,
     phasesTable,
     sessionsTable,
+    sessionEventsTable,
     sessionTasksTable,
     taskCommentsTable,
     notesTable,
@@ -351,6 +354,41 @@ const sessionsGroup = resource("sessions", sessionRepo, models.sessions)
   )
   .post("/:id/open-editor", async ({ params, set }) =>
     orBadRequest(set, await openSessionEditor(Number(params.id))),
+  )
+  // Send operator input to a disponent-managed (Remote) session's live agent — the
+  // write half of the event feed (see disponent-feed.ts). Resolves the session's
+  // disponent handle and forwards to `d.send`, which HARD-GUARDS on state: it bails
+  // (`state is …, not running`) unless the session is running, and on success pushes a
+  // supervisor `message` event onto the timeline so the send echoes into the feed. We
+  // surface disponent's error VERBATIM (409) rather than faking success, so the UI can
+  // show its honest bail. 404 for an unknown session; 400 when it isn't disponent-managed.
+  .post(
+    "/:id/send",
+    async ({ params, body, set }) => {
+      const row = await sessionRepo.get(Number(params.id));
+      if (!row) {
+        set.status = 404;
+        return { error: "not found" };
+      }
+      if (row.kind !== SessionKind.Remote || !row.vmName) {
+        set.status = 400;
+        return { error: "not a disponent-managed session" };
+      }
+      const d = getDisponent();
+      const dsession = await sessionForVm(d, row.vmName);
+      if (!dsession) {
+        set.status = 409;
+        return { error: "no live disponent session" };
+      }
+      try {
+        await d.send(dsession.uid, body.input);
+        return { ok: true };
+      } catch (e) {
+        set.status = 409;
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+    { body: t.Object({ input: t.String({ minLength: 1 }) }) },
   );
 
 // Repos carry two routes on top of CRUD: the identity icon — the cached

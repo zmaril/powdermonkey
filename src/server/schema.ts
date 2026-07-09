@@ -8,6 +8,7 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
+import type { SessionEventFidelity, SessionEventKind } from "../shared/session-events.ts";
 import {
   type AgentState,
   type CheckRollupState,
@@ -152,7 +153,43 @@ export const sessions = pgTable("sessions", {
   usageOutputTokens: integer("usage_output_tokens").notNull().default(0),
   usageCostCents: doublePrecision("usage_cost_cents").notNull().default(0),
   usageEventCursor: integer("usage_event_cursor"),
+  // The highest disponent event idx already drained into this session's LIVE FEED
+  // (the session_events table below) — the feed's own cursor, kept apart from
+  // usageEventCursor so the two drains (Usage vs everything-else) advance
+  // independently. Null until the first feed drain. See disponent-feed.ts.
+  eventFeedCursor: integer("event_feed_cursor"),
   ...timestamps,
+});
+
+// A disponent-managed (Remote) session's LIVE timeline — the additive event feed that
+// replaces "remote workers surface only through PR comments". The feed poller
+// (disponent-feed.ts) drains disponent's event stream (State/Message/ToolCall/…, all
+// EXCEPT Usage, which the usage meters own) past sessions.eventFeedCursor and appends
+// one row per event here; the browser mirrors it as a synced collection and the worker
+// card renders it. Purely observational: it never gates progress. `payload` is the raw
+// JSON string disponent emitted (parsed for display by describeSessionEvent in
+// shared/session-events.ts); `kind`/`fidelity` are the string forms of disponent's
+// numeric enums. `idx` is disponent's own per-session event index (monotonic).
+export const sessionEvents = pgTable("session_events", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  sessionId: integer("session_id")
+    .notNull()
+    .references(() => sessions.id),
+  // disponent's per-session monotonic event index — the ordering key AND the
+  // idempotency guard (only events with idx past the session's cursor are appended).
+  idx: integer("idx").notNull(),
+  // The string SessionEventKind (message | tool_call | raw | state | …), mapped from
+  // disponent's numeric EventKind at persist time (see disponent-feed.ts).
+  kind: text("kind").$type<SessionEventKind>().notNull(),
+  // exact | derived | scraped (SessionEventFidelity), or null — how faithful the frame
+  // is (a scraped terminal delta is marked as such, never as exact).
+  fidelity: text("fidelity").$type<SessionEventFidelity>(),
+  // The raw JSON payload string disponent emitted, stored verbatim and parsed for
+  // display on the client by describeSessionEvent.
+  payload: text("payload").notNull(),
+  // disponent's own event timestamp (ISO string), kept for the UI's relative time.
+  ts: text("ts"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 // Which tasks a session is working. A session can be dispatched for several tasks
@@ -359,6 +396,7 @@ export type Milestone = typeof milestones.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type Phase = typeof phases.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
+export type SessionEvent = typeof sessionEvents.$inferSelect;
 export type SessionTask = typeof sessionTasks.$inferSelect;
 export type TaskComment = typeof taskComments.$inferSelect;
 export type Repo = typeof repos.$inferSelect;
