@@ -144,9 +144,9 @@ export type Offering = {
  * can do, sourced live from disponent's `env_capabilities` edge (see GET
  * /capabilities, which calls `capabilities()` in src/server/disponent.ts).
  * `capability` is disponent's closed-vocabulary `CapabilityKind` token (e.g.
- * `dispatch`, `observe_poll`, `isolation_worktree`), lowered from the binding's
- * numeric enum to its readable name server-side; `detail` is optional
- * env-specific texture. The Settings dispatch picker shows these per backend so
+ * `dispatch`, `observe_poll`, `isolation_worktree`) — the node binding hands it
+ * back as this snake_case string directly, so it rides straight through; `detail`
+ * is optional env-specific texture. The Settings dispatch picker shows these per backend so
  * the operator sees what each environment actually supports — honest display,
  * only what disponent advertises.
  */

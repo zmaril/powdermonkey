@@ -1,13 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import {
-  CapabilityKind,
-  type DispatchSpec,
-  Disponent,
-  type Session as DSession,
-  SessionState as DState,
-  setEnv,
-} from "@disponent/node";
+import { type DispatchSpec, Disponent, type Session as DSession, setEnv } from "@disponent/node";
 import type { EnvCapability } from "../shared/types.ts";
 import { supervisorRepoDir } from "./repo-cache.ts";
 import { type ExeDevConfig, getExeDevConfig } from "./settings.ts";
@@ -62,49 +55,21 @@ export function resetDisponent(): void {
   engine = null;
 }
 
-// disponent hands capabilities back as the numeric `CapabilityKind` enum (its
-// napi members aren't enumerable, so we can't reflect a reverse map). Key the
-// name map off the *named* members instead of literal integers, so it stays
-// correct if disponent ever renumbers the enum — only a renamed/removed member
-// would need a matching edit here. An unknown kind (a disponent that advertises
-// something this pin doesn't know) falls through to its raw code rather than
-// being hidden or faked — honest capability edge.
-const CAPABILITY_NAME: Record<number, string> = {
-  [CapabilityKind.Dispatch]: "dispatch",
-  [CapabilityKind.Interact]: "interact",
-  [CapabilityKind.ObserveStream]: "observe_stream",
-  [CapabilityKind.ObservePoll]: "observe_poll",
-  [CapabilityKind.ListSessions]: "list_sessions",
-  [CapabilityKind.Resume]: "resume",
-  [CapabilityKind.Cancel]: "cancel",
-  [CapabilityKind.Teardown]: "teardown",
-  [CapabilityKind.IsolationWorktree]: "isolation_worktree",
-  [CapabilityKind.IsolationContainer]: "isolation_container",
-  [CapabilityKind.IsolationVm]: "isolation_vm",
-  [CapabilityKind.Templates]: "templates",
-  [CapabilityKind.ArtifactFetch]: "artifact_fetch",
-  [CapabilityKind.UsageReport]: "usage_report",
-};
-
 /** pm's per-env capability registry — what each environment disponent knows can
  *  do (its env_capabilities edge), read live from the engine. Parallels
- *  `offerings()`: the numeric `CapabilityKind` is lowered to disponent's
- *  snake_case token so the wire (and the UI) speaks readable names. The Settings
- *  dispatch picker shows these per backend so the operator sees what each
- *  environment can actually do. */
+ *  `offerings()`. disponent's node binding hands `capability` back as its
+ *  snake_case `CapabilityKind` token directly (e.g. "dispatch",
+ *  "isolation_vm"), so the wire (and the UI) already speaks readable names —
+ *  no lowering hop here. The Settings dispatch picker shows these per backend so
+ *  the operator sees what each environment can actually do. */
 export async function capabilities(): Promise<EnvCapability[]> {
   const rows = await getDisponent().capabilities();
   return rows.map((r) => ({
     envSlug: r.envSlug,
-    capability: CAPABILITY_NAME[r.capability] ?? String(r.capability),
+    capability: r.capability,
     ...(r.detail != null ? { detail: r.detail } : {}),
   }));
 }
-
-/** SessionState value → name, for readable "never came up" errors. */
-export const STATE_NAMES: Record<number, string> = Object.fromEntries(
-  Object.entries(DState).map(([name, value]) => [value as number, name]),
-);
 
 /** Dispatch one worker for a pm task, turning a thrown engine error into the
  *  `{ok:false}` failure report both backends surface. It stamps the identifying
@@ -141,7 +106,7 @@ export async function waitForRunning(
   for (;;) {
     const s = await d.session(uid);
     if (!s) throw new Error(`disponent lost session ${uid}`);
-    const settling = s.state === DState.Queued || s.state === DState.Provisioning;
+    const settling = s.state === "queued" || s.state === "provisioning";
     if (!settling || Date.now() >= deadline) return s;
     await new Promise((r) => setTimeout(r, 500));
   }
@@ -163,14 +128,12 @@ export async function dispatchAndAwaitRunning(
   const disp = await tryDispatch(d, taskId, spec);
   if (!disp.ok) return disp;
   const settled = await waitForRunning(d, disp.session.uid, opts.timeoutMs);
-  const up =
-    settled.state === DState.Running &&
-    settled.envHandle != null &&
-    (opts.ready?.(settled) ?? true);
+  const isRunning = settled.state === "running"; // lint-allow-string: disponent SessionState token, not pm's SessionState.Running
+  const up = isRunning && settled.envHandle != null && (opts.ready?.(settled) ?? true);
   if (!up) {
     return {
       ok: false,
-      error: `${opts.label} never came up (${STATE_NAMES[settled.state] ?? settled.state})`,
+      error: `${opts.label} never came up (${settled.state})`,
       output: settled.exitDetail ?? undefined,
     };
   }
