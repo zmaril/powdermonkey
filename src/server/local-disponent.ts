@@ -1,3 +1,4 @@
+import { IsolationKind } from "@disponent/node";
 import { dispatchAndAwaitRunning, getDisponent } from "./disponent.ts";
 
 // The local dispatch backend — a thin adapter over disponent's local tmux
@@ -63,7 +64,7 @@ export async function provisionLocalWorker(
       brief,
       env: "local", // lint-allow-string: disponent's environment slug, not pm's SessionKind
       repo: repoDir,
-      isolation: "worktree", // lint-allow-string: disponent IsolationKind token, not a pm enum
+      isolation: IsolationKind.Worktree,
       gitRef: branch,
     },
     { timeoutMs: PROVISION_TIMEOUT_MS, label: "local worker" },

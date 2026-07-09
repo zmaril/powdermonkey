@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Event } from "@disponent/node";
+import { type Event, EventKind, Fidelity } from "@disponent/node";
 import { FEED_KINDS, feedRowsFromEvents, pollDisponentFeed } from "../src/server/disponent-feed.ts";
 import type { PollDeps } from "../src/server/disponent-usage.ts";
 import { describeSessionEvent, SESSION_EVENT_KIND } from "../src/shared/session-events.ts";
@@ -110,7 +110,7 @@ const ev = (over: Partial<Event> & Pick<Event, "idx" | "kind">): Event =>
   ({
     sessionUid: "s1",
     ts: "2026-07-08T00:00:00Z",
-    fidelity: "exact", // lint-allow-string: disponent Fidelity token, not a pm enum
+    fidelity: Fidelity.Exact,
     payload: "{}",
     ...over,
   }) as Event;
@@ -118,13 +118,12 @@ const ev = (over: Partial<Event> & Pick<Event, "idx" | "kind">): Event =>
 test("feedRowsFromEvents maps disponent kinds to string kinds and tracks maxIdx", () => {
   const { rows, maxIdx } = feedRowsFromEvents(
     [
-      ev({ idx: 1, kind: SESSION_EVENT_KIND.Message, payload: '{"role":"assistant","text":"hi"}' }),
-      ev({ idx: 2, kind: SESSION_EVENT_KIND.ToolCall, payload: '{"tool":"bash"}' }),
+      ev({ idx: 1, kind: EventKind.Message, payload: '{"role":"assistant","text":"hi"}' }),
+      ev({ idx: 2, kind: EventKind.ToolCall, payload: '{"tool":"bash"}' }),
       ev({
         idx: 3,
-        kind: SESSION_EVENT_KIND.Raw,
-        // lint-allow-string: disponent Fidelity token, not a pm enum
-        fidelity: "scraped",
+        kind: EventKind.Raw,
+        fidelity: Fidelity.Scraped,
         payload: '{"source":"terminal","data":"x"}',
       }),
     ],
@@ -141,8 +140,8 @@ test("feedRowsFromEvents maps disponent kinds to string kinds and tracks maxIdx"
 
 test("feedRowsFromEvents never re-emits events at or below the cursor (idempotent)", () => {
   const events = [
-    ev({ idx: 5, kind: SESSION_EVENT_KIND.Message }),
-    ev({ idx: 6, kind: SESSION_EVENT_KIND.Log }),
+    ev({ idx: 5, kind: EventKind.Message }),
+    ev({ idx: 6, kind: EventKind.Log }),
   ];
   const { rows, maxIdx } = feedRowsFromEvents(events, 5);
   expect(rows.map((r) => r.idx)).toEqual([6]);
@@ -152,9 +151,9 @@ test("feedRowsFromEvents never re-emits events at or below the cursor (idempoten
 });
 
 test("FEED_KINDS carries every kind except Usage", () => {
-  expect(FEED_KINDS).not.toContain(SESSION_EVENT_KIND.Usage);
-  expect(FEED_KINDS).toContain(SESSION_EVENT_KIND.Message);
-  expect(FEED_KINDS).toContain(SESSION_EVENT_KIND.Raw);
+  expect(FEED_KINDS).not.toContain(EventKind.Usage);
+  expect(FEED_KINDS).toContain(EventKind.Message);
+  expect(FEED_KINDS).toContain(EventKind.Raw);
 });
 
 // A tiny fake of the drizzle query builder surface pollDisponentFeed touches: a
@@ -210,8 +209,8 @@ test("pollDisponentFeed inserts feed rows and advances the cursor", async () => 
   const { deps, inserted, updates } = fakeDeps({
     selectRows: [{ id: 42, vmName: "vm-1", cursor: null }],
     events: [
-      ev({ idx: 1, kind: SESSION_EVENT_KIND.Message, payload: '{"role":"assistant","text":"hi"}' }),
-      ev({ idx: 2, kind: SESSION_EVENT_KIND.ToolCall, payload: '{"tool":"bash"}' }),
+      ev({ idx: 1, kind: EventKind.Message, payload: '{"role":"assistant","text":"hi"}' }),
+      ev({ idx: 2, kind: EventKind.ToolCall, payload: '{"tool":"bash"}' }),
     ],
   });
   await pollDisponentFeed(deps);
@@ -225,8 +224,8 @@ test("pollDisponentFeed drains only past the stored cursor (no duplicates)", asy
   const { deps, inserted, updates } = fakeDeps({
     selectRows: [{ id: 42, vmName: "vm-1", cursor: 5 }],
     events: [
-      ev({ idx: 5, kind: SESSION_EVENT_KIND.Message }), // already drained
-      ev({ idx: 6, kind: SESSION_EVENT_KIND.Log }),
+      ev({ idx: 5, kind: EventKind.Message }), // already drained
+      ev({ idx: 6, kind: EventKind.Log }),
     ],
   });
   await pollDisponentFeed(deps);

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Event } from "@disponent/node";
+import { type Event, EventKind } from "@disponent/node";
 import { accumulateUsage } from "../src/server/disponent-usage.ts";
 
 // The pure reducer behind the per-backend usage meters: it folds a batch of
@@ -18,7 +18,7 @@ const ev = (over: Partial<Event> & Pick<Event, "idx" | "kind">): Event =>
   }) as Event;
 
 const usage = (idx: number, payload: object): Event =>
-  ev({ idx, kind: "usage", payload: JSON.stringify(payload) });
+  ev({ idx, kind: EventKind.Usage, payload: JSON.stringify(payload) });
 
 const zero = { inputTokens: 0, outputTokens: 0, costCents: 0 };
 
@@ -55,8 +55,8 @@ test("missing token/cost fields default to zero", () => {
 test("non-Usage events are ignored for totals but still advance maxIdx", () => {
   const out = accumulateUsage(zero, [
     usage(1, { inputTokens: 10, outputTokens: 2, costCents: "1" }),
-    ev({ idx: 5, kind: "message", payload: '{"text":"hi"}' }),
-    ev({ idx: 3, kind: "tool_call", payload: "{}" }),
+    ev({ idx: 5, kind: EventKind.Message, payload: '{"text":"hi"}' }),
+    ev({ idx: 3, kind: EventKind.ToolCall, payload: "{}" }),
   ]);
   expect(out.inputTokens).toBe(10);
   expect(out.outputTokens).toBe(2);
@@ -66,7 +66,7 @@ test("non-Usage events are ignored for totals but still advance maxIdx", () => {
 
 test("a malformed payload is skipped, never thrown", () => {
   const out = accumulateUsage(zero, [
-    ev({ idx: 1, kind: "usage", payload: "not json" }),
+    ev({ idx: 1, kind: EventKind.Usage, payload: "not json" }),
     usage(2, { inputTokens: 4, costCents: "2" }),
   ]);
   expect(out.inputTokens).toBe(4);
