@@ -63,16 +63,15 @@ jobs:
       # the engine that provisions exe.dev workers. Clone it at the pin and
       # build the napi addon so bun install can vendor it. Bump DISPONENT_REF
       # deliberately when adopting a new engine.
-      # INTERIM PIN: 38a1cf0 is the head of disponent's feat/offerings-capabilities
-      # branch (PR #31), which adds the capabilities() op this build consumes.
-      # REPIN to the squash-merged disponent main SHA once PR #31 lands.
+      # Pinned to disponent main at a932bc5 — the merge of PR #31, which adds the
+      # capabilities() op this build consumes. Bump this SHA to adopt a newer engine.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ../disponent
       - name: "Build @disponent/node (sibling file: dep)"
         env:
-          DISPONENT_REF: 38a1cf093527edaeed197106fbe8cb2ba3234cac
+          DISPONENT_REF: a932bc54a84142df16c92c362aa959a913d0de5b
         run: |
           git init -q ../disponent
           git -C ../disponent fetch -q --depth 1 https://github.com/zmaril/disponent "$DISPONENT_REF"
@@ -99,16 +98,15 @@ jobs:
       # the engine that provisions exe.dev workers. Clone it at the pin and
       # build the napi addon so bun install can vendor it. Bump DISPONENT_REF
       # deliberately when adopting a new engine.
-      # INTERIM PIN: 38a1cf0 is the head of disponent's feat/offerings-capabilities
-      # branch (PR #31), which adds the capabilities() op this build consumes.
-      # REPIN to the squash-merged disponent main SHA once PR #31 lands.
+      # Pinned to disponent main at a932bc5 — the merge of PR #31, which adds the
+      # capabilities() op this build consumes. Bump this SHA to adopt a newer engine.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ../disponent
       - name: "Build @disponent/node (sibling file: dep)"
         env:
-          DISPONENT_REF: 38a1cf093527edaeed197106fbe8cb2ba3234cac
+          DISPONENT_REF: a932bc54a84142df16c92c362aa959a913d0de5b
         run: |
           git init -q ../disponent
           git -C ../disponent fetch -q --depth 1 https://github.com/zmaril/disponent "$DISPONENT_REF"
@@ -141,16 +139,15 @@ jobs:
       # the engine that provisions exe.dev workers. Clone it at the pin and
       # build the napi addon so bun install can vendor it. Bump DISPONENT_REF
       # deliberately when adopting a new engine.
-      # INTERIM PIN: 38a1cf0 is the head of disponent's feat/offerings-capabilities
-      # branch (PR #31), which adds the capabilities() op this build consumes.
-      # REPIN to the squash-merged disponent main SHA once PR #31 lands.
+      # Pinned to disponent main at a932bc5 — the merge of PR #31, which adds the
+      # capabilities() op this build consumes. Bump this SHA to adopt a newer engine.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ../disponent
       - name: "Build @disponent/node (sibling file: dep)"
         env:
-          DISPONENT_REF: 38a1cf093527edaeed197106fbe8cb2ba3234cac
+          DISPONENT_REF: a932bc54a84142df16c92c362aa959a913d0de5b
         run: |
           git init -q ../disponent
           git -C ../disponent fetch -q --depth 1 https://github.com/zmaril/disponent "$DISPONENT_REF"
