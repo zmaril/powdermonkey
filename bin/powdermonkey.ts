@@ -33,6 +33,8 @@ usage:
                                 the project in the current directory; idempotent
   powdermonkey attach           open the tmux dashboard: one pane per session + server
   powdermonkey attach <target>  attach to one named session (e.g. pm-server, pm-session-7)
+  powdermonkey mcp              run the stdio MCP server (pm control ops as tools, for an
+                                external supervising agent); speaks MCP on stdin/stdout
   powdermonkey alias [dir]      symlink a short \`pm\` alongside powdermonkey (opt-in)
   powdermonkey backup [file]    save a version-independent JSON snapshot of the store
                                 (from the running supervisor; default data/backups/…)
@@ -127,6 +129,18 @@ switch (cmd) {
     console.log("attach: powdermonkey attach");
     process.exit(0);
     break;
+  }
+  case "mcp": {
+    // The stdio MCP server. It speaks the MCP protocol on stdin/stdout, so NOTHING
+    // else may write to stdout — bring the store up quietly (ready + settings only;
+    // no seed/pty/loops), then hand stdout to the transport. Errors go to stderr.
+    const { ready } = await import("../src/server/db.ts");
+    const { loadSettings } = await import("../src/server/settings.ts");
+    const { serveMcpStdio } = await import("../src/server/mcp.ts");
+    await ready();
+    await loadSettings();
+    await serveMcpStdio();
+    break; // connect() keeps the process alive on the stdio transport
   }
   // Internal verbs the supervisor uses to re-invoke itself (see paths.selfArgv):
   //   __serve-loop — the restart loop that owns the server pane (never returns).
