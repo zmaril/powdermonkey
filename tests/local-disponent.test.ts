@@ -1,4 +1,5 @@
 import { beforeAll, expect, test } from "bun:test";
+import { SessionState } from "@disponent/node";
 import { join } from "node:path";
 import { setupTestDb, tmp } from "./db-harness.ts";
 
@@ -67,11 +68,11 @@ test("provisionLocalWorker dispatches env=local, isolation=worktree, gitRef=bran
   // the engine's ledger knows the session; cancel keeps it, reap removes it.
   const d = getDisponent();
   const settled = await d.session(res.uid);
-  expect(settled?.state).toBe("running");
+  expect(settled?.state).toBe(SessionState.Running);
 
   const cancelled = await cancelLocalWorker(res.uid);
   expect(cancelled.ok).toBe(true);
-  expect((await d.session(res.uid))?.state).toBe("cancelled");
+  expect((await d.session(res.uid))?.state).toBe(SessionState.Cancelled);
 
   const torn = await teardownLocalWorker(res.uid);
   expect(torn.ok).toBe(true);
@@ -93,7 +94,7 @@ test("start-local routes through disponent: session row carries branch + engine 
 
   // The engine actually holds a running session behind this row.
   const d = getDisponent();
-  expect((await d.session(uid as string))?.state).toBe("running");
+  expect((await d.session(uid as string))?.state).toBe(SessionState.Running);
   // dispatching moved the task off "pending".
   expect((await taskRepo.get(task.id))?.status).toBe("dispatched");
 });
@@ -127,7 +128,7 @@ test("stop cancels the engine session (worktree kept) and re-pends the task", as
   // worktree is left in place for inspection.
   const d = getDisponent();
   const s = await d.session(uid);
-  expect(s?.state).toBe("cancelled");
+  expect(s?.state).toBe(SessionState.Cancelled);
   expect(s?.reapedAt).toBeFalsy();
   // archived here + task rolled back to pending so it can be re-run.
   expect((await sessionRepo.get(started.session.id))?.archivedAt).toBeTruthy();

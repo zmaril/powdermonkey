@@ -11,7 +11,7 @@
 // and shares the drain pump + PollDeps seam with disponent-usage.ts, so there's one
 // engine, one drain, and one injectable surface for tests.
 
-import type { Event, EventKind } from "@disponent/node";
+import { type Event, EventKind } from "@disponent/node";
 import { eq } from "drizzle-orm";
 import {
   type SessionEventFidelity,
@@ -32,15 +32,15 @@ import { sessionEvents, sessions } from "./schema.ts";
 /** The event kinds the LIVE FEED carries — everything disponent emits EXCEPT Usage,
  *  which the usage meters drain on their own path. Kept in one place so the drain and
  *  any future filter agree. */
-// disponent's EventKind is a string union; these are its tokens minus "usage".
+// disponent's EventKind is a runtime string enum; these are its members minus Usage.
 export const FEED_KINDS: EventKind[] = [
-  "state", // lint-allow-string: disponent EventKind token, not a pm enum
-  "message", // lint-allow-string: disponent EventKind token, not a pm enum
-  "tool_call", // lint-allow-string: disponent EventKind token, not a pm enum
-  "tool_result", // lint-allow-string: disponent EventKind token, not a pm enum
-  "log", // lint-allow-string: disponent EventKind token, not a pm enum
-  "artifact", // lint-allow-string: disponent EventKind token, not a pm enum
-  "raw", // lint-allow-string: disponent EventKind token, not a pm enum
+  EventKind.State,
+  EventKind.Message,
+  EventKind.ToolCall,
+  EventKind.ToolResult,
+  EventKind.Log,
+  EventKind.Artifact,
+  EventKind.Raw,
 ];
 
 /** One feed row ready to insert (minus its session id) — the string-mapped, persisted

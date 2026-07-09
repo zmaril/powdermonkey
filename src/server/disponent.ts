@@ -1,6 +1,12 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { type DispatchSpec, Disponent, type Session as DSession, setEnv } from "@disponent/node";
+import {
+  type DispatchSpec,
+  Disponent,
+  type Session as DSession,
+  SessionState,
+  setEnv,
+} from "@disponent/node";
 import type { EnvCapability } from "../shared/types.ts";
 import { supervisorRepoDir } from "./repo-cache.ts";
 import { type ExeDevConfig, getExeDevConfig } from "./settings.ts";
@@ -106,7 +112,7 @@ export async function waitForRunning(
   for (;;) {
     const s = await d.session(uid);
     if (!s) throw new Error(`disponent lost session ${uid}`);
-    const settling = s.state === "queued" || s.state === "provisioning";
+    const settling = s.state === SessionState.Queued || s.state === SessionState.Provisioning;
     if (!settling || Date.now() >= deadline) return s;
     await new Promise((r) => setTimeout(r, 500));
   }
@@ -128,7 +134,7 @@ export async function dispatchAndAwaitRunning(
   const disp = await tryDispatch(d, taskId, spec);
   if (!disp.ok) return disp;
   const settled = await waitForRunning(d, disp.session.uid, opts.timeoutMs);
-  const isRunning = settled.state === "running"; // lint-allow-string: disponent SessionState token, not pm's SessionState.Running
+  const isRunning = settled.state === SessionState.Running;
   const up = isRunning && settled.envHandle != null && (opts.ready?.(settled) ?? true);
   if (!up) {
     return {

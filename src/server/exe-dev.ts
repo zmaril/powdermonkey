@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import type { Disponent, Session as DSession } from "@disponent/node";
+import { type Disponent, type Session as DSession, SessionState } from "@disponent/node";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { SessionKind } from "../shared/types.ts";
 import { db } from "./db.ts";
@@ -141,7 +141,7 @@ export async function gcOrphanedWorkers(nowMs: number = Date.now()): Promise<num
 
   const d = getDisponent();
   await d.reconcile();
-  const running = await d.sessions({ state: "running" }); // lint-allow-string: disponent SessionState token, not pm's SessionState.Running
+  const running = await d.sessions({ state: SessionState.Running });
   if (running.length === 0) return 0;
 
   const rows = await db
