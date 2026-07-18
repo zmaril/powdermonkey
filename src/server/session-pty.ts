@@ -121,6 +121,62 @@ function pushChunk(entry: Entry, bytes: Uint8Array): void {
   }
 }
 
+/** A fresh, empty attach Entry, registered under `sessionId`. Shared by the tmux
+ *  and holder create paths — only the byte source they wire up afterward differs. */
+function newEntry(sessionId: number): Entry {
+  const entry: Entry = {
+    proc: null,
+    holder: null,
+    chunks: [],
+    bytes: 0,
+    subscribers: new Set(),
+    endSubscribers: new Set(),
+    idleTimer: null,
+    needsInput: false,
+  };
+  registry.set(sessionId, entry);
+  return entry;
+}
+
+/** Fan one pty chunk out: ring it for scrollback, push to every live subscriber,
+ *  then mark the session busy + re-arm its idle timer. The onData body both create
+ *  paths (tmux PTY, holder socket) share. */
+function broadcast(sessionId: number, entry: Entry, bytes: Uint8Array): void {
+  pushChunk(entry, bytes);
+  for (const send of entry.subscribers) {
+    try {
+      send(bytes);
+    } catch {}
+  }
+  setNeedsInput(sessionId, false);
+  armIdle(sessionId);
+}
+
+/** Replay `entry`'s scrollback to a new subscriber, register it, and return the
+ *  unsubscribe fn that drops the attach once the last viewer leaves. Shared by the
+ *  tmux and holder attach paths — the entry's origin is immaterial here. */
+function subscribeToEntry(
+  sessionId: number,
+  entry: Entry,
+  onData: (b: Uint8Array) => void,
+  onEnd?: () => void,
+): () => void {
+  for (const c of entry.chunks) {
+    try {
+      onData(c);
+    } catch {}
+  }
+  entry.subscribers.add(onData);
+  if (onEnd) entry.endSubscribers.add(onEnd);
+  return () => {
+    entry.subscribers.delete(onData);
+    if (onEnd) entry.endSubscribers.delete(onEnd);
+    // Last viewer left: drop the attach so it stops constraining the agent. The
+    // durable session (tmux or holder) and its agent keep running, ready to re-attach.
+    if (entry.subscribers.size === 0) detachSessionPty(sessionId);
+  };
+}
+
 /** Bring up the durable tmux session running the agent (idempotent per id). The
  *  agent starts immediately, detached, so it's already running before anyone
  *  attaches — and keeps running across supervisor restarts. */
@@ -152,32 +208,13 @@ export function startSupervisorPty(): void {
 /** Spawn the supervisor-side attach PTY for a live session and register it. */
 function createAttachEntry(sessionId: number): Entry {
   const name = sessionName(sessionId);
-  const entry: Entry = {
-    proc: null,
-    holder: null,
-    chunks: [],
-    bytes: 0,
-    subscribers: new Set(),
-    endSubscribers: new Set(),
-    idleTimer: null,
-    needsInput: false,
-  };
-  registry.set(sessionId, entry);
+  const entry = newEntry(sessionId);
   // `exec tmux attach` replaces the shell, so when the attach ends (we detach, or
   // the session is killed) the PTY exits cleanly. tmux redraws the current screen
   // on attach, so a freshly-created entry still shows the agent's live state.
   entry.proc = spawnShell(
     cwdById.get(sessionId) ?? repoDir(),
-    (bytes) => {
-      pushChunk(entry, bytes);
-      for (const send of entry.subscribers) {
-        try {
-          send(bytes);
-        } catch {}
-      }
-      setNeedsInput(sessionId, false);
-      armIdle(sessionId);
-    },
+    (bytes) => broadcast(sessionId, entry, bytes),
     `exec ${TMUX_BIN} -L ${SOCKET} attach -t ${name}`,
   );
   armIdle(sessionId);
@@ -222,21 +259,7 @@ export function attachSessionPty(
     if (!hasSessionPty(sessionId)) return null;
     entry = createAttachEntry(sessionId);
   }
-  const e = entry;
-  for (const c of e.chunks) {
-    try {
-      onData(c);
-    } catch {}
-  }
-  e.subscribers.add(onData);
-  if (onEnd) e.endSubscribers.add(onEnd);
-  return () => {
-    e.subscribers.delete(onData);
-    if (onEnd) e.endSubscribers.delete(onEnd);
-    // Last viewer left: drop the attach PTY so it stops constraining the agent's
-    // size. The tmux session (and its agent) keeps running, ready to re-attach.
-    if (e.subscribers.size === 0) detachSessionPty(sessionId);
-  };
+  return subscribeToEntry(sessionId, entry, onData, onEnd);
 }
 
 /** Create a holder-backed attach entry: dial the disponent pty-holder's unix socket
@@ -249,17 +272,7 @@ async function createHolderAttachEntry(
   socketPath: string,
 ): Promise<Entry | null> {
   if (!existsSync(socketPath)) return null;
-  const entry: Entry = {
-    proc: null,
-    holder: null,
-    chunks: [],
-    bytes: 0,
-    subscribers: new Set(),
-    endSubscribers: new Set(),
-    idleTimer: null,
-    needsInput: false,
-  };
-  registry.set(sessionId, entry);
+  const entry = newEntry(sessionId);
   // The holder ending (child Exit) — or the socket dropping without one (holder
   // gone) — means the durable session went away under us, exactly like the tmux
   // attach PTY exiting. The guard distinguishes it from a viewer detaching: detach
@@ -273,16 +286,7 @@ async function createHolderAttachEntry(
   let client: HolderClient;
   try {
     client = await connectHolder(socketPath, {
-      onData: (bytes) => {
-        pushChunk(entry, bytes);
-        for (const send of entry.subscribers) {
-          try {
-            send(bytes);
-          } catch {}
-        }
-        setNeedsInput(sessionId, false);
-        armIdle(sessionId);
-      },
+      onData: (bytes) => broadcast(sessionId, entry, bytes),
       onExit: onGone,
       onClose: onGone,
     });
@@ -311,21 +315,7 @@ export async function attachHolderSessionPty(
     if (!created) return null;
     entry = created;
   }
-  const e = entry;
-  for (const c of e.chunks) {
-    try {
-      onData(c);
-    } catch {}
-  }
-  e.subscribers.add(onData);
-  if (onEnd) e.endSubscribers.add(onEnd);
-  return () => {
-    e.subscribers.delete(onData);
-    if (onEnd) e.endSubscribers.delete(onEnd);
-    // Last viewer left: drop the holder attach (a Detach frame). The held session
-    // and its agent keep running, ready to re-attach.
-    if (e.subscribers.size === 0) detachSessionPty(sessionId);
-  };
+  return subscribeToEntry(sessionId, entry, onData, onEnd);
 }
 
 export function writeSessionPty(sessionId: number, data: string): void {

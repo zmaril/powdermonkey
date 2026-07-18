@@ -11,12 +11,18 @@
 // `tmux attach`. The wire format is transcribed verbatim from disponent's
 // `crates/disponent-hold/src/protocol.rs` (read, not guessed):
 //
-//   Handshake — on connect the holder writes ONE newline-terminated JSON control
-//   line, `{"v":1}\n`, then switches to the binary frame stream. The client reads up
-//   to the first `\n`, notes the version, and only then starts reading frames. There
-//   is NO role handshake in this protocol version (the reader/writer split is a
-//   future disponent milestone); the holder is multi-reader with unrestricted write,
-//   so a connected client may both read output and write input.
+//   Handshake (roles, N-readers-1-writer) — the CLIENT speaks first: on connect it
+//   writes ONE newline-terminated JSON control line declaring its role,
+//   `{"role":"writer"}\n` (or `"reader"`). The holder replies with ONE
+//   newline-terminated line, `{"role":"<granted>","writer_busy":<bool>}\n`: the role
+//   it actually GRANTED and whether a writer request was denied because one is
+//   already held. At most one writer at a time; N readers. pm's terminal is
+//   interactive, so we request `writer`; if the holder answers `writer_busy:true`
+//   we were admitted read-only (another attacher drives) — we still stream Data so
+//   the browser shows output, but our Input/Resize frames are dropped. Both sides
+//   switch to the binary frame stream after the two handshake lines. (This is
+//   disponent main's M2a protocol; there is NO `{"v":N}` version field — it was
+//   removed when the role handshake landed.)
 //
 //   Frames — `1 byte kind | 4-byte LE u32 len | len bytes payload`. `len` may be 0.
 //   The two directions reuse the small kind space but mean different things:
@@ -34,9 +40,15 @@ export type HolderExit = { kind: "code" | "signal"; value: number };
 
 /** The handles a consumer drives a live holder attach through. */
 export type HolderClient = {
-  /** Send raw bytes to the pty master (an Input frame). */
+  /** True iff the holder admitted us read-only because another attacher holds the
+   *  single writer lock (`writer_busy`). While set, {@link write} and
+   *  {@link resize} are silent no-ops — the browser keeps seeing output but can't
+   *  drive the pty until the writer detaches. */
+  readonly readOnly: boolean;
+  /** Send raw bytes to the pty master (an Input frame). Dropped when
+   *  {@link readOnly} (we hold no writer lock). */
   write(data: string | Uint8Array): void;
-  /** Request a pty resize (a Resize frame). */
+  /** Request a pty resize (a Resize frame). Dropped when {@link readOnly}. */
   resize(cols: number, rows: number): void;
   /** Detach cleanly (a Detach frame, then close the socket). The held session and
    *  its agent keep running — this only drops our view. */
@@ -51,6 +63,10 @@ export type HolderHandlers = {
   /** The socket errored or closed before an Exit frame (holder gone). Fires at
    *  most once, and never after onExit. */
   onClose?(err?: Error): void;
+  /** The holder admitted us read-only (`writer_busy`) — another attacher holds the
+   *  writer lock. Fires at most once, during connect, before any frame. Optional:
+   *  a consumer can surface a notice; input is dropped regardless. */
+  onReadOnly?(): void;
 };
 
 // Server→client frame kinds (protocol.rs `ServerKind`).
@@ -94,10 +110,13 @@ export async function connectHolder(
   handlers: HolderHandlers,
 ): Promise<HolderClient> {
   // Incoming byte accumulator + a small parse state machine: first the one-line
-  // `{"v":1}` handshake, then the binary frame stream.
+  // `{"role":...,"writer_busy":...}` handshake reply, then the binary frame stream.
   let buf = new Uint8Array(0);
   let handshakeDone = false;
   let finished = false; // onExit or onClose has fired — don't fire either again
+  // Set from the holder's handshake reply: true iff we asked for the writer lock
+  // but were admitted read-only because another attacher already holds it.
+  let readOnly = false;
 
   const encoder = new TextEncoder();
 
@@ -151,13 +170,25 @@ export async function connectHolder(
     }
   };
 
-  // Consume the leading `{"v":N}\n` handshake line, then hand off to frame parsing.
+  // Consume the leading `{"role":...,"writer_busy":...}\n` handshake reply line —
+  // the holder's answer to the role request we sent on connect — then hand off to
+  // frame parsing. A missing/unknown role or `writer_busy:true` means we were not
+  // granted the writer lock, so we stay read-only.
   const consume = () => {
     if (!handshakeDone) {
       const nl = buf.indexOf(NEWLINE);
-      if (nl < 0) return; // handshake line not fully arrived yet
+      if (nl < 0) return; // handshake reply line not fully arrived yet
+      const line = new TextDecoder().decode(buf.slice(0, nl));
       handshakeDone = true;
       buf = buf.slice(nl + 1);
+      // The holder echoes the role it GRANTED plus a writer_busy flag. We only ever
+      // request "writer"; anything other than a granted writer leaves us read-only.
+      const grantedWriter = /"role"\s*:\s*"writer"/.test(line);
+      const writerBusy = /"writer_busy"\s*:\s*true/.test(line);
+      if (!grantedWriter || writerBusy) {
+        readOnly = true;
+        handlers.onReadOnly?.();
+      }
     }
     drainFrames();
   };
@@ -178,6 +209,11 @@ export async function connectHolder(
     },
   });
 
+  // The client speaks first: declare our role before any frame. pm's terminal is
+  // interactive, so we request the single writer lock; the holder's reply (parsed
+  // in `consume`) tells us whether we actually got it.
+  socket.write(encoder.encode('{"role":"writer"}\n'));
+
   const send = (frame: Uint8Array) => {
     if (finished) return;
     try {
@@ -186,11 +222,18 @@ export async function connectHolder(
   };
 
   return {
+    get readOnly() {
+      return readOnly;
+    },
     write(data: string | Uint8Array) {
+      // Read-only attach (another attacher holds the writer lock): drop input so
+      // the pty is driven by exactly one writer at a time.
+      if (readOnly) return;
       const bytes = typeof data === "string" ? encoder.encode(data) : data;
       send(encodeFrame(CLIENT_INPUT, bytes));
     },
     resize(cols: number, rows: number) {
+      if (readOnly) return; // reader resizes are ignored by the holder anyway
       send(encodeFrame(CLIENT_RESIZE, encodeResizePayload(cols, rows)));
     },
     close() {
