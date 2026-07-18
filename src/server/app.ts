@@ -4,6 +4,7 @@ import type { TSchema } from "@sinclair/typebox";
 import { getTableColumns, getTableName } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 import { match, P } from "ts-pattern";
+import { messageDto } from "../shared/messages.ts";
 import {
   CommentAuthor,
   Decision,
@@ -399,6 +400,43 @@ const sessionsGroup = resource("sessions", sessionRepo, models.sessions)
         inReplyTo: t.Optional(t.String()),
       }),
     },
+  )
+  // Read-only proxy over disponent's Message ledger for a disponent-managed session's
+  // manager↔worker comms (notes/manager-worker-comms.md). Two consumers, one route:
+  // `?fanoutId=` rolls up a fan-out's "N of M acked" progress — a CROSS-session read (a
+  // fan-out spans many workers), so it doesn't need this session's live handle; without
+  // a fanoutId it scopes to THIS worker's own messages (via its disponent session uid),
+  // which hydrates a worker→manager decision card with the real question body (the `mail`
+  // event's MailRef carries none — the body lives on the Message row). Empty, never faked,
+  // when disponent knows no live session for the row. pm never writes acks here.
+  .get(
+    "/:id/messages",
+    async ({ params, query, set }) => {
+      const row = await sessionRepo.get(Number(params.id));
+      if (!row) {
+        set.status = 404;
+        return { error: "not found" };
+      }
+      if (row.kind !== SessionKind.Remote || !row.vmName) {
+        set.status = 400;
+        return { error: "not a disponent-managed session" };
+      }
+      const d = getDisponent();
+      try {
+        if (query.fanoutId) {
+          const msgs = await d.messages({ fanoutId: query.fanoutId });
+          return { messages: msgs.map(messageDto) };
+        }
+        const dsession = await sessionForVm(d, row.vmName);
+        if (!dsession) return { messages: [] };
+        const msgs = await d.messages({ sessionUid: dsession.uid });
+        return { messages: msgs.map(messageDto) };
+      } catch (e) {
+        set.status = 409;
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+    { query: t.Object({ fanoutId: t.Optional(t.String()) }) },
   );
 
 // Repos carry two routes on top of CRUD: the identity icon — the cached
