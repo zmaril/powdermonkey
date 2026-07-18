@@ -381,7 +381,7 @@ const sessionsGroup = resource("sessions", sessionRepo, models.sessions)
         return { error: "no live disponent session" };
       }
       try {
-        await d.send(dsession.uid, body.input);
+        await d.send(body.input, { sessions: [dsession.uid] });
         return { ok: true };
       } catch (e) {
         set.status = 409;
