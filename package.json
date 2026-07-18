@@ -32,6 +32,7 @@
     "typecheck": "tsc --noEmit",
     "check": "biome check --error-on-warnings src && bun run scripts/lint-strings.ts && bun run scripts/lint-dock-theme.ts && bun run scripts/lint-spacing.ts",
     "size": "git ls-files 'src/**/*.ts' 'src/**/*.tsx' | xargs wc -l | tail -1",
+    "coverage": "bun test --coverage",
     "test": "for f in tests/*.test.ts; do echo \"# $f\"; out=$(bun test --preload ./tests/_teardown.ts \"$f\" 2>&1); echo \"$out\"; if echo \"$out\" | grep -qE '^ *[1-9][0-9]* fail'; then exit 1; fi; if ! echo \"$out\" | grep -qE 'Ran [0-9]+ test'; then exit 1; fi; done && for f in tests/*.test.tsx; do [ -e \"$f\" ] || continue; echo \"# $f\"; out=$(bun test --preload ./tests/_teardown.ts --preload ./tests/dom-preload.ts \"$f\" 2>&1); echo \"$out\"; if echo \"$out\" | grep -qE '^ *[1-9][0-9]* fail'; then exit 1; fi; if ! echo \"$out\" | grep -qE 'Ran [0-9]+ test'; then exit 1; fi; done",
     "prepublishOnly": "bun run build:web"
   },
