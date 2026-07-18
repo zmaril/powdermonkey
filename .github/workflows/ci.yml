@@ -29,7 +29,7 @@ jobs:
       tauri: ${{ steps.filter.outputs.tauri }}
     steps:
       - uses: actions/checkout@v7
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -171,6 +171,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - name: Tauri system deps
         run: |
           sudo apt-get update
@@ -179,3 +181,10 @@ jobs:
         with:
           workspaces: src-tauri
       - run: cargo check --manifest-path src-tauri/Cargo.toml
+      # src-tauri is a window shell over the web UI — no app logic, and so no
+      # tests of its own. These still earn their place: fmt and clippy keep the
+      # shell from drifting, and `cargo test` is wired up so the day this crate
+      # does grow logic, its tests run without anyone remembering to add a step.
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
