@@ -142,6 +142,10 @@ export type MailInfo = {
   recipient: string;
   topic: string;
   body: string;
+  // The fan-out this question belongs to (a MailRef always carries one — a single
+  // recipient still mints a fanoutId). The card reads Messages by this id to hydrate the
+  // real question body (the ref inlines none) AND to roll up "N of M acked" progress.
+  fanoutId: string;
 };
 
 /** Parse a `mail` row into its MailInfo, or null when the row isn't a mail event or the
@@ -157,6 +161,7 @@ export function parseMailEvent(row: { kind: string; payload: string | object }):
     recipient: str(p.recipient),
     topic: str(p.topic),
     body: str(p.body),
+    fanoutId: str(p.fanoutId),
   };
 }
 
