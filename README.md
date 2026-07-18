@@ -1,3 +1,5 @@
+<!-- housekeeper:description a crude weapon for our barbaric age -->
+<!-- housekeeper:topics agents, ai, claude-code, harness, orchestration, powderworks -->
 # PowderMonkey
 
 > [!WARNING]
