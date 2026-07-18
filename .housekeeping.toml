@@ -9,3 +9,7 @@ website = "off"
 # hooks/lib.sh is sourced by the git hooks in hooks/ (never run directly), so it
 # lives beside them rather than under scripts/ — a deliberate keeper.
 allow = ["hooks/lib.sh"]
+[allow-auto-merge]
+# Auto-merge is enabled on the repo so a green PR can land without a babysitter.
+# The check asserts GitHub's allow_auto_merge matches this declaration.
+enabled = true
