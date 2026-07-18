@@ -8,6 +8,7 @@ import {
   setEnv,
 } from "@disponent/node";
 import type { EnvCapability } from "../shared/types.ts";
+import { holderEnabled } from "./local-disponent.ts";
 import { supervisorRepoDir } from "./repo-cache.ts";
 import { type ExeDevConfig, getExeDevConfig } from "./settings.ts";
 
@@ -45,6 +46,12 @@ export function getDisponent(cfg: ExeDevConfig = getExeDevConfig()): Disponent {
     const localDry = Boolean(process.env.PM_LOCAL_DRY_RUN);
     if (exeDry) setEnv("DISPONENT_EXE_DRY_RUN", "1");
     if (localDry) setEnv("DISPONENT_LOCAL_DRY_RUN", "1");
+    // Holder path (M2b, opt-in via PM_LOCAL_HOLDER): run local agents under the
+    // first-party pty holder (`disponent hold`) instead of a tmux session, so pm's
+    // browser terminal can dial the holder socket directly. tmux stays the default;
+    // this only flips the engine's local backend when the operator opts in. Goes
+    // through setEnv (not process.env) so the native engine actually reads it.
+    if (holderEnabled()) setEnv("DISPONENT_LOCAL_HOLDER", "dsp-hold");
     let sink = "none";
     if (!exeDry && !localDry) {
       const dataDir = join(supervisorRepoDir(), "data");

@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { db } from "./db.ts";
+import { connectHolder, type HolderClient } from "./holder-client.ts";
 import { closePty, ptyExited, resizePty, spawnShell, writePty } from "./pty.ts";
 import { sessions } from "./schema.ts";
 import { hasSession, SOCKET, shq, TMUX_BIN, tmux } from "./tmux.ts";
@@ -25,8 +27,14 @@ const SHELL = process.env.SHELL || "bash";
 type Entry = {
   // The supervisor-side `tmux attach` PTY: a view onto the durable session, not
   // the agent itself. Recreated on demand (e.g. after a restart); closing it just
-  // detaches — the tmux session and its `claude` live on.
+  // detaches — the tmux session and its `claude` live on. Null for a holder-backed
+  // entry, whose byte source/sink is `holder` (below) instead of a Bun PTY.
   proc: Pty;
+  // M2b: a live attach to a disponent pty-holder's unix socket, used INSTEAD of a
+  // `tmux attach` Bun PTY when the session is holder-backed (flag-gated). Only the
+  // byte source/sink differs — the ring, subscribers, and idle timer are shared.
+  // Null for the tmux path.
+  holder: HolderClient | null;
   // Ring of recent output, capped to SCROLLBACK_BYTES, replayed to new attachers.
   chunks: Uint8Array[];
   bytes: number;
@@ -146,6 +154,7 @@ function createAttachEntry(sessionId: number): Entry {
   const name = sessionName(sessionId);
   const entry: Entry = {
     proc: null,
+    holder: null,
     chunks: [],
     bytes: 0,
     subscribers: new Set(),
@@ -230,17 +239,111 @@ export function attachSessionPty(
   };
 }
 
+/** Create a holder-backed attach entry: dial the disponent pty-holder's unix socket
+ *  (M2b) and register it, wiring its byte stream into the SAME Entry the tmux path
+ *  uses (scrollback ring, subscribers, idle timer). Returns null if the socket is
+ *  gone or the dial fails, so the caller can fall back. The holder replays scrollback
+ *  on connect, so a freshly-created entry still shows the agent's live state. */
+async function createHolderAttachEntry(
+  sessionId: number,
+  socketPath: string,
+): Promise<Entry | null> {
+  if (!existsSync(socketPath)) return null;
+  const entry: Entry = {
+    proc: null,
+    holder: null,
+    chunks: [],
+    bytes: 0,
+    subscribers: new Set(),
+    endSubscribers: new Set(),
+    idleTimer: null,
+    needsInput: false,
+  };
+  registry.set(sessionId, entry);
+  // The holder ending (child Exit) — or the socket dropping without one (holder
+  // gone) — means the durable session went away under us, exactly like the tmux
+  // attach PTY exiting. The guard distinguishes it from a viewer detaching: detach
+  // deletes the entry first, so `registry.get` no longer matches and we stay silent.
+  const onGone = () => {
+    if (registry.get(sessionId) === entry) {
+      notifyEnded(sessionId);
+      detachSessionPty(sessionId);
+    }
+  };
+  let client: HolderClient;
+  try {
+    client = await connectHolder(socketPath, {
+      onData: (bytes) => {
+        pushChunk(entry, bytes);
+        for (const send of entry.subscribers) {
+          try {
+            send(bytes);
+          } catch {}
+        }
+        setNeedsInput(sessionId, false);
+        armIdle(sessionId);
+      },
+      onExit: onGone,
+      onClose: onGone,
+    });
+  } catch {
+    registry.delete(sessionId);
+    return null;
+  }
+  entry.holder = client;
+  armIdle(sessionId);
+  return entry;
+}
+
+/** Subscribe to a holder-backed session's live stream (M2b) after replaying its
+ *  scrollback — the holder-socket counterpart of {@link attachSessionPty}. Lazily
+ *  dials the holder on first attach, then shares the stream across tabs. Returns an
+ *  unsubscribe fn, or null if the holder socket isn't there (dial failed). */
+export async function attachHolderSessionPty(
+  sessionId: number,
+  socketPath: string,
+  onData: (b: Uint8Array) => void,
+  onEnd?: () => void,
+): Promise<(() => void) | null> {
+  let entry = registry.get(sessionId);
+  if (!entry) {
+    const created = await createHolderAttachEntry(sessionId, socketPath);
+    if (!created) return null;
+    entry = created;
+  }
+  const e = entry;
+  for (const c of e.chunks) {
+    try {
+      onData(c);
+    } catch {}
+  }
+  e.subscribers.add(onData);
+  if (onEnd) e.endSubscribers.add(onEnd);
+  return () => {
+    e.subscribers.delete(onData);
+    if (onEnd) e.endSubscribers.delete(onEnd);
+    // Last viewer left: drop the holder attach (a Detach frame). The held session
+    // and its agent keep running, ready to re-attach.
+    if (e.subscribers.size === 0) detachSessionPty(sessionId);
+  };
+}
+
 export function writeSessionPty(sessionId: number, data: string): void {
   const entry = registry.get(sessionId);
   if (!entry) return;
-  writePty(entry.proc, data);
+  // Holder-backed entries route input to the holder socket (an Input frame); tmux
+  // entries write the Bun PTY. Either way the idle timer re-arms below.
+  if (entry.holder) entry.holder.write(data);
+  else writePty(entry.proc, data);
   setNeedsInput(sessionId, false);
   armIdle(sessionId);
 }
 
 export function resizeSessionPty(sessionId: number, cols: number, rows: number): void {
   const entry = registry.get(sessionId);
-  if (entry) resizePty(entry.proc, cols, rows);
+  if (!entry) return;
+  if (entry.holder) entry.holder.resize(cols, rows);
+  else resizePty(entry.proc, cols, rows);
 }
 
 /** Detach the supervisor's view without ending the session: close the attach PTY
@@ -251,7 +354,12 @@ function detachSessionPty(sessionId: number): void {
   if (entry.idleTimer) clearTimeout(entry.idleTimer);
   registry.delete(sessionId);
   try {
-    closePty(entry.proc);
+    // A holder entry detaches by closing its socket (a Detach frame); the held
+    // session lives on. A tmux entry closes its attach PTY. Deleting the entry
+    // above first means any resulting close callback sees no registered entry and
+    // won't misfire the end-of-session path.
+    if (entry.holder) entry.holder.close();
+    else closePty(entry.proc);
   } catch {}
 }
 
