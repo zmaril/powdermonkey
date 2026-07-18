@@ -1,6 +1,8 @@
 import { Anchor, Box, Card, Group, Stack, Text } from "@mantine/core";
 import { IconExternalLink } from "@tabler/icons-react";
+import { useState } from "react";
 import type { Session, Task } from "../../../server/schema.ts";
+import type { MailInfo } from "../../../shared/session-events.ts";
 import { SessionKind } from "../../../shared/types.ts";
 import { Markdown } from "../../markdown.tsx";
 import type { Indexes } from "../../plan-data.ts";
@@ -15,7 +17,7 @@ import {
 import { timeAgo } from "../../time.ts";
 import { ColumnLabel } from "./ColumnLabel.tsx";
 import { contextOf, workerPrs } from "./grouping.ts";
-import { SessionComposer } from "./SessionComposer.tsx";
+import { type ComposerReply, SessionComposer } from "./SessionComposer.tsx";
 import { SessionEventFeed } from "./SessionEventFeed.tsx";
 import { TaskLine } from "./TaskLine.tsx";
 
@@ -46,6 +48,12 @@ export function WorkerCard({
   // The repo this worker runs against — one session = one repo, so any task's
   // pinned repo is THE repo. Undefined for repo-less (pre-registry) tasks.
   const repo = useRepo(tasks[0]?.repoId);
+  // A Reply on a worker's "needs a decision" mail card seeds the composer (below it) with
+  // the answer threaded (`inReplyTo`) to that question — the target is the worker's own
+  // session, which the composer already sends to. `token` re-fires the seed per click.
+  const [reply, setReply] = useState<ComposerReply | null>(null);
+  const onReply = (mail: MailInfo) =>
+    setReply({ messageId: mail.messageId, body: "", token: Date.now() });
   // A historical session (landed / stopped / teleported) is archived: its state badge
   // is the outcome, and the live-only controls (Shell/VS Code/Teleport/Stop) no longer
   // apply, so they drop off. The card still shows its tasks, PRs and final agent status.
@@ -99,8 +107,14 @@ export function WorkerCard({
             // on a live session; a historical one keeps the feed as a read-only record.
             <>
               <ColumnLabel>Agent Status</ColumnLabel>
-              <SessionEventFeed session={session} />
-              {live && <SessionComposer session={session} />}
+              <SessionEventFeed session={session} onReply={live ? onReply : undefined} />
+              {live && (
+                <SessionComposer
+                  session={session}
+                  reply={reply}
+                  onReplyConsumed={() => setReply(null)}
+                />
+              )}
             </>
           ) : (
             <>
