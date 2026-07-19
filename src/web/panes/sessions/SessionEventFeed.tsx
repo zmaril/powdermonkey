@@ -1,5 +1,4 @@
-import { Badge, Box, Button, Card, Group, Stack, Text } from "@mantine/core";
-import { IconArrowBackUp } from "@tabler/icons-react";
+import { Box, Group, Stack, Text } from "@mantine/core";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useMemo } from "react";
 import type { Session, SessionEvent } from "../../../server/schema.ts";
@@ -10,6 +9,7 @@ import {
   parseMailEvent,
 } from "../../../shared/session-events.ts";
 import { sessionEventsCollection } from "../../collections.ts";
+import { MailCard } from "./MailCard.tsx";
 
 /** The live event feed for a disponent-managed (Remote) session — the read half of
  *  Slice 4. It mirrors the session_events synced collection, filtered to this session
@@ -82,50 +82,5 @@ export function SessionEventFeed({
         })}
       </Stack>
     </Box>
-  );
-}
-
-/** An inbound worker→manager question rendered as a "needs a decision" card: visually
- *  distinct from the uniform row so it can't be scrolled past, carrying the worker's
- *  message (or its topic when the ref inlines no body) and a Reply button that seeds the
- *  composer with `inReplyTo` = this message's id. Reply only shows when a composer is
- *  mounted (`onReply` present) — a historical session's feed keeps the card read-only. */
-function MailCard({ mail, onReply }: { mail: MailInfo; onReply?: (mail: MailInfo) => void }) {
-  const body =
-    mail.body || (mail.topic ? `topic: ${mail.topic}` : "The worker is asking for a decision.");
-  return (
-    <Card
-      withBorder
-      radius="sm"
-      padding="xs"
-      bg="dark.6"
-      style={{ borderColor: "var(--mantine-color-grape-6)" }}
-    >
-      <Group justify="space-between" wrap="nowrap" align="center" mb="tight">
-        <Group gap="tight" wrap="nowrap">
-          <Badge size="xs" color="grape" variant="filled">
-            needs a decision
-          </Badge>
-          <Text size="xs" c="dimmed">
-            worker → manager
-          </Text>
-        </Group>
-        {onReply && (
-          <Button
-            size="compact-xs"
-            variant="light"
-            color="grape"
-            leftSection={<IconArrowBackUp size={13} />}
-            onClick={() => onReply(mail)}
-            title="Reply to the worker — prefills the composer, threaded to this question"
-          >
-            Reply
-          </Button>
-        )}
-      </Group>
-      <Text size="xs" style={{ wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
-        {body}
-      </Text>
-    </Card>
   );
 }

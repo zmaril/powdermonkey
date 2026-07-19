@@ -1,9 +1,10 @@
 import { Button, Group, Stack, Text, TextInput } from "@mantine/core";
 import { IconSend } from "@tabler/icons-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { Session } from "../../../server/schema.ts";
 import { SessionState } from "../../../shared/types.ts";
 import { api } from "../../client.ts";
+import { useReplySeed } from "./useReplySeed.ts";
 
 /** A reply the operator chose to draft from a "needs a decision" mail card: the message
  *  id the answer threads against (`inReplyTo`) plus a prefilled body. `token` changes on
@@ -43,17 +44,16 @@ export function SessionComposer({
   const running = session.state === SessionState.Running;
   const ref = useRef<HTMLInputElement>(null);
 
-  // Seed the composer from a Reply click. Keyed on the reply's identity (`token`) so a
-  // second Reply on the same card re-seeds; focusing lands the cursor for an inline answer.
-  const seededToken = useRef<number | null>(null);
-  useEffect(() => {
-    if (!reply || reply.token === seededToken.current) return;
-    seededToken.current = reply.token;
-    setInput(reply.body);
-    setInReplyTo(reply.messageId);
+  // Seed the composer from a Reply click (the effect lives in useReplySeed). Focusing lands
+  // the cursor for an inline answer. `seed` is stable (state setters + ref are), so the hook
+  // only re-seeds on a genuinely new reply token.
+  const seed = useCallback((r: { body: string; messageId: string }) => {
+    setInput(r.body);
+    setInReplyTo(r.messageId);
     setError(null);
     ref.current?.focus();
-  }, [reply]);
+  }, []);
+  useReplySeed(reply, seed);
 
   const submit = async () => {
     const text = input.trim();
@@ -71,7 +71,6 @@ export function SessionComposer({
     }
     setInput("");
     setInReplyTo(null);
-    seededToken.current = null;
     onReplyConsumed?.();
   };
 
@@ -89,7 +88,6 @@ export function SessionComposer({
             onClick={() => {
               setInReplyTo(null);
               setInput("");
-              seededToken.current = null;
               onReplyConsumed?.();
             }}
           >
