@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { IsolationKind } from "@disponent/node";
 import { dispatchAndAwaitRunning, getDisponent } from "./disponent.ts";
 
@@ -46,6 +47,42 @@ export type LocalProvisionArgs = {
 export type LocalProvisionResult =
   | { ok: true; uid: string; workDir: string; handle: LocalHandle }
   | { ok: false; error: string; output?: string };
+
+// ── The holder attach path (M2b) ───────────────────────────────────────────────
+//
+// disponent's local backend has two ways to run a worker agent: the default tmux
+// session, or — gated by DISPONENT_LOCAL_HOLDER — the first-party pty holder
+// (`disponent hold`), which serves the agent's byte-exact pty over a unix socket.
+// When the holder path is on, pm's browser terminal can dial that socket directly
+// (holder-client.ts) instead of spawning a `tmux attach` PTY. tmux stays the
+// DEFAULT; this pm-side flag only selects the alternative, and it's off unless set.
+
+/** Whether pm should use the disponent holder path: run local agents under
+ *  `disponent hold` (via DISPONENT_LOCAL_HOLDER, set on the engine in disponent.ts)
+ *  AND attach the browser terminal to the holder socket rather than tmux. Off by
+ *  default — set PM_LOCAL_HOLDER to any non-empty value to opt in. */
+export function holderEnabled(): boolean {
+  return Boolean(process.env.PM_LOCAL_HOLDER);
+}
+
+/** Where disponent's local backend places per-session holder sockets: `<root>/sock`,
+ *  with `root` = DISPONENT_LOCAL_ROOT (default `$HOME/.disponent/work`) — the exact
+ *  convention disponent computes internally (disponent-core `local.rs`: `holder_dir`
+ *  is `self.root.join("sock")`, and `root` reads DISPONENT_LOCAL_ROOT). Both sides
+ *  read the same real env var, so they agree on the path. */
+function holderSocketDir(): string {
+  const home = process.env.HOME ?? ".";
+  const root = process.env.DISPONENT_LOCAL_ROOT ?? join(home, ".disponent", "work");
+  return join(root, "sock");
+}
+
+/** The unix socket a holder-backed session's terminal is served on, derived from the
+ *  engine session uid (parked in a pm session's `vmName`) + the socket-dir
+ *  convention. Centralized here so it can later swap to a typed attach descriptor
+ *  from disponent's schema (deferred) without touching the callers. */
+export function resolveHolderAttachTarget(uid: string): string {
+  return join(holderSocketDir(), `${uid}.sock`);
+}
 
 /** Provision a local worktree session for a task and start its agent in tmux —
  *  one disponent dispatch against the `local` env with worktree isolation.

@@ -43,6 +43,7 @@ import { capabilities, getDisponent, sessionForVm } from "./exe-dev.ts";
 import { fanOutTasks } from "./fanout.ts";
 import { proposeFollowup } from "./followups.ts";
 import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
+import { holderEnabled, resolveHolderAttachTarget } from "./local-disponent.ts";
 import { models, taskKindSchema } from "./models.ts";
 import {
   buildContext,
@@ -83,6 +84,7 @@ import {
   tasks as tasksTable,
 } from "./schema.ts";
 import {
+  attachHolderSessionPty,
   attachSessionPty,
   resizeSessionPty,
   SUPERVISOR_ID,
@@ -803,6 +805,26 @@ export const app = new Elysia()
         .otherwise(() => null);
 
       if (sessionId != null) {
+        // Holder-backed disponent-local session (M2b, flag-gated): dial the
+        // disponent pty-holder's unix socket directly rather than spawning a `tmux
+        // attach` PTY. Only when PM_LOCAL_HOLDER is on AND the session is a
+        // disponent-local run (kind Local + engine uid in vmName) with its holder
+        // socket present. tmux stays the default — this branch is otherwise skipped
+        // and the tmux attach below runs unchanged.
+        if (holderEnabled() && sessionId !== SUPERVISOR_ID) {
+          const row = await sessionRepo.get(sessionId);
+          if (row?.kind === SessionKind.Local && row.vmName) {
+            const socketPath = resolveHolderAttachTarget(row.vmName);
+            if (existsSync(socketPath)) {
+              const detach = await attachHolderSessionPty(sessionId, socketPath, send, sendEnded);
+              if (detach) {
+                ptys.set(ws.raw, { kind: "attach", sessionId, detach });
+                return;
+              }
+            }
+          }
+        }
+
         const detach = attachSessionPty(sessionId, send, sendEnded);
         if (detach) {
           ptys.set(ws.raw, { kind: "attach", sessionId, detach });
