@@ -383,14 +383,22 @@ const sessionsGroup = resource("sessions", sessionRepo, models.sessions)
         return { error: "no live disponent session" };
       }
       try {
-        await d.send(body.input, { sessions: [dsession.uid] });
+        // `inReplyTo` threads a reply against the worker's message (the 3rd positional
+        // arg of disponent's send) so the manager's answer links to the question that
+        // prompted it; omitted, this is the same plain send as before.
+        await d.send(body.input, { sessions: [dsession.uid] }, body.inReplyTo ?? null);
         return { ok: true };
       } catch (e) {
         set.status = 409;
         return { error: e instanceof Error ? e.message : String(e) };
       }
     },
-    { body: t.Object({ input: t.String({ minLength: 1 }) }) },
+    {
+      body: t.Object({
+        input: t.String({ minLength: 1 }),
+        inReplyTo: t.Optional(t.String()),
+      }),
+    },
   );
 
 // Repos carry two routes on top of CRUD: the identity icon — the cached

@@ -2,7 +2,12 @@ import { expect, test } from "bun:test";
 import { type Event, EventKind, Fidelity } from "@disponent/node";
 import { FEED_KINDS, feedRowsFromEvents, pollDisponentFeed } from "../src/server/disponent-feed.ts";
 import type { PollDeps } from "../src/server/disponent-usage.ts";
-import { describeSessionEvent, SESSION_EVENT_KIND } from "../src/shared/session-events.ts";
+import {
+  describeSessionEvent,
+  MAIL_SENDER_WORKER,
+  parseMailEvent,
+  SESSION_EVENT_KIND,
+} from "../src/shared/session-events.ts";
 
 // Slice 4 — the live event feed for disponent-managed sessions. Two pure surfaces are
 // pinned here without any live backend: (1) describeSessionEvent, the shared renderer's
@@ -102,6 +107,47 @@ test("a malformed payload falls back to the raw string, never throws", () => {
     payload: { line: "ok" },
   });
   expect(obj.text).toBe("ok");
+});
+
+test("a mail event renders its direction and topic", () => {
+  const d = describeSessionEvent({
+    kind: SESSION_EVENT_KIND.Mail,
+    payload: JSON.stringify({
+      messageId: "m-1",
+      sender: "worker",
+      recipient: "manager",
+      fanoutId: "f-1",
+      topic: "which-db",
+    }),
+  });
+  expect(d.icon).toBe("@");
+  expect(d.label).toBe("worker→manager");
+  expect(d.text).toContain("which-db");
+  expect(d.mono).toBe(false);
+});
+
+test("parseMailEvent extracts the MailRef fields for a mail row, null otherwise", () => {
+  const info = parseMailEvent({
+    kind: SESSION_EVENT_KIND.Mail,
+    payload: JSON.stringify({
+      messageId: "m-9",
+      sender: MAIL_SENDER_WORKER,
+      recipient: "manager",
+      fanoutId: "f-9",
+    }),
+  });
+  expect(info).not.toBeNull();
+  expect(info?.messageId).toBe("m-9");
+  expect(info?.sender).toBe(MAIL_SENDER_WORKER);
+  expect(info?.recipient).toBe("manager");
+  // a non-mail row yields null (so the feed leaves it on the uniform render)
+  expect(parseMailEvent({ kind: SESSION_EVENT_KIND.Message, payload: "{}" })).toBeNull();
+  // a garbled mail payload yields null rather than throwing
+  expect(parseMailEvent({ kind: SESSION_EVENT_KIND.Mail, payload: "not json" })).toBeNull();
+});
+
+test("FEED_KINDS carries Mail so worker questions are drained", () => {
+  expect(FEED_KINDS).toContain(EventKind.Mail);
 });
 
 // ── the feed drain/poll reducer ─────────────────────────────────────────────────

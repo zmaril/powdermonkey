@@ -1,6 +1,6 @@
 // The live event feed for disponent-managed (Remote) sessions — additive observation
 // that replaces the "remote workers surface only through PR comments" gap. disponent
-// emits a per-session event stream (State/Message/ToolCall/ToolResult/Log/Artifact/Raw,
+// emits a per-session event stream (State/Message/ToolCall/ToolResult/Log/Artifact/Mail/Raw,
 // plus Usage which the meters own — see disponent-usage.ts); this poller drains the
 // non-Usage events past each session's feed cursor and appends them to session_events,
 // which the browser mirrors live onto the worker card. It NEVER gates progress —
@@ -40,6 +40,7 @@ export const FEED_KINDS: EventKind[] = [
   EventKind.ToolResult,
   EventKind.Log,
   EventKind.Artifact,
+  EventKind.Mail,
   EventKind.Raw,
 ];
 

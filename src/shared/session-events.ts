@@ -23,6 +23,7 @@ export const SESSION_EVENT_KIND = {
   Log: "log",
   Usage: "usage",
   Artifact: "artifact",
+  Mail: "mail",
   Raw: "raw",
 } as const;
 export type SessionEventKind = ValueOf<typeof SESSION_EVENT_KIND>;
@@ -113,10 +114,55 @@ export function describeSessionEvent(row: {
       return { icon: "◆", label: "state", text: `${str(p.from)} → ${str(p.to)}`, mono: false };
     case SESSION_EVENT_KIND.Artifact:
       return { icon: "◇", label: "artifact", text: raw, mono: false };
+    case SESSION_EVENT_KIND.Mail: {
+      // A `mail` event carries a MailRef (sender/recipient/messageId/fanoutId/topic) —
+      // the Message body itself lives on the disponent Message row, not the ref, so the
+      // line summarizes the direction and (when present) the topic. The feed lifts this
+      // same payload into a "needs a decision" card for a worker→manager question.
+      const sender = str(p.sender) || "?";
+      const recipient = str(p.recipient) || "?";
+      const topic = str(p.topic);
+      const body = str(p.body);
+      const text = body || (topic ? `topic: ${topic}` : "message");
+      return { icon: "@", label: `${sender}→${recipient}`, text, mono: false };
+    }
     default:
       return { icon: "•", label: row.kind, text: raw, mono: false };
   }
 }
+
+/** The manager-facing view of a `mail` event's MailRef payload: who sent it, to whom,
+ *  the message id a reply threads against (`inReplyTo`), and the optional topic/body.
+ *  `body` is not part of the MailRef on the wire (it lives on the disponent Message row),
+ *  so it's only populated when a payload happens to inline it — the card degrades to the
+ *  topic otherwise. PURE and browser-safe; returns null for a non-mail or garbled row. */
+export type MailInfo = {
+  messageId: string;
+  sender: string;
+  recipient: string;
+  topic: string;
+  body: string;
+};
+
+/** Parse a `mail` row into its MailInfo, or null when the row isn't a mail event or the
+ *  payload is malformed — so the feed can branch a worker→manager question into a
+ *  "needs a decision" card while leaving every other row on the uniform render. */
+export function parseMailEvent(row: { kind: string; payload: string | object }): MailInfo | null {
+  if (row.kind !== SESSION_EVENT_KIND.Mail) return null;
+  const p = parsePayload(row.payload);
+  if (p === null) return null;
+  return {
+    messageId: str(p.messageId),
+    sender: str(p.sender),
+    recipient: str(p.recipient),
+    topic: str(p.topic),
+    body: str(p.body),
+  };
+}
+
+/** The disponent Party token an inbound worker question is sent BY — a mail row whose
+ *  sender is this reads as a decision the manager owes the worker. */
+export const MAIL_SENDER_WORKER = "worker";
 
 /** The persisted kinds/fidelities as lookup sets. disponent's EventKind and Fidelity
  *  tokens are the SAME strings as the constants above, so mapping a drained event is a
