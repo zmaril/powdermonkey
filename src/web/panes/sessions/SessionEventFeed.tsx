@@ -53,7 +53,7 @@ export function SessionEventFeed({
           // gets the actionable card. Any other mail (manager→worker, →user) is just a
           // message line on the uniform render below.
           if (mail && mail.sender === MAIL_SENDER_WORKER) {
-            return <MailCard key={e.id} mail={mail} onReply={onReply} />;
+            return <MailCard key={e.id} session={session} mail={mail} onReply={onReply} />;
           }
           const d = describeSessionEvent(e);
           return (

@@ -4,6 +4,7 @@ import type { TSchema } from "@sinclair/typebox";
 import { getTableColumns, getTableName } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 import { match, P } from "ts-pattern";
+import { messageDto } from "../shared/messages.ts";
 import {
   CommentAuthor,
   Decision,
@@ -77,6 +78,7 @@ import {
   proposals as proposalsTable,
   pullRequests as pullRequestsTable,
   repos as reposTable,
+  type Session,
   sessionEvents as sessionEventsTable,
   sessions as sessionsTable,
   sessionTasks as sessionTasksTable,
@@ -344,6 +346,31 @@ const phasesGroup = resource("phases", phaseRepo, models.phases)
     orNotFound(set, await reopenPhase(Number(params.id))),
   );
 
+// Resolve a disponent-managed (Remote) session for the send/messages routes: it must exist
+// (else 404) and be disponent-managed with a vmName (else 400). Shared so both routes guard
+// identically; on success it also hands back the engine handle (`d`) and the narrowed
+// vmName. The caller surfaces `error` verbatim under `status`.
+async function resolveRemoteSession(
+  id: number,
+): Promise<
+  | { ok: true; row: Session; vmName: string; d: ReturnType<typeof getDisponent> }
+  | { ok: false; status: number; error: string }
+> {
+  const row = await sessionRepo.get(id);
+  if (!row) return { ok: false, status: 404, error: "not found" };
+  if (row.kind !== SessionKind.Remote || !row.vmName) {
+    return { ok: false, status: 400, error: "not a disponent-managed session" };
+  }
+  return { ok: true, row, vmName: row.vmName, d: getDisponent() };
+}
+
+// Stamp a resolveRemoteSession failure's status and return its error body — the tail both
+// disponent session routes share.
+function httpError(set: { status?: number | string }, e: { status: number; error: string }) {
+  set.status = e.status;
+  return { error: e.error };
+}
+
 // Sessions carry `land` (graceful teardown of finished work), `stop` (abort a
 // running session) and `open-editor` (VS Code on the operator's machine) on top
 // of CRUD.
@@ -367,17 +394,10 @@ const sessionsGroup = resource("sessions", sessionRepo, models.sessions)
   .post(
     "/:id/send",
     async ({ params, body, set }) => {
-      const row = await sessionRepo.get(Number(params.id));
-      if (!row) {
-        set.status = 404;
-        return { error: "not found" };
-      }
-      if (row.kind !== SessionKind.Remote || !row.vmName) {
-        set.status = 400;
-        return { error: "not a disponent-managed session" };
-      }
-      const d = getDisponent();
-      const dsession = await sessionForVm(d, row.vmName);
+      const r = await resolveRemoteSession(Number(params.id));
+      if (!r.ok) return httpError(set, r);
+      const { d } = r;
+      const dsession = await sessionForVm(d, r.vmName);
       if (!dsession) {
         set.status = 409;
         return { error: "no live disponent session" };
@@ -399,6 +419,36 @@ const sessionsGroup = resource("sessions", sessionRepo, models.sessions)
         inReplyTo: t.Optional(t.String()),
       }),
     },
+  )
+  // Read-only proxy over disponent's Message ledger for a disponent-managed session's
+  // manager↔worker comms (notes/manager-worker-comms.md). Two consumers, one route:
+  // `?fanoutId=` rolls up a fan-out's "N of M acked" progress — a CROSS-session read (a
+  // fan-out spans many workers), so it doesn't need this session's live handle; without
+  // a fanoutId it scopes to THIS worker's own messages (via its disponent session uid),
+  // which hydrates a worker→manager decision card with the real question body (the `mail`
+  // event's MailRef carries none — the body lives on the Message row). Empty, never faked,
+  // when disponent knows no live session for the row. pm never writes acks here.
+  .get(
+    "/:id/messages",
+    async ({ params, query, set }) => {
+      const r = await resolveRemoteSession(Number(params.id));
+      if (!r.ok) return httpError(set, r);
+      const { d } = r;
+      try {
+        if (query.fanoutId) {
+          const msgs = await d.messages({ fanoutId: query.fanoutId });
+          return { messages: msgs.map(messageDto) };
+        }
+        const dsession = await sessionForVm(d, r.vmName);
+        if (!dsession) return { messages: [] };
+        const msgs = await d.messages({ sessionUid: dsession.uid });
+        return { messages: msgs.map(messageDto) };
+      } catch (e) {
+        set.status = 409;
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+    { query: t.Object({ fanoutId: t.Optional(t.String()) }) },
   );
 
 // Repos carry two routes on top of CRUD: the identity icon — the cached

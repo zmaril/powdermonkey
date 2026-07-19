@@ -140,6 +140,9 @@ test("parseMailEvent extracts the MailRef fields for a mail row, null otherwise"
   expect(info?.messageId).toBe("m-9");
   expect(info?.sender).toBe(MAIL_SENDER_WORKER);
   expect(info?.recipient).toBe("manager");
+  // the fanoutId is lifted too — the card reads Messages by it to hydrate the body and
+  // roll up "N of M acked" progress
+  expect(info?.fanoutId).toBe("f-9");
   // a non-mail row yields null (so the feed leaves it on the uniform render)
   expect(parseMailEvent({ kind: SESSION_EVENT_KIND.Message, payload: "{}" })).toBeNull();
   // a garbled mail payload yields null rather than throwing
