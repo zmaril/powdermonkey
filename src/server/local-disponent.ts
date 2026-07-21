@@ -44,6 +44,15 @@ export type LocalProvisionArgs = {
   branch: string;
   /** The built task prompt — disponent writes it as the worker's brief.md. */
   brief: string;
+  /** Teleport only: fetch `branch` from the clone's `origin` and cut the worktree
+   *  off it (prefer local `<branch>`, else `origin/<branch>`, else HEAD), rather
+   *  than off local HEAD. A plain start-local leaves this false. */
+  fetchRemote?: boolean;
+  /** Teleport only: a bespoke startup command run VERBATIM in the session tmux with
+   *  NO brief appended (e.g. `claude --teleport <id>`, to resume the cloud run's
+   *  conversation). A plain start-local leaves this undefined, so disponent runs its
+   *  default `claude … "$(cat brief.md)"`. */
+  startup?: string;
 };
 
 export type LocalProvisionResult =
@@ -120,7 +129,7 @@ export async function resolveDisponentAttach(uid: string): Promise<DisponentAtta
 export async function provisionLocalWorker(
   args: LocalProvisionArgs,
 ): Promise<LocalProvisionResult> {
-  const { taskId, repoDir, branch, brief } = args;
+  const { taskId, repoDir, branch, brief, fetchRemote, startup } = args;
   const d = getDisponent();
 
   const started = await dispatchAndAwaitRunning(
@@ -132,6 +141,11 @@ export async function provisionLocalWorker(
       repo: repoDir,
       isolation: IsolationKind.Worktree,
       gitRef: branch,
+      // Teleport rides these two (undefined/false for a plain start-local, so the
+      // spec is byte-identical to today's): fetch `branch` off the clone's origin
+      // (#74), and run `startup` verbatim as the agent command with no brief (#33).
+      fetchRemote,
+      agentCmd: startup,
     },
     { timeoutMs: PROVISION_TIMEOUT_MS, label: "local worker" },
   );

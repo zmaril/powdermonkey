@@ -17,20 +17,20 @@ import { linkSessionTasks, taskIdsForSession } from "./session-tasks.ts";
 // touching the supervisor's main checkout. When the branch lands on main with
 // PM-Phase trailers, reconciliation marks the work done — same as a cloud session.
 //
-// Provisioning has two selectable paths (slice 2 of issue 152). The DEFAULT stays pm's
-// own git worktree + interactive tmux PTY (startLocalViaWorktree). Opting in with
-// PM_LOCAL_BACKEND=disponent routes the default start through disponent's local
-// tmux backend instead (local-disponent.ts): the engine cuts the worktree with
+// Provisioning has two selectable paths (issue 152). The DEFAULT stays pm's own git
+// worktree + interactive tmux PTY (startLocalViaWorktree). Opting in with
+// PM_LOCAL_BACKEND=disponent routes the start through disponent's local tmux backend
+// instead (local-disponent.ts): the engine cuts the worktree with
 // `isolation: "worktree"` off pm's repo cache clone, drops the brief in, and runs
 // the agent in its own `tmux -L disponent` session. Land reaps it (worktree gone,
-// branch kept); stop cancels it (agent gone, worktree kept). TELEPORT always keeps
-// the pm-owned path: disponent's local backend can't fetch a remote branch or run
-// `claude --teleport`. (A later slice flips the default + retires the pm path once
-// teleport is migrated.)
+// branch kept); stop cancels it (agent gone, worktree kept). TELEPORT rides the same
+// backend now: its remote-branch fetch maps onto disponent's per-dispatch `fetchRemote`
+// (#74), and its `claude --teleport <id>` startup onto `agentCmd` (#33). (A later stage
+// flips the default + retires the pm-owned path.)
 
-/** Which backend a plain `start-local` uses: the pm-owned git worktree + PTY
- *  (default), or disponent's local tmux worktree backend (PM_LOCAL_BACKEND=disponent).
- *  Teleport ignores this — it always needs the pm-owned path. */
+/** Which backend a local start (plain start-local OR teleport) uses: the pm-owned git
+ *  worktree + PTY (default), or disponent's local tmux worktree backend
+ *  (PM_LOCAL_BACKEND=disponent). */
 function localDisponentEnabled(): boolean {
   return process.env.PM_LOCAL_BACKEND === "disponent";
 }
@@ -127,12 +127,15 @@ export async function startLocalSession(
   const branch = opts.branch ?? `pm/task-${primary}`;
   const ctx: LaunchCtx = { ids, primary, branch, repoCwd, prompt, trailers };
 
-  // Teleport (a custom startup, and possibly a remote branch to fetch) always uses
-  // pm's own worktree + PTY. A plain start-local uses disponent's local backend
-  // when opted in (PM_LOCAL_BACKEND=disponent), else the pm-owned path — see the
-  // module comment.
-  const viaDisponent = !opts.fetchRemote && !opts.startup && localDisponentEnabled();
-  return viaDisponent ? startLocalViaDisponent(ctx) : startLocalViaWorktree(ctx, baseRef, opts);
+  // With the backend opted in (PM_LOCAL_BACKEND=disponent), BOTH plain start-local
+  // and teleport ride disponent's local backend: teleport's remote-branch fetch and
+  // its bespoke `claude --teleport <id>` startup map onto disponent's per-dispatch
+  // `fetchRemote` (#74) + `agentCmd` (#33). Off (the default), everything stays on the
+  // pm-owned git worktree + PTY path — see the module comment.
+  const viaDisponent = localDisponentEnabled();
+  return viaDisponent
+    ? startLocalViaDisponent(ctx, opts)
+    : startLocalViaWorktree(ctx, baseRef, opts);
 }
 
 /** The resolved launch inputs both provisioning paths share. */
@@ -164,8 +167,14 @@ async function recordDispatchedSession(
 /** Provision through disponent's local tmux backend: the engine cuts the worktree
  *  (isolation "worktree", branch `pm/task-<id>` off the cache clone) and runs the
  *  agent in tmux. pm keeps a tracking row — branch + worktree_path + the engine
- *  session uid in vm_name (so land/stop reap/cancel it). No pm-owned git or PTY. */
-async function startLocalViaDisponent(ctx: LaunchCtx): Promise<StartLocalResult> {
+ *  session uid in vm_name (so land/stop reap/cancel it). No pm-owned git or PTY.
+ *  Teleport rides the same path: `opts.fetchRemote` cuts the worktree off the clone's
+ *  origin branch (#74), and `opts.startup` (`claude --teleport <id>`) runs as the
+ *  agent command verbatim (#33). Both are absent for a plain start-local. */
+async function startLocalViaDisponent(
+  ctx: LaunchCtx,
+  opts: StartLocalOpts,
+): Promise<StartLocalResult> {
   const { ids, primary, branch, repoCwd, prompt, trailers } = ctx;
 
   const prov = await provisionLocalWorker({
@@ -173,6 +182,8 @@ async function startLocalViaDisponent(ctx: LaunchCtx): Promise<StartLocalResult>
     repoDir: repoCwd,
     branch,
     brief: prompt,
+    fetchRemote: opts.fetchRemote,
+    startup: opts.startup,
   });
   if (!prov.ok) return { ok: false, error: prov.error, output: prov.output };
 
