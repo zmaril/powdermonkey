@@ -23,9 +23,8 @@ const { ready } = await setupTestDb();
 const { loadPlan, parsePlan } = await import("../src/server/plan.ts");
 const { taskRepo, sessionRepo } = await import("../src/server/crud.ts");
 const { startLocalSession, landSession, stopSession } = await import("../src/server/worktree.ts");
-const { provisionLocalWorker, teardownLocalWorker, cancelLocalWorker } = await import(
-  "../src/server/local-disponent.ts"
-);
+const { provisionLocalWorker, teardownLocalWorker, cancelLocalWorker, resolveDisponentAttach } =
+  await import("../src/server/local-disponent.ts");
 const { getDisponent } = await import("../src/server/disponent.ts");
 
 beforeAll(async () => {
@@ -77,6 +76,34 @@ test("provisionLocalWorker dispatches env=local, isolation=worktree, gitRef=bran
   const torn = await teardownLocalWorker(res.uid);
   expect(torn.ok).toBe(true);
   expect((await d.session(res.uid))?.reapedAt).toBeTruthy();
+});
+
+test("resolveDisponentAttach reads disponent's transport-neutral descriptor (#78)", async () => {
+  const res = await provisionLocalWorker({
+    taskId: 7,
+    repoDir,
+    branch: "pm/task-7",
+    brief: "do the work",
+  });
+  if (!res.ok) throw new Error(res.error);
+
+  // The local backend reports the `tmux` transport: endpoint = socket, target =
+  // dsp-<uid> — exactly the (socket, session) pair the browser terminal attaches to,
+  // and it matches the untyped envHandle the provision returned.
+  const attach = await resolveDisponentAttach(res.uid);
+  expect(attach).toEqual({
+    transport: "tmux",
+    socket: res.handle.socket,
+    tmuxSession: res.handle.tmux,
+  });
+  if (attach?.transport === "tmux") {
+    expect(attach.tmuxSession).toBe(`dsp-${res.uid}`);
+  }
+
+  // An unknown uid resolves to null (no reachable terminal) rather than throwing.
+  expect(await resolveDisponentAttach("no-such-uid")).toBeNull();
+
+  await teardownLocalWorker(res.uid);
 });
 
 test("start-local routes through disponent: session row carries branch + engine uid", async () => {
