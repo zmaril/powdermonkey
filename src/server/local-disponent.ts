@@ -1,6 +1,8 @@
-import { join } from "node:path";
-import { IsolationKind } from "@disponent/node";
+import { AttachTransport, IsolationKind } from "@disponent/node";
 import { dispatchAndAwaitRunning, getDisponent } from "./disponent.ts";
+
+// NB: no node:path import — the holder socket path is now read from disponent's
+// descriptor (attachEndpoint), not reconstructed from a path convention.
 
 // The local dispatch backend — a thin adapter over disponent's local tmux
 // backend (github.com/zmaril/disponent). Where the exe.dev adapter (exe-dev.ts)
@@ -57,31 +59,58 @@ export type LocalProvisionResult =
 // (holder-client.ts) instead of spawning a `tmux attach` PTY. tmux stays the
 // DEFAULT; this pm-side flag only selects the alternative, and it's off unless set.
 
-/** Whether pm should use the disponent holder path: run local agents under
- *  `disponent hold` (via DISPONENT_LOCAL_HOLDER, set on the engine in disponent.ts)
- *  AND attach the browser terminal to the holder socket rather than tmux. Off by
- *  default — set PM_LOCAL_HOLDER to any non-empty value to opt in. */
+/** Whether pm should select the disponent holder path at PROVISION time: run local
+ *  agents under `disponent hold` (via DISPONENT_LOCAL_HOLDER, set on the engine in
+ *  disponent.ts) rather than a bare tmux session. Off by default — set PM_LOCAL_HOLDER
+ *  to any non-empty value to opt in. The ATTACH side is no longer gated on this flag:
+ *  pm reads disponent's transport-neutral descriptor (below) and attaches to whatever
+ *  transport the running session actually reports (tmux or dsp-hold). */
 export function holderEnabled(): boolean {
   return Boolean(process.env.PM_LOCAL_HOLDER);
 }
 
-/** Where disponent's local backend places per-session holder sockets: `<root>/sock`,
- *  with `root` = DISPONENT_LOCAL_ROOT (default `$HOME/.disponent/work`) — the exact
- *  convention disponent computes internally (disponent-core `local.rs`: `holder_dir`
- *  is `self.root.join("sock")`, and `root` reads DISPONENT_LOCAL_ROOT). Both sides
- *  read the same real env var, so they agree on the path. */
-function holderSocketDir(): string {
-  const home = process.env.HOME ?? ".";
-  const root = process.env.DISPONENT_LOCAL_ROOT ?? join(home, ".disponent", "work");
-  return join(root, "sock");
-}
+/** Where + how pm's browser terminal reaches a disponent-local session's live
+ *  terminal, resolved from disponent #78's transport-neutral attach descriptor on the
+ *  Session — pm switches on `transport` instead of assuming tmux (or guessing a holder
+ *  socket path). `tmux` → attach `tmux -L <socket> -t <session>`; `dsp_hold` → dial the
+ *  holder unix socket (holder-client.ts); `ttyd` → a web-only address pm's shell
+ *  terminal can't attach to. */
+export type DisponentAttach =
+  | { transport: "tmux"; socket: string; tmuxSession: string }
+  | { transport: "dsp_hold"; socketPath: string }
+  | { transport: "ttyd"; url: string };
 
-/** The unix socket a holder-backed session's terminal is served on, derived from the
- *  engine session uid (parked in a pm session's `vmName`) + the socket-dir
- *  convention. Centralized here so it can later swap to a typed attach descriptor
- *  from disponent's schema (deferred) without touching the callers. */
-export function resolveHolderAttachTarget(uid: string): string {
-  return join(holderSocketDir(), `${uid}.sock`);
+/** Resolve the attach descriptor for a disponent-local session (engine uid, parked in
+ *  a pm session's `vmName`) from disponent's TYPED Session fields
+ *  (`attachTransport`/`attachEndpoint`/`attachTarget`/`attachUrl`, #78). Returns null
+ *  when the session is gone or reports no reachable terminal (all descriptor fields
+ *  null) — honest rather than faked. A first miss reconciles once, since a reopened
+ *  engine (post supervisor restart) may not yet know a prior uid. */
+export async function resolveDisponentAttach(uid: string): Promise<DisponentAttach | null> {
+  const d = getDisponent();
+  let session = await d.session(uid);
+  if (!session) {
+    try {
+      await d.reconcile();
+    } catch {}
+    session = await d.session(uid);
+  }
+  if (!session) return null;
+  const { attachTransport, attachEndpoint, attachTarget, attachUrl } = session;
+  switch (attachTransport) {
+    case AttachTransport.Tmux:
+      // tmux → endpoint = socket, target = session name (`dsp-<uid>`).
+      return attachEndpoint && attachTarget
+        ? { transport: "tmux", socket: attachEndpoint, tmuxSession: attachTarget }
+        : null;
+    case AttachTransport.DspHold:
+      // dsp-hold → endpoint = the holder's unix socket path.
+      return attachEndpoint ? { transport: "dsp_hold", socketPath: attachEndpoint } : null;
+    case AttachTransport.Ttyd:
+      return attachUrl ? { transport: "ttyd", url: attachUrl } : null;
+    default:
+      return null;
+  }
 }
 
 /** Provision a local worktree session for a task and start its agent in tmux —

@@ -44,7 +44,7 @@ import { capabilities, getDisponent, sessionForVm } from "./exe-dev.ts";
 import { fanOutTasks } from "./fanout.ts";
 import { proposeFollowup } from "./followups.ts";
 import { currentCloudPrs, syncCloudPrs } from "./github-watch.ts";
-import { holderEnabled, resolveHolderAttachTarget } from "./local-disponent.ts";
+import { type DisponentAttach, resolveDisponentAttach } from "./local-disponent.ts";
 import { models, taskKindSchema } from "./models.ts";
 import {
   buildContext,
@@ -96,7 +96,7 @@ import {
 import { listSessionTasks } from "./session-tasks.ts";
 import { getSettings, patchSettings } from "./settings.ts";
 import { teleportTask } from "./teleport.ts";
-import { landSession, startLocalSession, stopSession } from "./worktree.ts";
+import { isDisponentLocal, landSession, startLocalSession, stopSession } from "./worktree.ts";
 
 // Full CRUD for every vocab entity, plus the nested plan loader and the runtime
 // dispatch/status routes. Eden Treaty consumes `App` (exported below) so the
@@ -116,6 +116,36 @@ type PtyHandle =
   // biome-ignore lint/suspicious/noExplicitAny: native PTY handle (see pty.ts).
   { kind: "fresh"; proc: any } | { kind: "attach"; sessionId: number; detach: () => void };
 const ptys = new Map<object, PtyHandle>();
+
+// Attach a disponent-local session's browser terminal to whatever transport its #78
+// descriptor reports: `tmux` → a `tmux attach` PTY on disponent's socket+session;
+// `dsp_hold` → dial the pty-holder's unix socket directly (holder-client.ts). Both
+// funnel into the SAME multiplexed session Entry (scrollback replay, shared subs), so
+// downstream write/resize/detach are identical. `ttyd` is web-only — pm's shell
+// terminal can't attach to it — so it returns null (the caller fails honestly).
+// Returns the detach fn, or null when the target isn't attachable (e.g. its socket is
+// gone), letting the caller decide whether to fail honestly.
+function attachDisponent(
+  sessionId: number,
+  attach: DisponentAttach,
+  send: (bytes: Uint8Array) => void,
+  sendEnded: () => void,
+): Promise<(() => void) | null> | (() => void) | null {
+  switch (attach.transport) {
+    case "tmux":
+      return attachSessionPty(sessionId, send, sendEnded, {
+        socket: attach.socket,
+        tmuxSession: attach.tmuxSession,
+      });
+    case "dsp_hold":
+      return existsSync(attach.socketPath)
+        ? attachHolderSessionPty(sessionId, attach.socketPath, send, sendEnded)
+        : null;
+    default:
+      // ttyd (web-only) — not attachable from a shell terminal.
+      return null;
+  }
+}
 
 // Per-socket teardown for /sync: each connection owns one PGlite live.changes
 // subscription, dropped when the socket closes.
@@ -863,22 +893,35 @@ export const app = new Elysia()
         .otherwise(() => null);
 
       if (sessionId != null) {
-        // Holder-backed disponent-local session (M2b, flag-gated): dial the
-        // disponent pty-holder's unix socket directly rather than spawning a `tmux
-        // attach` PTY. Only when PM_LOCAL_HOLDER is on AND the session is a
-        // disponent-local run (kind Local + engine uid in vmName) with its holder
-        // socket present. tmux stays the default — this branch is otherwise skipped
-        // and the tmux attach below runs unchanged.
-        if (holderEnabled() && sessionId !== SUPERVISOR_ID) {
+        const isSupervisor = sessionId === SUPERVISOR_ID;
+
+        // A disponent-local session's agent lives in DISPONENT's own terminal — its
+        // tmux (`dsp-<uid>` on disponent's socket) or its pty-holder — NOT pm's
+        // `pm-session-<id>`. Resolve WHERE + HOW from disponent's transport-neutral
+        // attach descriptor (#78) and attach the browser terminal straight to it, so
+        // the operator sees the real agent rather than a fresh shell. Supervisor
+        // (id 0) and pm-owned/teleport sessions (no engine uid) skip this and take the
+        // pm-tmux attach below unchanged.
+        if (!isSupervisor) {
           const row = await sessionRepo.get(sessionId);
-          if (row?.kind === SessionKind.Local && row.vmName) {
-            const socketPath = resolveHolderAttachTarget(row.vmName);
-            if (existsSync(socketPath)) {
-              const detach = await attachHolderSessionPty(sessionId, socketPath, send, sendEnded);
-              if (detach) {
-                ptys.set(ws.raw, { kind: "attach", sessionId, detach });
-                return;
-              }
+          if (row && isDisponentLocal(row) && row.vmName) {
+            const attach = await resolveDisponentAttach(row.vmName);
+            const detach = attach && (await attachDisponent(sessionId, attach, send, sendEnded));
+            if (detach) {
+              ptys.set(ws.raw, { kind: "attach", sessionId, detach });
+              return;
+            }
+            // Disponent-local + still running but no attachable target (descriptor
+            // absent, a web-only ttyd transport, or the tmux/holder endpoint gone):
+            // fail honestly rather than silently opening an unrelated fresh shell.
+            if (row.state === SessionState.Running && !row.archivedAt) {
+              send(
+                new TextEncoder().encode(
+                  "\x1b[2m[disponent agent terminal not attachable — cannot attach]\x1b[0m\r\n",
+                ),
+              );
+              sendEnded();
+              return;
             }
           }
         }
@@ -888,7 +931,6 @@ export const app = new Elysia()
           ptys.set(ws.raw, { kind: "attach", sessionId, detach });
           return;
         }
-        const isSupervisor = sessionId === SUPERVISOR_ID;
         // No live PTY and this is a worker session that has already ended (landed,
         // stopped, or merge-archived): don't quietly spawn a fresh shell on a dead
         // session — tell the client so it shows the end-state. The supervisor (id 0)

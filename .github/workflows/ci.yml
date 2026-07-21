@@ -72,7 +72,7 @@ jobs:
           workspaces: ../disponent
       - name: "Build @disponent/node (sibling file: dep)"
         env:
-          DISPONENT_REF: ede045f9796f5512af0789855ee2a1528e1e1d15
+          DISPONENT_REF: d77a34ee06a5eb2347c5b9899d916f366834a8b5
         run: |
           git init -q ../disponent
           git -C ../disponent fetch -q --depth 1 https://github.com/zmaril/disponent "$DISPONENT_REF"
@@ -108,7 +108,7 @@ jobs:
           workspaces: ../disponent
       - name: "Build @disponent/node (sibling file: dep)"
         env:
-          DISPONENT_REF: ede045f9796f5512af0789855ee2a1528e1e1d15
+          DISPONENT_REF: d77a34ee06a5eb2347c5b9899d916f366834a8b5
         run: |
           git init -q ../disponent
           git -C ../disponent fetch -q --depth 1 https://github.com/zmaril/disponent "$DISPONENT_REF"
@@ -150,7 +150,7 @@ jobs:
           workspaces: ../disponent
       - name: "Build @disponent/node (sibling file: dep)"
         env:
-          DISPONENT_REF: ede045f9796f5512af0789855ee2a1528e1e1d15
+          DISPONENT_REF: d77a34ee06a5eb2347c5b9899d916f366834a8b5
         run: |
           git init -q ../disponent
           git -C ../disponent fetch -q --depth 1 https://github.com/zmaril/disponent "$DISPONENT_REF"
